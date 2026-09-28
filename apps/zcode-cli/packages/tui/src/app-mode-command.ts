@@ -11,6 +11,7 @@ const MODE_DESCRIPTIONS: Record<TuiSwitchableMode, string> = {
   build: "Ask before each file changes.",
   edit: "Edit selected files or relevant workspace files automatically.",
   plan: "Inspect the code and present a plan before editing.",
+  research: "Read-only web research; file edits and commands are denied.",
   yolo: "Edit and run commands with fewer confirmations.",
 };
 

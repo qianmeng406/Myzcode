@@ -78,6 +78,51 @@ const PLAN_MODE_EXIT_REMINDER = [
   `You have exited plan mode. You can now make edits, run tools, and take actions.`,
 ];
 
+// 资料查询模式（research mode）：中文检索引导。渠道工具与提示词成对维护——
+// 表里提到的工具都必须真实注册（tool/handlers/research-tools.ts），否则模型会调用不存在的工具。
+const RESEARCH_MODE_FULL_REMINDER = [
+  "# 资料查询模式 (Research Mode)",
+  "",
+  "当前处于资料查询模式。你的任务是根据用户的问题检索资料、阅读原文并给出有依据的回答，而不是修改代码或执行工程任务。本模式下执行命令、修改文件的操作会被拒绝。",
+  "",
+  "## 检索渠道（本模式专属工具）",
+  "",
+  "按问题类型选择渠道，多渠道并行检索、相互印证：",
+  "",
+  "| 问题类型 | 首选渠道 | 说明 |",
+  "|---|---|---|",
+  "| 库/框架/工具的用法 | `SearchDocs` → `GetLibraryDocs` | Context7 官方文档检索，先搜库再读文档 |",
+  "| Web/JS/HTML/CSS 标准 API | `SearchMdn` | MDN Web Docs，浏览器厂商维护的权威参考 |",
+  "| 具体编程问题/报错 | `SearchStackOverflow` | Stack Overflow；`site` 参数可搜整个 Stack Exchange 网络（math/stats/superuser/ai…） |",
+  "| 选 npm 包 / Node、前端生态 | `SearchNpm` | 带月下载量、依赖者数、版本 |",
+  "| 确认 Python 包信息 | `SearchPyPI` | PyPI 精确查询（版本、支持的 Python、主页） |",
+  "| 找项目/实现/工具 | `SearchGitHub` | GitHub 仓库搜索（可比较热度） |",
+  "| 技术选型/业界动态/社区观点 | `SearchHackerNews` | Hacker News 讨论 |",
+  "| 算法/模型/CS 预印本 | `SearchArxiv` | arXiv 论文 |",
+  "| 跨学科文献（含引用数、期刊） | `SearchPapers` | OpenAlex 索引，覆盖所有学科 |",
+  "| 医学/生物/药学/临床 | `SearchPubmed` | PubMed 生物医学文献 |",
+  "| 通用网页信息/新闻/中文资料 | `WebSearch`（内置） | 联网搜索 |",
+  "",
+  "找到有价值的链接后，用 `WebFetch`（内置）或 `GetLibraryDocs` 抓取原文精读。",
+  "",
+  "## 工作流程",
+  "",
+  "1. **拆解问题**：先把用户的问题拆成几个具体的检索点；问题模糊时先向用户确认检索范围，再开始搜索。",
+  "2. **多路检索**：对每个检索点选择合适渠道，用不同关键词多搜几轮，不要只依赖第一次搜索的结果；独立的检索可以并行发起。",
+  "3. **阅读原文**：对最有价值的结果抓取原文精读（文档用 `GetLibraryDocs`，网页用 `WebFetch`），不要只根据摘要或片段下结论。",
+  "4. **交叉验证**：重要结论至少用两个独立来源印证；来源之间冲突时如实说明分歧，并指出哪一方更可信、为什么。",
+  "5. **带引用作答**：最终回答中为关键事实标注来源链接；不确定的内容明确说「未找到可靠来源」，不要编造。",
+  "",
+  "## 边界",
+  "",
+  "- 本模式下不要执行命令、修改文件或进行代码工程类操作；用户明确要求时，提醒其先切换到其他模式。",
+  "- 回答使用用户提问的语言；引用保留原文表述。",
+];
+
+const RESEARCH_MODE_SPARSE_REMINDER = [
+  "资料查询模式仍处于激活状态（完整指引见会话前文）。只读检索：用渠道工具多路检索并交叉验证，关键结论标注来源链接；不要尝试执行命令或修改文件。",
+];
+
 const TODO_REMINDER_CONFIG = Object.freeze({
   TURNS_SINCE_WRITE: 10,
   TURNS_BETWEEN_REMINDERS: 10,
@@ -184,7 +229,8 @@ export function buildRuntimeModeReminderBody(
   mode: CollaborationMode,
   planEnabled = mode === "plan",
 ): string | null {
-  if (!planEnabled) return null;
+  const researchEnabled = mode === "research";
+  if (!planEnabled && !researchEnabled) return null;
 
   const { foundRuntimeModeReminder, humanTurnsSinceReminder } =
     getRuntimeModeReminderTurnCount(entries);
@@ -196,10 +242,13 @@ export function buildRuntimeModeReminderBody(
   }
 
   const nextReminderCount = countRuntimeModeReminders(entries) + 1;
-  const reminderLines =
-    nextReminderCount % RUNTIME_MODE_REMINDER_CONFIG.FULL_REMINDER_EVERY_N_ATTACHMENTS === 1
-      ? PLAN_MODE_FULL_REMINDER
-      : PLAN_MODE_SPARSE_REMINDER;
+  const isFirstReminder = nextReminderCount % RUNTIME_MODE_REMINDER_CONFIG.FULL_REMINDER_EVERY_N_ATTACHMENTS === 1;
+  if (researchEnabled) {
+    return (isFirstReminder ? RESEARCH_MODE_FULL_REMINDER : RESEARCH_MODE_SPARSE_REMINDER).join("\n");
+  }
+  const reminderLines = isFirstReminder
+    ? PLAN_MODE_FULL_REMINDER
+    : PLAN_MODE_SPARSE_REMINDER;
   return reminderLines.join("\n");
 }
 

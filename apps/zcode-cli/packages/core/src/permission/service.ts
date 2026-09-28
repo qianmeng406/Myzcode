@@ -177,6 +177,10 @@ export class PermissionService {
       return this.checkPlanMode(context, capability);
     }
 
+    if (context.mode === "research") {
+      return this.checkResearchMode(context, capability);
+    }
+
     if (this.matchesProjectRules(projectRules, "allow", context, capability, rulePolicy)) {
       return this.allow(
         context,
@@ -445,6 +449,50 @@ export class PermissionService {
 
   private isMcpToolCapability(capability: ResolvedPermissionCapability): boolean {
     return capability.permissionName === "mcp";
+  }
+
+  /** 资料查询模式：只读与研究类网络检索放行，写入/执行一律拒绝（与 plan 同级的位置约束）。 */
+  private checkResearchMode(
+    context: PermissionContext,
+    capability: ResolvedPermissionCapability,
+  ): PermissionDecisionResult {
+    if (capability.readOnly && !capability.destructive) {
+      return this.allow(
+        context,
+        capability,
+        "mode.research.readOnly",
+        "Research mode allows read-only tool execution",
+      );
+    }
+
+    if (this.isMcpToolCapability(capability) && !capability.destructive) {
+      return this.allow(
+        context,
+        capability,
+        "mode.research.mcp",
+        "Research mode allows non-destructive MCP tool execution",
+      );
+    }
+
+    if (
+      capability.sideEffectScope === "session" &&
+      !capability.destructive &&
+      !capability.needsApproval
+    ) {
+      return this.allow(
+        context,
+        capability,
+        "mode.research.sessionCapability",
+        "Research mode allows non-destructive session state updates",
+      );
+    }
+
+    return this.deny(
+      context,
+      capability,
+      "mode.research.nonReadOnly",
+      "Research mode only allows read-only research tools; switch modes to edit files or run commands",
+    );
   }
 
   private checkBuildMode(

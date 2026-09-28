@@ -21,6 +21,7 @@ const zcodeTaskModeRealtimeValues = [
   "auto",
   "autoEdit",
   "build",
+  "research",
 ] as const satisfies readonly ZCodeTaskMode[];
 const zcodeTaskMigrationSourceRealtimeValues = [
   "claudeCode",

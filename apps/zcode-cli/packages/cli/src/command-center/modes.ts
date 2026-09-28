@@ -4,6 +4,7 @@ const SWITCHABLE_COMMAND_CENTER_MODES = [
   "plan",
   "build",
   "edit",
+  "research",
   "yolo",
 ] as const satisfies readonly SwitchableCommandCenterMode[];
 

@@ -38,6 +38,7 @@ import {
   NotepadText,
   ShieldAlertIcon,
   ShieldCheckIcon,
+  Telescope,
   type LucideIcon,
 } from "lucide-react";
 import { ZCODE_MODE_OPTION_DESCRIPTION_IDS, ZCODE_MODE_OPTION_LABEL_IDS } from "./display-help.js";
@@ -211,6 +212,8 @@ export function resolveModeOptionIcon(value: unknown): LucideIcon {
   // build 对应常规确认模式，使用确认图标。
   if (typeof value === "string" && value.toLocaleLowerCase() === "build") return HandIcon;
   if (typeof value === "string" && value.toLocaleLowerCase() === "plan") return NotepadText;
+  // research（资料查询）：只读检索语义，用望远镜与 plan 的记事本区分。
+  if (typeof value === "string" && value.toLocaleLowerCase() === "research") return Telescope;
 
   if (typeof value === "string" && /^(auto|agent|autoEdit|edit)$/i.test(value)) {
     return ShieldCheckIcon;

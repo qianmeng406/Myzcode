@@ -136,8 +136,12 @@ const normalizeLocaleOption = (value: string | undefined): UiLocale | undefined 
 const normalizePromptMode = (value: string | undefined): CliPermissionMode | undefined => {
   if (value === undefined) return undefined;
   const mode = value.toLowerCase();
-  if (mode === "build" || mode === "plan" || mode === "edit" || mode === "yolo") return mode;
-  throw new Error(`Unsupported --mode value: ${value}. Supported modes: build, edit, plan, yolo.`);
+  if (mode === "build" || mode === "plan" || mode === "edit" || mode === "yolo" || mode === "research") {
+    return mode;
+  }
+  throw new Error(
+    `Unsupported --mode value: ${value}. Supported modes: build, edit, plan, research, yolo.`,
+  );
 };
 
 const normalizeBrowserUse = (value: string | undefined): GlobalOptions["browserUse"] => {

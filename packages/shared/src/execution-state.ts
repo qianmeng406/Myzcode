@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** auto 保留为内部权限；plan 仅在旧格式读取边界接受。 */
-export const executionPermissionModeSchema = z.enum(["build", "edit", "yolo", "auto"]);
+/** auto 保留为内部权限；plan 仅在旧格式读取边界接受；research 为只读资料查询模式。 */
+export const executionPermissionModeSchema = z.enum(["build", "edit", "yolo", "auto", "research"]);
 export const executionStateSchema = z.object({
   mode: executionPermissionModeSchema,
   planEnabled: z.boolean(),

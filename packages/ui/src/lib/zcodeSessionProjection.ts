@@ -39,6 +39,11 @@ const ZCODE_AGENT_MODE_OPTIONS = [
     description: "Inspect the code and present a plan before editing.",
   },
   {
+    id: "research",
+    name: "Research mode",
+    description: "Read-only web research across docs, code Q&A, and academic sources.",
+  },
+  {
     id: "yolo",
     name: "Full access",
     description: "Edit and run commands with fewer confirmations.",
