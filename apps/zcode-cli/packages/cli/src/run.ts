@@ -136,11 +136,18 @@ const normalizeLocaleOption = (value: string | undefined): UiLocale | undefined 
 const normalizePromptMode = (value: string | undefined): CliPermissionMode | undefined => {
   if (value === undefined) return undefined;
   const mode = value.toLowerCase();
-  if (mode === "build" || mode === "plan" || mode === "edit" || mode === "yolo" || mode === "research") {
+  if (
+    mode === "build" ||
+    mode === "plan" ||
+    mode === "edit" ||
+    mode === "yolo" ||
+    mode === "research" ||
+    mode === "workflow"
+  ) {
     return mode;
   }
   throw new Error(
-    `Unsupported --mode value: ${value}. Supported modes: build, edit, plan, research, yolo.`,
+    `Unsupported --mode value: ${value}. Supported modes: build, edit, plan, research, workflow, yolo.`,
   );
 };
 

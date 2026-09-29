@@ -47,6 +47,7 @@ import { BackgroundBashOutputSidePane } from "@/app-shell/BackgroundBashOutputSi
 import { PlanDetailSidePane } from "@/app-shell/PlanDetailSidePane.js";
 import { WorkflowRunSidePane } from "@/app-shell/WorkflowRunSidePane.js";
 import { WorkflowRunDirectorySidePane } from "@/app-shell/WorkflowRunDirectorySidePane.js";
+import { WorkflowStageSidePane } from "@/app-shell/WorkflowStageSidePane.js";
 import { WorkflowActorSessionSidePane } from "@/app-shell/WorkflowActorSessionSidePane.js";
 import { WorkflowWorkspaceSidePane } from "@/app-shell/WorkflowWorkspaceSidePane.js";
 import { WorkflowArtifactSidePane } from "@/app-shell/WorkflowArtifactSidePane.js";
@@ -896,6 +897,7 @@ export function AnimatedSidePanePanel({
         planTitle: intl.formatMessage({ id: "planTool.panel.planTab" }),
         workflowRunTitle: intl.formatMessage({ id: "sidePane.workflowRun" }),
         workflowDirectoryTitle: intl.formatMessage({ id: "sidePane.workflowDirectory" }),
+        workflowStageTitle: intl.formatMessage({ id: "sidePane.workflowStage" }),
         workflowActorTitle: intl.formatMessage({ id: "sidePane.workflowActor" }),
         workflowScriptTitle: intl.formatMessage({ id: "sidePane.workflowScript" }),
         workflowArtifactTitle: intl.formatMessage({ id: "sidePane.workflowArtifact" }),
@@ -1159,6 +1161,8 @@ export function AnimatedSidePanePanel({
                               onOpenWorkflowRun={onOpenWorkflowRun}
                             />
                           ) : null
+                        ) : tab.type === "workflow-stage" ? (
+                          <WorkflowStageSidePane tab={tab} onOpenFileLink={onOpenFileLink} />
                         ) : tab.type === "workflow-actor-session" ? (
                           <WorkflowActorSessionSidePane
                             tab={tab}

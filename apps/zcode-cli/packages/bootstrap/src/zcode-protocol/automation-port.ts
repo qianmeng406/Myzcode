@@ -233,8 +233,10 @@ function normalizeCronAutomationMode(
     case "yolo":
     case "build":
       return mode;
-    // 定时自动化无人值守，research（只读资料查询）不是合法的自动化形态，归位 build。
+    // 定时自动化无人值守，research（只读资料查询）与 workflow（交互式交付 SOP，
+    // 依赖用户逐阶段确认与台账纪律）都不是合法的自动化形态，归位 build。
     case "research":
+    case "workflow":
     case "auto":
     case "autoEdit":
       return "build";

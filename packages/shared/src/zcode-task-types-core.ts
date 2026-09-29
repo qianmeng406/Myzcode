@@ -146,7 +146,15 @@ export interface ZCodeTaskGoalChangedPatch {
 }
 // ---- ZCode task 模式 ----
 
-export type ZCodeTaskMode = "yolo" | "plan" | "edit" | "auto" | "autoEdit" | "build" | "research";
+export type ZCodeTaskMode =
+  | "yolo"
+  | "plan"
+  | "edit"
+  | "auto"
+  | "autoEdit"
+  | "build"
+  | "research"
+  | "workflow";
 
 export type ZCodeOffPeakRunType = "init" | "resume";
 

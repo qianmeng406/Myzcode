@@ -123,6 +123,52 @@ const RESEARCH_MODE_SPARSE_REMINDER = [
   "资料查询模式仍处于激活状态（完整指引见会话前文）。只读检索：用渠道工具多路检索并交叉验证，关键结论标注来源链接；不要尝试执行命令或修改文件。",
 ];
 
+// 标准工作流模式（workflow mode）：文档驱动交付 SOP。与 research reminder 同为静态文案——
+// 模型每轮据此读台账定位阶段；对抗轮的 saved 工作流名（wf-fe-acceptance / wf-adversarial-audit）
+// 是用户级资产，缺失时 reminder 要求如实告知而非手工模拟。
+const WORKFLOW_MODE_FULL_REMINDER = [
+  "# 标准工作流模式 (Workflow Mode)",
+  "",
+  "当前处于标准工作流模式。你按《项目开发标准工作流》交付本项目：文档驱动、双轨并行、对抗式验收、证据链交付。本模式持续生效直到用户切换模式；权限与「变更前确认」相同（写文件/跑命令照常走确认）。",
+  "",
+  "## 每轮先定位",
+  "",
+  "1. 读 `workflow/工作台账.md`（找不到再查 `docs/` 与根目录的 `工作台账*.md`）。",
+  "2. 有台账 → 从「当前阶段」与未完成条目续接，不重做已完成阶段；无台账 → 新项目从 W0 开始，W0 的首个产出就是把台账建到 `workflow/工作台账.md`。",
+  "3. 台账需含机器标记行 `<!-- std-workflow v1 stage:W2-F -->`（stage 值如 W0 / W0.5 / W1-F / W2-B / W5 / W11），每次推进阶段必须同步更新它。",
+  "4. 回复第一行用【Wx 阶段名】标注当前阶段。",
+  "",
+  "## 阶段地图",
+  "",
+  "W0 分母冻结（需求/页面清单/配置项/权限矩阵/消息类型）→ W0.5 UI 设计冻结（UI 规范+3 基线页+用户视觉确认）→",
+  "前端轨 W1-F 工程基座 → W2-F 演示数据 → W3-F 静态验收〔对抗轮①〕→ W4-F 真接口；后端轨 W1-B 工程基座 → W2-B 业务实现（双轨并行）→",
+  "W5 逐页联调 → W6 独立验收〔对抗轮②〕→ W7 缺陷修复与复验 → W8 发布复核〔对抗轮③〕→ W9 发布 → W10 需求终审〔对抗轮④〕→ W11 交付归档",
+  "",
+  "## 对抗轮（不要让用户做多余工作）",
+  "",
+  "到达 W3-F / W6 / W8 / W10 时，直接用 CreateWorkflow 的 saved 源运行全局工作流，参数从台账与目录结构自动解析，只向用户发起一次运行确认：",
+  "- W3-F → `wf-fe-acceptance`（pageDesignDoc/requirementDoc/uiSpecDoc/frontendDir/outputDir/devServer）",
+  "- W6/W8/W10 → `wf-adversarial-audit`（roundType 分别为 independent-acceptance / release-review / requirement-audit；baselineDocs/previousEvidenceDir/outputDir）",
+  "读报告 → 按缺陷整改 → 复跑，直至结论为放行。工作流缺失时如实告知并给出命令替代，不要手工编造工作流报告。",
+  "",
+  "## 六铁律（摘要）",
+  "",
+  "分母先行（先冻结清单再开发）｜三态判定（✅完成/⚠️部分/❌缺失，禁止二态）｜证据只增不改（每轮新目录，旧证据只读）｜不许放宽标准｜对抗式复核（任务是推翻上一轮结论）｜精确标识（文件:行号）",
+  "",
+  "## 台账与续接",
+  "",
+  "完成条目即时更新台账（状态/证据路径）；每轮结束写续接记录（下一步/环境状态/未决问题）。细则可读 `~/.zcode/skills/std-dev-workflow/references/`（stages/ui/frontend/backend/evidence/release）。",
+  "",
+  "## 边界",
+  "",
+  "- 用户明确要求临时脱离流程时可执行，但在台账中标注为越例。",
+  "- 不伪造证据、不跳过门禁；无法判定时如实说明无法判定。",
+];
+
+const WORKFLOW_MODE_SPARSE_REMINDER = [
+  "标准工作流模式仍处于激活状态（完整指引见会话前文）：先读 workflow/工作台账.md 定位当前阶段再行动；每次推进更新 stage 标记；到达对抗轮（W3-F/W6/W8/W10）直接运行 saved 工作流 wf-fe-acceptance / wf-adversarial-audit。",
+];
+
 const TODO_REMINDER_CONFIG = Object.freeze({
   TURNS_SINCE_WRITE: 10,
   TURNS_BETWEEN_REMINDERS: 10,
@@ -230,7 +276,8 @@ export function buildRuntimeModeReminderBody(
   planEnabled = mode === "plan",
 ): string | null {
   const researchEnabled = mode === "research";
-  if (!planEnabled && !researchEnabled) return null;
+  const workflowEnabled = mode === "workflow";
+  if (!planEnabled && !researchEnabled && !workflowEnabled) return null;
 
   const { foundRuntimeModeReminder, humanTurnsSinceReminder } =
     getRuntimeModeReminderTurnCount(entries);
@@ -245,6 +292,9 @@ export function buildRuntimeModeReminderBody(
   const isFirstReminder = nextReminderCount % RUNTIME_MODE_REMINDER_CONFIG.FULL_REMINDER_EVERY_N_ATTACHMENTS === 1;
   if (researchEnabled) {
     return (isFirstReminder ? RESEARCH_MODE_FULL_REMINDER : RESEARCH_MODE_SPARSE_REMINDER).join("\n");
+  }
+  if (workflowEnabled) {
+    return (isFirstReminder ? WORKFLOW_MODE_FULL_REMINDER : WORKFLOW_MODE_SPARSE_REMINDER).join("\n");
   }
   const reminderLines = isFirstReminder
     ? PLAN_MODE_FULL_REMINDER

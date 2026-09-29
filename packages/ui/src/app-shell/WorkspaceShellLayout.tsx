@@ -317,6 +317,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   handleOpenPlanDetail,
   handleOpenWorkflowRun,
   handleOpenWorkflowRunDirectory,
+  handleOpenWorkflowStage,
   handleOpenWorkflowActorSession,
   handleOpenWorkflowWorkspace,
   handleOpenWorkflowArtifact,
@@ -1879,6 +1880,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                               onOpenWorkflowRun={handleOpenWorkflowRun}
                               onOpenWorkflowArtifact={handleOpenWorkflowArtifact}
                               onOpenWorkflowRunDirectory={handleOpenWorkflowRunDirectory}
+                              onOpenWorkflowStage={handleOpenWorkflowStage}
                               onOpenWorkflowActorSession={handleOpenWorkflowActorSession}
                               onOpenWorkflowWorkspace={handleOpenWorkflowWorkspace}
                               onOpenFileLink={handleOpenMarkdownFileLink}

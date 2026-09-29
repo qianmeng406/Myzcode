@@ -71,7 +71,15 @@ export const zcodePermissionResponseSchema = z
   })
   .strict();
 export type ZCodePermissionResponse = z.infer<typeof zcodePermissionResponseSchema>;
-export const zcodeSessionModeSchema = z.enum(["plan", "build", "edit", "yolo", "auto", "research"]);
+export const zcodeSessionModeSchema = z.enum([
+  "plan",
+  "build",
+  "edit",
+  "yolo",
+  "auto",
+  "research",
+  "workflow",
+]);
 export const zcodeSessionStatusSchema = z.enum([
   "idle",
   "running",

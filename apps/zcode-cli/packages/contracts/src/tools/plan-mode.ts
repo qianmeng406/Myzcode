@@ -20,9 +20,11 @@ export const EnterPlanModeOutputSchema = z
   .object({
     message: z.string().min(1).describe("Confirmation that plan mode was entered."),
     previousMode: z
-      .enum(["plan", "build", "edit", "yolo", "auto", "research"])
+      .enum(["plan", "build", "edit", "yolo", "auto", "research", "workflow"])
       .describe("Session mode before EnterPlanMode ran."),
-    mode: z.enum(["plan", "build", "edit", "yolo", "auto", "research"]).describe("Current permission mode."),
+    mode: z
+      .enum(["plan", "build", "edit", "yolo", "auto", "research", "workflow"])
+      .describe("Current permission mode."),
     planEnabled: z.boolean().optional(),
     previousPlanEnabled: z.boolean().optional(),
   })
@@ -69,12 +71,12 @@ export const ExitPlanModeOutputSchema = z
     plan: z.string().nullable().describe("The plan that was approved by the user."),
     approved: z.literal(true).describe("True when the user approved exiting plan mode."),
     previousMode: z
-      .enum(["plan", "build", "edit", "yolo", "auto", "research"])
+      .enum(["plan", "build", "edit", "yolo", "auto", "research", "workflow"])
       .describe("Previous permission mode."),
     planEnabled: z.boolean().optional(),
     previousPlanEnabled: z.boolean().optional(),
     mode: z
-      .enum(["build", "edit", "yolo", "auto", "research"])
+      .enum(["build", "edit", "yolo", "auto", "research", "workflow"])
       .describe("Current session mode after exiting plan mode."),
     allowedPrompts: z.array(ExitPlanModeAllowedPromptSchema).optional(),
   })

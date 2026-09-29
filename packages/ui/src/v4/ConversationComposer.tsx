@@ -431,6 +431,8 @@ interface ConversationComposerProps {
   onSwitchMode: (mode: string) => void;
   /** 打开当前 session 的 Status panel，并直达 Running 明细。 */
   onOpenRunningBackgroundWorks?: () => void;
+  /** live 模式为 workflow 时打开标准工作流阶段侧栏；scope（会话/workspace）由宿主组装。 */
+  onOpenWorkflowStage?: () => void;
   /**
    * 后台任务入口点击的落点：`"workflow-run"` = 唯一在跑的工作流直达详情页（宿主判定），
    * 缺省 `"panel"` = 展开状态胶囊。入口据此换 tooltip；行为本身在 onOpenRunningBackgroundWorks 里。
@@ -519,6 +521,7 @@ function ConversationComposerImpl({
   onSelectThought,
   onSwitchMode,
   onOpenRunningBackgroundWorks,
+  onOpenWorkflowStage,
   backgroundWorkOpenTarget = "panel",
   runningSubagentCount = 0,
   onRecoverCustomModelSelection,
@@ -2148,6 +2151,8 @@ function ConversationComposerImpl({
           activeConfigPicker={activeConfigPicker}
           onConfigPickerOpenChange={handleConfigPickerOpenChange}
           onSwitchMode={onSwitchMode}
+          workflowStageActive={snapshot?.config?.mode === "workflow"}
+          onOpenWorkflowStage={onOpenWorkflowStage}
         />
         {/* 附件画廊重构曾整段覆盖 leadingActions，误删 CUA 常驻入口。
             入口自身继续负责平台、远程与设置可见性，不在 composer 重复判定。 */}
@@ -2173,11 +2178,13 @@ function ConversationComposerImpl({
       handleConfigPickerOpenChange,
       backgroundWorkOpenTarget,
       onOpenRunningBackgroundWorks,
+      onOpenWorkflowStage,
       onSwitchMode,
       provider,
       remoteSessionId,
       runningSubagentCount,
       snapshot?.backgroundWorks,
+      snapshot?.config?.mode,
       workspaceIdentity,
       workspacePath,
     ],

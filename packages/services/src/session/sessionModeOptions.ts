@@ -8,6 +8,7 @@ const CANONICAL_SESSION_MODES = new Set<ZCodeTaskMode>([
   "autoEdit",
   "build",
   "research",
+  "workflow",
 ]);
 
 function readTrimmedString(value: unknown): string | undefined {

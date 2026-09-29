@@ -34,6 +34,11 @@ const ZCODE_AGENT_MODE_OPTIONS = [
     description: "Read-only web research across docs, code Q&A, and academic sources.",
   },
   {
+    id: "workflow",
+    name: "Workflow mode",
+    description: "Document-driven delivery with staged gates and automated adversarial review rounds.",
+  },
+  {
     id: "yolo",
     name: "Full access",
     description: "Edit and run commands with fewer confirmations.",

@@ -129,7 +129,15 @@ function sessionUsageSeedFromRuntimeContextUsage(
   };
 }
 
-const STABLE_FORK_MODES = new Set<CollaborationMode>(["plan", "build", "edit", "yolo", "auto", "research"]);
+const STABLE_FORK_MODES = new Set<CollaborationMode>([
+  "plan",
+  "build",
+  "edit",
+  "yolo",
+  "auto",
+  "research",
+  "workflow",
+]);
 
 function stableForkMode(value: string, fallback: CollaborationMode): CollaborationMode {
   return STABLE_FORK_MODES.has(value as CollaborationMode)

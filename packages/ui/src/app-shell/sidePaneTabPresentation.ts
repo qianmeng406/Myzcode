@@ -16,6 +16,7 @@ export interface SidePaneTabPresentationLabels {
   planTitle: string;
   workflowRunTitle: string;
   workflowDirectoryTitle: string;
+  workflowStageTitle: string;
   workflowActorTitle: string;
   workflowScriptTitle: string;
   workflowArtifactTitle: string;
@@ -30,6 +31,9 @@ export function getSidePaneTabSearchHint(tab: WorkspaceSidePaneTab): string {
   }
   if (tab.type === "workflow-directory") {
     return `${tab.parentSessionId} workflow runs directory history ended`;
+  }
+  if (tab.type === "workflow-stage") {
+    return `${tab.parentSessionId} standard workflow stage ledger 工作台账 W0 W11 adversarial`;
   }
   if (tab.type === "workflow-actor-session") {
     // 会话 id 也进搜索面：排查时手里往往只有它（日志与 journal 都记它）。
@@ -88,6 +92,7 @@ export function getLocalizedSidePaneTabTitle(
       "sidePane.selectionChat": labels.selectionChatTitle,
       "planTool.panel.planTab": labels.planTitle,
       "sidePane.workflowRun": labels.workflowRunTitle,
+      "sidePane.workflowStage": labels.workflowStageTitle,
       "sidePane.workflowActor": labels.workflowActorTitle,
       "sidePane.workflowScript": labels.workflowScriptTitle,
       "sidePane.workflowArtifact": labels.workflowArtifactTitle,
@@ -103,6 +108,7 @@ export function getSidePaneTabTypeLabel(
   if (tab.type === "plan-detail") return labels.planTitle;
   if (tab.type === "workflow-run") return labels.workflowRunTitle;
   if (tab.type === "workflow-directory") return labels.workflowDirectoryTitle;
+  if (tab.type === "workflow-stage") return labels.workflowStageTitle;
   if (tab.type === "workflow-actor-session") return labels.workflowActorTitle;
   if (tab.type === "workflow-workspace") return labels.workflowScriptTitle;
   if (tab.type === "workflow-artifact") return labels.workflowArtifactTitle;

@@ -181,6 +181,9 @@ export class PermissionService {
       return this.checkResearchMode(context, capability);
     }
 
+    // workflow（标准工作流）模式刻意不设专门分支：交付流程需要正常的读写权限，
+    // 直接落到链尾 checkBuildMode（读放行、写/命令按风险确认），纪律由 reminder 驱动。
+
     if (this.matchesProjectRules(projectRules, "allow", context, capability, rulePolicy)) {
       return this.allow(
         context,
