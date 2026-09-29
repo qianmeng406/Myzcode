@@ -61,13 +61,26 @@ test("minimal profile drops skills, project instructions, date and git context",
   assert.ok(!text.includes("abc1234 demo"), "近期提交不该下发");
 });
 
-test("minimal profile emits exactly two sections and no meta_user attachments", () => {
+test("minimal profile emits exactly three sections and no meta_user attachments", () => {
   const result = build("minimal");
   assert.deepEqual(
     result.sections.map((section) => section.source),
-    ["cli_prefix", "env_info"],
+    ["cli_prefix", "env_info", "minimal_guardrails"],
   );
   assert.equal(result.metaUserAttachments.length, 0);
+});
+
+test("minimal profile carries the guardrails its full-access permissions require", () => {
+  // 极简模式是自动执行权限且没有任何其它指引：护栏段是它唯一的防线，必须在场。
+  const minimalText = renderedText(build("minimal"));
+  assert.ok(minimalText.includes("# Guardrails"));
+  assert.ok(minimalText.includes("automatic permissions"));
+  assert.ok(minimalText.includes("Destructive or hard-to-reverse"), "破坏性操作须先确认");
+  assert.ok(minimalText.includes("explicit confirmation"));
+  assert.ok(minimalText.includes("Never claim success you have not verified"));
+  // 默认档位有自己的完整行为段，不携带这段——它是极简档位专属的最低保障。
+  const standardText = renderedText(build("default"));
+  assert.ok(!standardText.includes("# Guardrails"));
 });
 
 test("minimal profile is materially smaller than the default profile", () => {

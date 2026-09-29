@@ -47,7 +47,8 @@ export type ContextSource =
   | "session_guidance" // 当前可用内置能力指导
   | "output_style" // 输出风格
   | "context_management" // 长上下文管理提示
-  | "desktop_context"; // ZCode Desktop 渲染与交互协议
+  | "desktop_context" // ZCode Desktop 渲染与交互协议
+  | "minimal_guardrails"; // 极简模式的最简护栏（该模式没有其余任何指引）
 
 export type ContextInjectionTarget = "system" | "meta_user";
 

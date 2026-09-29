@@ -21,6 +21,7 @@ import { buildRequestUserContextSection } from "./sections/request-user-context.
 import { buildCurrentDateSection } from "./sections/current-date.js";
 import { buildMemorySection } from "./sections/memory.js";
 import { buildDesktopContextSection } from "./sections/desktop.js";
+import { buildMinimalGuardrailsSection } from "./sections/minimal-guardrails.js";
 import {
   buildContextManagementSection,
   buildDynamicBehaviorSection,
@@ -144,7 +145,9 @@ export class ContextBuilder {
     if (isMinimalProfile) {
       // 极简模式只保留环境（工作目录 / 平台）：desktop context、Dynamic Behavior、
       // session guidance、memory、output style、context management、git 段全部不发。
+      // 但该模式是自动执行权限，护栏段必须留在场——否则模型手里一条防线都没有。
       sections.push(buildEnvInfoSection(this.config.envInfo, this.config.model));
+      sections.push(buildMinimalGuardrailsSection());
     } else if (!hasCustomSystemPrompt) {
       if (!isWorkflowActor && this.config.presentationSurface === "zcode_desktop") {
         sections.push(buildDesktopContextSection());
