@@ -133,17 +133,8 @@ export class PermissionService {
     }
 
     const planEnabled = context.planEnabled ?? context.mode === "plan";
-    // workflow（项目开发模式）与 yolo 同级：交付流程按台账推进，命令与文件修改自动执行、
-    // 不逐次确认（纪律由 workflow reminder 承担）。ruleId 分开记，审计能区分两种来源。
-    if ((context.mode === "yolo" || context.mode === "workflow") && !planEnabled) {
-      return this.allow(
-        context,
-        capability,
-        context.mode === "workflow" ? "mode.workflow" : "mode.yolo",
-        context.mode === "workflow"
-          ? "Workflow mode executes commands and edits without per-action prompts"
-          : "Yolo mode bypasses permission prompts",
-      );
+    if (context.mode === "yolo" && !planEnabled) {
+      return this.allow(context, capability, "mode.yolo", "Yolo mode bypasses permission prompts");
     }
 
     if (context.mode === "auto") {
@@ -170,6 +161,19 @@ export class PermissionService {
         capability,
         "rule.project.deny",
         `Tool ${context.toolName} is denied by project permission rules`,
+      );
+    }
+
+    // workflow（项目开发模式）：命令与文件修改自动执行、不逐次确认（交付纪律由 reminder
+    // 承担），但**排在 disallowedTools 与项目 deny 之后**——用户显式配置的禁用清单是比
+    // 「完整权限」更强的意图表达，必须照旧生效；项目 ask 规则不生效（该模式的定义就是
+    // 不打断）。yolo 保持既有位置不动：这是本模式与 yolo 唯一的语义差，别把两者合并。
+    if (context.mode === "workflow" && !planEnabled) {
+      return this.allow(
+        context,
+        capability,
+        "mode.workflow",
+        "Workflow mode executes commands and edits without per-action prompts",
       );
     }
 

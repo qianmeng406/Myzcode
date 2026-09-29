@@ -27,6 +27,25 @@ test("workflow mode does not bypass plan-mode restrictions when plan is enabled"
   assert.equal(decision.decision, "deny");
 });
 
+test("workflow mode still honors user-configured disallowedTools", () => {
+  // workflow 的自动执行排在 disallowedTools 之后：用户显式禁用清单是比「完整权限」
+  // 更强的意图表达（yolo 的既有位置保持不动，这是 workflow 与 yolo 唯一的语义差）。
+  const service = new PermissionService({
+    allowedTools: new Set<string>(),
+    disallowedTools: new Set(["Bash"]),
+    autoApproveHighRisk: false,
+    allowMediumRiskInAutoMode: false,
+  });
+  const decision = service.checkPermission({
+    toolName: "Bash",
+    input: { command: "ls" },
+    riskLevel: "medium",
+    mode: "workflow",
+  });
+  assert.equal(decision.decision, "deny");
+  assert.equal(decision.ruleId, "rule.disallowedTools");
+});
+
 test("yolo keeps its own rule id", () => {
   const service = new PermissionService();
   const decision = service.checkPermission({

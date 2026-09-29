@@ -19,11 +19,15 @@ import {
 } from "@zcode/shared";
 import { RefreshCwIcon } from "lucide-react";
 
-/** 台账最多读这么多字节——它是人手维护的 markdown，超过这个量说明读错文件了。 */
-const LEDGER_MAX_BYTES = 512 * 1024;
+/**
+ * 与宿主 fileService 的文本读取硬上限一致（services/src/file/fileService.ts 的
+ * MAX_TEXT_READ_BYTES）：请求更多也只会被钳到这个值，这里照实请求并消费 truncated 标记。
+ */
+const LEDGER_MAX_BYTES = 256 * 1024;
 
 type LedgerLoad =
-  | { kind: "loaded"; content: string }
+  | { kind: "loading" }
+  | { kind: "loaded"; content: string; truncated: boolean }
   | { kind: "missing" }
   | { kind: "error"; message: string };
 
@@ -65,10 +69,12 @@ function StageLane({
 }
 
 const WorkflowStageContents = memo(function WorkflowStageContents({
+  onOpenBrowserUrl,
   onOpenCodeViewer,
   onOpenFileLink,
   tab,
 }: {
+  onOpenBrowserUrl?: (url: string) => void;
   onOpenCodeViewer?: (source: CodeViewerSource) => void;
   onOpenFileLink?: (target: MessageFileLinkTarget) => void;
   tab: WorkflowStageSidePaneTab;
@@ -90,8 +96,14 @@ const WorkflowStageContents = memo(function WorkflowStageContents({
     [tab.workspacePath],
   );
 
-  const [load, setLoad] = useState<LedgerLoad>({ kind: "missing" });
+  const [load, setLoad] = useState<LedgerLoad>({ kind: "loading" });
   const [refreshTick, setRefreshTick] = useState(0);
+
+  // 换工作区（split pane / 切会话）时先回到 loading，避免把上一个工作区的台账
+  // 留在屏幕上直到新读取完成。
+  useEffect(() => {
+    setLoad({ kind: "loading" });
+  }, [ledgerPath]);
 
   const refresh = useCallback(async () => {
     try {
@@ -100,7 +112,12 @@ const WorkflowStageContents = memo(function WorkflowStageContents({
         offset: 0,
         length: LEDGER_MAX_BYTES,
       });
-      setLoad(slice.content.trim().length > 0 ? { kind: "loaded", content: slice.content } : { kind: "missing" });
+      const trimmed = slice.content.trim();
+      if (trimmed.length === 0) {
+        setLoad({ kind: "missing" });
+        return;
+      }
+      setLoad({ kind: "loaded", content: slice.content, truncated: slice.truncated });
     } catch (error) {
       // 读不到与「文件不存在」在 UI 上必须是两种话：前者可能是远程工作区/权限问题，
       // 提示重试；后者是新项目的正常起点，提示先建台账。
@@ -117,9 +134,12 @@ const WorkflowStageContents = memo(function WorkflowStageContents({
     void refresh();
   }, [refresh, refreshTick]);
 
-  // 台账由助手在会话里写：watch workflow/ 目录（事件粒度是目录，保守全量重读），
-  // 变更即抬 refreshTick 触发上面的重读 effect。watch 失败（目录尚不存在等）不影响
-  // 基础功能：仍可手动刷新，tab 重挂载也会重读——与 useWatchedReaddir 同一条容错线。
+  // 台账由助手在会话里写，两个 watcher 配合覆盖全生命周期：
+  // 1) workflow/ 目录存在后 watch 它——台账内容变更的主信号；
+  // 2) watch 工作区根（非递归，根必然存在）——捕捉 workflow/ 目录**被创建**的那一刻
+  //    （新项目/接手盘点的典型时序：面板先打开、目录后出现，此时信号 1 尚 watch 不上）。
+  // 两个 effect 都以 refreshTick 为依赖：手动刷新会重新尝试建立 watcher；watch 失败
+  // （目录尚不存在等）只记 info 日志，不影响基础功能。
   useEffect(() => {
     let cancelled = false;
     let cleanup: (() => void) | null = null;
@@ -140,14 +160,50 @@ const WorkflowStageContents = memo(function WorkflowStageContents({
       })
       .catch((error) => {
         if (!cancelled) {
-          logger.info("[WorkflowStage] 监视台账目录失败（可手动刷新）", { ledgerDir, error });
+          logger.info("[WorkflowStage] 监视台账目录失败（等待目录创建）", { ledgerDir, error });
         }
       });
     return () => {
       cancelled = true;
       cleanup?.();
     };
-  }, [fileWatcherService, ledgerDir]);
+  }, [fileWatcherService, ledgerDir, refreshTick]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let cleanup: (() => void) | null = null;
+    fileWatcherService
+      .watch({ path: tab.workspacePath })
+      .then(({ id }) => {
+        if (cancelled) {
+          void fileWatcherService.unwatch({ id });
+          return;
+        }
+        const disposable = fileWatcherService.onDynamicChange(id)((event) => {
+          // 根是非递归 watch：只关心 workflow/ 目录的创建/更名，其余子项不产生事件。
+          const changed = event.changedPath ?? "";
+          if (/(^|[\\/])workflow$/iu.test(changed)) {
+            setRefreshTick((tick) => tick + 1);
+          }
+        });
+        cleanup = () => {
+          disposable.dispose();
+          void fileWatcherService.unwatch({ id });
+        };
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          logger.info("[WorkflowStage] 监视工作区根失败（可手动刷新）", {
+            workspacePath: tab.workspacePath,
+            error,
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [fileWatcherService, tab.workspacePath, refreshTick]);
 
   const strip: StdWorkflowStageStrip | null = useMemo(() => {
     if (load.kind !== "loaded") return null;
@@ -180,7 +236,11 @@ const WorkflowStageContents = memo(function WorkflowStageContents({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        {load.kind === "error" ? (
+        {load.kind === "loading" ? (
+          <p data-testid="workflow-stage-loading" className="text-ui-base text-foreground-subtlest">
+            {intl.formatMessage({ id: "workflow.stagePane.loading" })}
+          </p>
+        ) : load.kind === "error" ? (
           <p data-testid="workflow-stage-read-error" className="text-ui-base text-foreground-subtlest">
             {intl.formatMessage({ id: "workflow.stagePane.readError" })}
           </p>
@@ -219,12 +279,23 @@ const WorkflowStageContents = memo(function WorkflowStageContents({
                       {strip.stage}
                     </span>
                     {" · "}
-                    {strip.nextAdversarial
+                    {strip.adversarialInProgress
                       ? intl.formatMessage(
-                          { id: "workflow.stagePane.nextAdversarial" },
-                          { stage: strip.nextAdversarial.stage, workflow: strip.nextAdversarial.workflow },
+                          { id: "workflow.stagePane.currentAdversarial" },
+                          {
+                            stage: strip.adversarialInProgress.stage,
+                            workflow: strip.adversarialInProgress.workflow,
+                          },
                         )
-                      : intl.formatMessage({ id: "workflow.stagePane.noneAdversarial" })}
+                      : strip.nextAdversarial
+                        ? intl.formatMessage(
+                            { id: "workflow.stagePane.nextAdversarial" },
+                            {
+                              stage: strip.nextAdversarial.stage,
+                              workflow: strip.nextAdversarial.workflow,
+                            },
+                          )
+                        : intl.formatMessage({ id: "workflow.stagePane.noneAdversarial" })}
                   </p>
                 </>
               ) : (
@@ -233,6 +304,14 @@ const WorkflowStageContents = memo(function WorkflowStageContents({
                 </p>
               )}
             </section>
+            {load.truncated ? (
+              <p
+                data-testid="workflow-stage-truncated"
+                className="pb-2 text-ui-xs text-amber-600 dark:text-amber-400"
+              >
+                {intl.formatMessage({ id: "workflow.stagePane.truncated" })}
+              </p>
+            ) : null}
             <MessageResponse
               className="mx-auto w-full max-w-4xl min-w-0 break-words text-foreground"
               workspacePath={tab.workspacePath}
@@ -240,6 +319,7 @@ const WorkflowStageContents = memo(function WorkflowStageContents({
               codePreviewSettings={codePreviewSettings}
               onOpenCodeViewer={onOpenCodeViewer}
               onOpenFileLink={onOpenFileLink}
+              onOpenExternalUrl={onOpenBrowserUrl}
             >
               {load.content}
             </MessageResponse>
@@ -251,15 +331,22 @@ const WorkflowStageContents = memo(function WorkflowStageContents({
 });
 
 export const WorkflowStageSidePane = memo(function WorkflowStageSidePane({
+  onOpenBrowserUrl,
   onOpenCodeViewer,
   onOpenFileLink,
   tab,
 }: {
+  onOpenBrowserUrl?: (url: string) => void;
   onOpenCodeViewer?: (source: CodeViewerSource) => void;
   onOpenFileLink?: (target: MessageFileLinkTarget) => void;
   tab: WorkflowStageSidePaneTab;
 }) {
   return (
-    <WorkflowStageContents tab={tab} onOpenCodeViewer={onOpenCodeViewer} onOpenFileLink={onOpenFileLink} />
+    <WorkflowStageContents
+      tab={tab}
+      onOpenBrowserUrl={onOpenBrowserUrl}
+      onOpenCodeViewer={onOpenCodeViewer}
+      onOpenFileLink={onOpenFileLink}
+    />
   );
 });

@@ -19,7 +19,9 @@ export const STD_WORKFLOW_LEDGER_RELATIVE_PATH = "workflow/工作台账.md";
 /** 标记行的当前格式版本。 */
 export const STD_WORKFLOW_STAGE_MARKER_VERSION = 1;
 
-const STD_WORKFLOW_STAGE_PATTERN = /<!--\s*std-workflow v(\d+) stage:([A-Za-z0-9._-]+?)\s*-->/u;
+// g 标志是取「最后一次匹配」的前提：没有它 exec 永远停在第一个匹配（下面那个循环
+// 就成了死循环）。lastIndex 的复位由解析函数自己负责，别处不要复用这条正则的执行状态。
+const STD_WORKFLOW_STAGE_PATTERN = /<!--\s*std-workflow v(\d+) stage:([A-Za-z0-9._-]+?)\s*-->/gu;
 
 /** 主线阶段（按序）。 */
 export const STD_WORKFLOW_MAIN_STAGES = [
@@ -65,16 +67,30 @@ function laneOf(stage: string): { lane: StdWorkflowLane; index: number } | null 
   return null;
 }
 
-/** 台账文本 → 机器标记解析结果；无标记或版本不识别时返回 null（面板降级为纯渲染）。 */
+/**
+ * 台账文本 → 机器标记解析结果；无标记、版本号不是当前支持的版本、或 stage 为空时返回
+ * null（面板降级为纯渲染，绝不按错误版本的字段猜测）。
+ *
+ * 取**最后一次**匹配而不是第一次：标记行是被反复改写的"活"行，而台账开头常出现示例/
+ * 模板行（wf-start 生成的模板自身就含一个示例标记）——末次匹配在两类行并存时更可能
+ * 命中真正被维护的那条。
+ */
 export function parseStdWorkflowStageMarker(text: string): {
   version: number;
   stage: string;
 } | null {
-  const match = STD_WORKFLOW_STAGE_PATTERN.exec(text);
-  if (!match) return null;
-  const version = Number.parseInt(match[1]!, 10);
-  if (!Number.isFinite(version)) return null;
-  return { version, stage: match[2]! };
+  let match: RegExpExecArray | null;
+  let last: RegExpExecArray | null = null;
+  STD_WORKFLOW_STAGE_PATTERN.lastIndex = 0;
+  while ((match = STD_WORKFLOW_STAGE_PATTERN.exec(text)) !== null) {
+    last = match;
+  }
+  STD_WORKFLOW_STAGE_PATTERN.lastIndex = 0;
+  if (!last) return null;
+  const version = Number.parseInt(last[1]!, 10);
+  // 只认当前版本：未来的 v2 标记格式未知，按 v1 规则推导比诚实说"没认出"更糟。
+  if (!Number.isFinite(version) || version !== STD_WORKFLOW_STAGE_MARKER_VERSION) return null;
+  return { version, stage: last[2]! };
 }
 
 export type StdWorkflowStageState = "done" | "current" | "pending";
@@ -86,7 +102,9 @@ export interface StdWorkflowStageStrip {
   main: ReadonlyArray<{ stage: string; state: StdWorkflowStageState }>;
   frontend: ReadonlyArray<{ stage: string; state: StdWorkflowStageState }>;
   backend: ReadonlyArray<{ stage: string; state: StdWorkflowStageState }>;
-  /** 下一个未过去的对抗轮；推不出（很少见）或已全部过去时为 undefined。 */
+  /** 当前阶段本身就是对抗轮（正在进行）时的轮次信息。 */
+  adversarialInProgress: { stage: string; workflow: string } | undefined;
+  /** 下一个**尚未到达**的对抗轮；当前正在对抗轮、或已全部到达过时为 undefined。 */
   nextAdversarial: { stage: string; workflow: string } | undefined;
 }
 
@@ -95,8 +113,9 @@ export interface StdWorkflowStageStrip {
  * - 同泳道内早于当前的记 done、晚于的记 pending、当前记 current；
  * - 当前在双轨时：主线 W0/W0.5 记 done、W5 起记 pending，另一条轨不做推断（pending）；
  * - 当前在主线时：跨过 W5（含）才把双轨整体记 done（联调意味着双轨收尾），否则 pending；
- * - 下一对抗轮：主线按 W6→W8→W10 顺序取第一个晚于当前的；当前在双轨或主线未到 W5
- *   时取 W3-F（无法证明前端验收已过去时不跳过它）。
+ * - 对抗轮：当前阶段本身是对抗轮时由 adversarialInProgress 表达（正在打）；
+ *   nextAdversarial 只取严格晚于当前的轮次，主线按 W6→W8→W10，主线未到 W5 或双轨
+ *   当前（前端轨已到达/越过 W3-F 的情形除外）保守取 W3-F。
  */
 export function deriveStdWorkflowStageStrip(stage: string): StdWorkflowStageStrip {
   const current = laneOf(stage);
@@ -119,10 +138,10 @@ export function deriveStdWorkflowStageStrip(stage: string): StdWorkflowStageStri
       main: pendingMain,
       frontend: pendingFrontend,
       backend: pendingBackend,
-      nextAdversarial: {
-        stage: "W3-F",
-        workflow: STD_WORKFLOW_ADVERSARIAL_WORKFLOWS["W3-F"]!,
-      },
+      // 未知阶段不做任何推断——nextAdversarial 也一并缺席，否则「以下不做先后推断」
+      // 的横幅下面紧跟一条具体的对抗轮推断，自相矛盾。
+      adversarialInProgress: undefined,
+      nextAdversarial: undefined,
     };
   }
 
@@ -156,6 +175,11 @@ export function deriveStdWorkflowStageStrip(stage: string): StdWorkflowStageStri
       };
     });
 
+  // 对抗轮口径：nextAdversarial 只取**严格晚于**当前的轮次（当前正处于对抗轮时由
+  // adversarialInProgress 表达"正在打"），面板两类话术分开，不会出现"下一个对抗轮=当前阶段"。
+  const adversarialInProgress = STD_WORKFLOW_ADVERSARIAL_WORKFLOWS[stage]
+    ? { stage, workflow: STD_WORKFLOW_ADVERSARIAL_WORKFLOWS[stage]! }
+    : undefined;
   let nextAdversarial: { stage: string; workflow: string } | undefined;
   if (current.lane === "main") {
     if (current.index < 2) {
@@ -175,11 +199,11 @@ export function deriveStdWorkflowStageStrip(stage: string): StdWorkflowStageStri
       }
     }
   } else {
-    // 双轨当前：主线对抗轮必未到，前端轨是否已过 W3-F 无法从后端/当前轨判定，
-    // 统一回到最早的 W3-F，除非当前就是主线之外已过去的位置（W4-F 之后仍取 W3-F
-    // 会误导，这里只在当前为前端轨且已越过 W3-F 时才推进到 W6）。
+    // 双轨当前：主线对抗轮必未到。前端轨是否已过 W3-F 无法从后端/当前轨判定，
+    // 只有当前就在前端轨且已到达/越过 W3-F 时才推进到 W6——否则保守回到 W3-F
+    //（无法证明前端验收已过去时不跳过它）。
     const adversarialFrontendIndex = laneOf("W3-F")!.index;
-    if (current.lane === "frontend" && current.index > adversarialFrontendIndex) {
+    if (current.lane === "frontend" && current.index >= adversarialFrontendIndex) {
       nextAdversarial = { stage: "W6", workflow: STD_WORKFLOW_ADVERSARIAL_WORKFLOWS["W6"]! };
     } else {
       nextAdversarial = {
@@ -192,6 +216,7 @@ export function deriveStdWorkflowStageStrip(stage: string): StdWorkflowStageStri
   return {
     stage,
     known: true,
+    adversarialInProgress,
     main: markLane(STD_WORKFLOW_MAIN_STAGES, "main"),
     frontend: markLane(STD_WORKFLOW_FRONTEND_STAGES, "frontend"),
     backend: markLane(STD_WORKFLOW_BACKEND_STAGES, "backend"),

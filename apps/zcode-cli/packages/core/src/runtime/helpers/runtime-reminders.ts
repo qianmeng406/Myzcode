@@ -144,8 +144,8 @@ const WORKFLOW_MODE_FULL_REMINDER = [
   "## 阶段地图",
   "",
   "W0 分母冻结（需求/页面清单/配置项/权限矩阵/消息类型）→ W0.5 UI 设计冻结（UI 规范+3 基线页+用户视觉确认）→",
-  "前端轨 W1-F 工程基座 → W2-F 演示数据 → W3-F 静态验收〔对抗轮①〕→ W4-F 真接口；后端轨 W1-B 工程基座 → W2-B 业务实现（双轨并行）→",
-  "W5 逐页联调 → W6 独立验收〔对抗轮②〕→ W7 缺陷修复与复验 → W8 发布复核〔对抗轮③〕→ W9 发布 → W10 需求终审〔对抗轮④〕→ W11 交付归档",
+  "前端轨 W1-F 工程基座 → W2-F 演示数据 → W3-F 专项验收〔对抗轮①〕→ W4-F 修复复测；后端轨 W1-B 工程基座 → W2-B 逐模块开发（双轨并行）→",
+  "W5 逐页联调（接真实接口 + 去演示化）→ W6 独立验收〔对抗轮②〕→ W7 缺陷修复与复验 → W8 发布复核〔对抗轮③〕→ W9 发布 → W10 需求终审〔对抗轮④〕→ W11 交付归档",
   "",
   "## 接手已有项目（存量项目无台账时的强制第一步）",
   "",
@@ -289,7 +289,10 @@ export function buildRuntimeModeReminderBody(
   planEnabled = mode === "plan",
 ): string | null {
   const researchEnabled = mode === "research";
-  const workflowEnabled = mode === "workflow";
+  // plan+workflow 组合可达（EnterPlanMode 不改 mode；composer 勾选计划也保留当前 mode），
+  // 此时权限真值是 plan 只读——必须给 plan 指引而不是宣称「完全访问」的 SOP，否则模型
+  // 会按全权行事、每条命令被拒。所以 workflow 分支显式排除 planEnabled。
+  const workflowEnabled = mode === "workflow" && !planEnabled;
   if (!planEnabled && !researchEnabled && !workflowEnabled) return null;
 
   const { foundRuntimeModeReminder, humanTurnsSinceReminder } =

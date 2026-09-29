@@ -89,3 +89,12 @@ test("research and plan modes are unaffected by the workflow branch", () => {
   assert.ok(plan!.includes("Plan mode is active"));
   assert.equal(buildRuntimeModeReminderBody([], "build"), null);
 });
+
+test("plan+workflow combo yields the plan reminder, not the full-access SOP", () => {
+  // 权限真值是 plan 只读（workflow 放行分支被 planEnabled 挡住），reminder 必须同口径：
+  // 给出宣称「完全访问」的 SOP 会让模型按全权行事、每条命令被拒。
+  const body = buildRuntimeModeReminderBody([], "workflow", true);
+  assert.ok(body);
+  assert.ok(body!.includes("Plan mode is active"));
+  assert.ok(!body!.includes("权限等同「完全访问」"));
+});

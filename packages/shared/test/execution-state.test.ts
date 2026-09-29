@@ -48,6 +48,21 @@ test("parseStdWorkflowStageMarker reads the canonical marker line", () => {
   assert.deepEqual(parseStdWorkflowStageMarker(text), { version: 1, stage: "W2-F" });
 });
 
+test("parseStdWorkflowStageMarker prefers the last marker over earlier examples", () => {
+  // 台账顶部常出现模板/示例标记（wf-start 生成的台账自带说明行），活标记是被改写的那条。
+  const text = [
+    "标记行格式：`<!-- std-workflow v1 stage:W0 -->`（每次推进更新）",
+    "",
+    "<!-- std-workflow v1 stage:W2-F -->",
+  ].join("\n");
+  assert.deepEqual(parseStdWorkflowStageMarker(text), { version: 1, stage: "W2-F" });
+});
+
+test("parseStdWorkflowStageMarker rejects unknown marker versions", () => {
+  // v2 格式未知：按 v1 规则推导比诚实说没认出更糟，必须返回 null。
+  assert.equal(parseStdWorkflowStageMarker("<!-- std-workflow v2 stage:W2-F -->"), null);
+});
+
 test("parseStdWorkflowStageMarker returns null without a marker", () => {
   assert.equal(parseStdWorkflowStageMarker("# 工作台账\n\n没有标记行"), null);
 });
@@ -77,6 +92,24 @@ test("deriveStdWorkflowStageStrip marks same-lane ordering only", () => {
     stage: "W3-F",
     workflow: STD_WORKFLOW_ADVERSARIAL_WORKFLOWS["W3-F"],
   });
+  assert.equal(strip.adversarialInProgress, undefined);
+});
+
+test("deriveStdWorkflowStageStrip reports an in-progress adversarial round at its own stage", () => {
+  const strip = deriveStdWorkflowStageStrip("W3-F");
+  assert.deepEqual(strip.adversarialInProgress, {
+    stage: "W3-F",
+    workflow: STD_WORKFLOW_ADVERSARIAL_WORKFLOWS["W3-F"],
+  });
+  // 「下一个」必须严格晚于当前，不能指向自己。
+  assert.equal(strip.nextAdversarial?.stage, "W6");
+
+  const final = deriveStdWorkflowStageStrip("W10");
+  assert.deepEqual(final.adversarialInProgress, {
+    stage: "W10",
+    workflow: STD_WORKFLOW_ADVERSARIAL_WORKFLOWS["W10"],
+  });
+  assert.equal(final.nextAdversarial, undefined);
 });
 
 test("deriveStdWorkflowStageStrip treats tracks as done once the main line reaches W5", () => {
@@ -105,7 +138,9 @@ test("deriveStdWorkflowStageStrip degrades honestly on unknown stages", () => {
   assert.equal(strip.known, false);
   assert.equal(strip.stage, "W99");
   assert.equal(strip.main.every((entry) => entry.state === "pending"), true);
-  assert.equal(strip.nextAdversarial?.stage, "W3-F");
+  // 未知阶段零推断：对抗轮口径同样缺席，不与「不做先后推断」横幅自相矛盾。
+  assert.equal(strip.nextAdversarial, undefined);
+  assert.equal(strip.adversarialInProgress, undefined);
 });
 
 test("adversarial workflows point at the two saved engines", () => {

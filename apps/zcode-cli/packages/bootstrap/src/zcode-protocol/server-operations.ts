@@ -3455,12 +3455,17 @@ function derivePersistedSessionMode(
 function isZCodeSessionMode(
   value: unknown,
 ): value is NonNullable<ZCodeSessionCreateParams["mode"]> {
+  // 与 zcodeSessionModeSchema 同值域：漏一个模式，冷恢复时 derivePersistedSessionMode 会
+  // 越过新模式的 assistant 消息、把更早的旧模式 latch 成 modeOverride，压过权威的
+  // execution-state 持久条目（research 曾漏过，workflow 别再漏）。
   return (
     value === "plan" ||
     value === "build" ||
     value === "edit" ||
     value === "yolo" ||
-    value === "auto"
+    value === "auto" ||
+    value === "research" ||
+    value === "workflow"
   );
 }
 

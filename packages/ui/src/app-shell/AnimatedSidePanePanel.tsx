@@ -1162,7 +1162,12 @@ export function AnimatedSidePanePanel({
                             />
                           ) : null
                         ) : tab.type === "workflow-stage" ? (
-                          <WorkflowStageSidePane tab={tab} onOpenFileLink={onOpenFileLink} />
+                          <WorkflowStageSidePane
+                            tab={tab}
+                            onOpenBrowserUrl={onOpenBrowserUrl}
+                            onOpenCodeViewer={onOpenCodeViewer}
+                            onOpenFileLink={onOpenFileLink}
+                          />
                         ) : tab.type === "workflow-actor-session" ? (
                           <WorkflowActorSessionSidePane
                             tab={tab}
