@@ -190,6 +190,18 @@ export class PermissionService {
       );
     }
 
+    // 极简模式：上下文极简 + 权限也极简——自动执行、不逐次确认，排在 disallowedTools 与
+    // 项目 deny 之后（同 workflow 姿态）。注意该模式刻意不发任何 reminder，也没有身份
+    // 行为段与技能清单，所以这里放行后**没有任何护栏文本**，这是模式定义本身的取舍。
+    if (context.mode === "minimal" && !planEnabled) {
+      return this.allow(
+        context,
+        capability,
+        "mode.minimal",
+        "Minimal mode executes commands and edits without per-action prompts",
+      );
+    }
+
     if (this.matchesProjectRules(projectRules, "ask", context, capability, rulePolicy)) {
       return this.ask(
         context,

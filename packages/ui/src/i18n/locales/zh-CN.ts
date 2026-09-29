@@ -5690,7 +5690,7 @@ const zhCN: Record<string, string> = {
   "mode.description.glm.workflow":
     "文档驱动的项目交付：按台账推进阶段门禁，对抗轮自动运行复核工作流；命令与文件修改自动执行。",
   "mode.description.glm.minimal":
-    "只下发系统工具与最小上下文：保留身份行与工作目录，去掉技能、记忆、项目指令与 MCP 工具。",
+    "只下发系统工具与最小上下文：保留身份行与工作目录，去掉技能、记忆、项目指令与 MCP 工具；命令与文件修改自动执行。",
   "mode.description.glm.zcodeUpdate":
     "跟进官方发版：取每个版本的 diff、判定相关性、以本地改动落地并跑门禁验收；命令与文件修改自动执行。",
   "todo.panel.title": "待办",

@@ -124,8 +124,13 @@ function V4ComposerModeSwitchImpl({
               aria-label={intl.formatMessage({ id: "chat.toolbar.mode.label" })}
               className={cn(
                 "group/mode h-7 gap-1 rounded-lg px-2 text-ui-base data-[composer-compact=true]:w-7 data-[composer-compact=true]:px-0",
-                // workflow 与 yolo 同为自动执行权限，触发按钮同用警示色提示。
-                (selected.id === "yolo" || selected.id === "workflow") &&
+                // yolo / workflow / zcodeUpdate / minimal 同为自动执行权限，触发按钮同用警示色提示。
+                // 与 display.tsx 的 isHighPermissionModeValue 同值域；这里拿不到那个 helper
+                // （它在展示层文件内部），改它时两处要一起改。
+                (selected.id === "yolo" ||
+                  selected.id === "workflow" ||
+                  selected.id === "zcodeUpdate" ||
+                  selected.id === "minimal") &&
                   "text-warning hover:text-warning",
               )}
             >

@@ -53,7 +53,7 @@ const ZCODE_AGENT_MODE_OPTIONS = [
     id: "minimal",
     name: "Minimal mode",
     description:
-      "Send only the system tools with a bare identity line and working directory; no skills, memory, project instructions, or MCP tools.",
+      "Send only the system tools with a bare identity line and working directory, and run commands and edits without confirmation; no skills, memory, project instructions, or MCP tools.",
   },
   {
     id: "zcodeUpdate",

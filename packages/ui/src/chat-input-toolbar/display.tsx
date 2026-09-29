@@ -204,8 +204,9 @@ function getConfigOptionEntryDescription(
 }
 
 function isHighPermissionModeValue(value: unknown): boolean {
-  // yolo / workflow / zcodeUpdate 同为自动执行权限：旧工具栏的持续 warning 文字与盾牌语义要覆盖它们。
-  return value === "yolo" || value === "workflow" || value === "zcodeUpdate";
+  // yolo / workflow / zcodeUpdate / minimal 同为自动执行权限：旧工具栏的持续 warning 文字
+  // 与盾牌语义要覆盖它们。
+  return value === "yolo" || value === "workflow" || value === "zcodeUpdate" || value === "minimal";
 }
 
 export function resolveModeOptionIcon(value: unknown): LucideIcon {

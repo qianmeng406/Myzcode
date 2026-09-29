@@ -15,7 +15,7 @@ const MODE_DESCRIPTIONS: Record<TuiSwitchableMode, string> = {
   workflow:
     "Document-driven delivery with staged gates and adversarial review; commands and edits run without confirmation.",
   minimal:
-    "Send only the system tools with a bare identity line and working directory; no skills, memory, or MCP tools.",
+    "Send only the system tools with a bare identity line and working directory, and run commands and edits without confirmation; no skills, memory, or MCP tools.",
   zcodeUpdate:
     "Track upstream ZCode releases: fetch each version's diff, judge relevance, re-implement locally, then verify.",
   yolo: "Edit and run commands with fewer confirmations.",

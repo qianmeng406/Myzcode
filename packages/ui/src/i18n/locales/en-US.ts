@@ -5943,7 +5943,7 @@ const enUS: Record<string, string> = {
   "mode.description.glm.workflow":
     "Document-driven delivery with staged gates and automated adversarial review; commands and edits run without confirmation.",
   "mode.description.glm.minimal":
-    "Send only the system tools with a bare identity line and working directory; no skills, memory, project instructions, or MCP tools.",
+    "Send only the system tools with a bare identity line and working directory; no skills, memory, project instructions, or MCP tools. Commands and edits run without confirmation.",
   "mode.description.glm.zcodeUpdate":
     "Track upstream releases: fetch each version's diff, judge relevance, re-implement locally, then verify; commands and edits run without confirmation.",
   "todo.panel.title": "Todo",
