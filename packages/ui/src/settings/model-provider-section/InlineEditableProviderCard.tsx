@@ -149,6 +149,7 @@ export function InlineEditableProviderCard({
   presetApiKeyUrl,
   onOpenPresetApiKey,
   statusSection,
+  statusSupplement,
   nameEditable,
   headerVisible = true,
   headerActionsVisible,
@@ -176,6 +177,13 @@ export function InlineEditableProviderCard({
   presetApiKeyUrl?: string;
   onOpenPresetApiKey?: () => void;
   statusSection?: ReactNode;
+  /**
+   * 追加在供应商标题之后、连接区之前的内容（如网关额度卡片）。
+   *
+   * 与 `statusSection` 的区别：`statusSection` 会顶替标题栏（用于 Coding Plan 的整卡形态），
+   * 这里只在标题栏下方插入内容，供应商名称 / 启停开关 / 删除入口全部保留。
+   */
+  statusSupplement?: ReactNode;
   nameEditable?: boolean;
   headerVisible?: boolean;
   headerActionsVisible?: boolean;
@@ -807,6 +815,8 @@ export function InlineEditableProviderCard({
       ) : null}
 
       {statusSection}
+
+      {statusSupplement}
 
       <div className="space-y-3">
         {isAccountProvider ? null : (

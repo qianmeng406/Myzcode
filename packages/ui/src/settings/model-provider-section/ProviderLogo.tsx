@@ -19,6 +19,8 @@ import openrouterLight from "@/assets/provider-icons/model-provider-openrouter-l
 import openrouterDark from "@/assets/provider-icons/model-provider-openrouter-dark.svg";
 import opencodeLight from "@/assets/provider-icons/model-provider-opencode-light.svg";
 import opencodeDark from "@/assets/provider-icons/model-provider-opencode-dark.svg";
+import commandCodeLight from "@/assets/provider-icons/model-provider-command-code-light.svg";
+import commandCodeDark from "@/assets/provider-icons/model-provider-command-code-dark.svg";
 
 type ProviderLogoRef = NonNullable<ProviderConfigObject["logo"]>;
 
@@ -43,6 +45,7 @@ const BUILTIN_PROVIDER_LOGO_ASSETS: Readonly<Record<string, BuiltinProviderLogoA
   xai: { light: xAiLogo },
   openrouter: { light: openrouterLight, dark: openrouterDark },
   opencode: { light: opencodeLight, dark: opencodeDark },
+  "command-code": { light: commandCodeLight, dark: commandCodeDark },
 };
 
 function resolveBuiltinProviderLogoAsset(

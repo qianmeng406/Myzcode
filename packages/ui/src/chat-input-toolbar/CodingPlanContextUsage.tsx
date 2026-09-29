@@ -83,7 +83,7 @@ function formatContextFiveHourResetTime({
   }).format(resetAt);
 }
 
-function ChatCodingPlanUsageMeter({
+export function ChatCodingPlanUsageMeter({
   color,
   label,
   action,

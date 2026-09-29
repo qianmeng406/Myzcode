@@ -9,6 +9,7 @@ import type {
 } from "@zcode/shared";
 import {
   BUILTIN_MODEL_PROVIDER_IDS,
+  COMMAND_CODE_PROVIDER_GROUP,
   isStartPlanModelProviderId,
   resolveModelProviderFamilySpecByProviderId,
   resolveProviderFamilyDomainFromOAuthProvider,
@@ -177,6 +178,15 @@ export function useModelProviderNavigation({
     ],
   );
 
+  const commandCodeProviders = useMemo(
+    () =>
+      sortModelProvidersForDisplay(
+        modelProviders.filter((provider) => provider.config.group === COMMAND_CODE_PROVIDER_GROUP),
+        displayOrder,
+      ),
+    [displayOrder, modelProviders],
+  );
+
   const navigationGroups = useMemo<ModelProviderNavGroup[]>(() => {
     const groups: ModelProviderNavGroup[] = [
       {
@@ -210,6 +220,23 @@ export function useModelProviderNavigation({
           ...codingPlanItems.filter((item) => isStartPlanModelProviderId(item.presetId)),
         ],
       },
+      // 内置网关渠道单独成组：与智谱套餐渠道并列，但走 API Key 接入、不参与 OAuth/套餐逻辑。
+      // 目录未下发该渠道时不渲染空分组。
+      ...(commandCodeProviders.length > 0
+        ? [
+            {
+              id: "command-code" as const,
+              title: intl.formatMessage({ id: "settings.modelProvider.commandCodeTitle" }),
+              items: commandCodeProviders.map((provider) => ({
+                key: createCustomProviderNodeKey(provider.providerId),
+                type: "custom" as const,
+                label: getProviderFormLabel(provider),
+                provider,
+                statusActive: provider.executable === true,
+              })),
+            },
+          ]
+        : []),
       {
         id: "custom",
         title: intl.formatMessage({ id: "settings.modelProvider.customTitle" }),
@@ -226,6 +253,7 @@ export function useModelProviderNavigation({
     return groups;
   }, [
     customProviders,
+    commandCodeProviders,
     codingPlanItems,
     connectionModeCodingPlanItems,
     // 左侧导航分组标题在这个 memo 内格式化。

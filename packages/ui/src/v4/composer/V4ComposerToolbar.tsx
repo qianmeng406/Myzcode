@@ -18,6 +18,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BUILTIN_MODEL_PROVIDER_IDS,
+  COMMAND_CODE_PROVIDER_ID,
   getModelProviderFamilySpec,
   resolveModelProviderFamilySpecByProviderId,
   TID_V4_MODEL_CONFIG,
@@ -48,6 +49,11 @@ import {
   hasChatStartPlanBalance,
   type ChatStartPlanBalanceConfig,
 } from "@/chat-input-toolbar/StartPlanContextBalance.js";
+import type { ChatCommandCodeQuotaConfig } from "@/chat-input-toolbar/CommandCodeContextQuota.js";
+import { usePlatform } from "@/hooks/usePlatform.js";
+import { requestEmbeddedBrowserOpen } from "@/lib/embeddedBrowserOpenBridge.js";
+import { resolveGatewayDashboardUrl } from "@/settings/model-provider-section/gatewayQuota.js";
+import { useGatewayQuota } from "@/settings/model-provider-section/useGatewayQuota.js";
 import { ThoughtLevelCycleControl } from "@/chat-input-toolbar/ThoughtLevelCycleControl.js";
 import { getNextThoughtLevelValue } from "@/chat-input-toolbar/thoughtLevelOptions.js";
 import type { V4ComposerConfigPicker } from "@/v4/composer/configPickerState.js";
@@ -718,6 +724,66 @@ function V4ComposerModelControlsImpl({
       ? codingPlanUsageRemainingConfig
       : undefined;
 
+  // Command Code 渠道的额度：只有当前选中的模型属于该渠道时才进入弹层。
+  // 额度按渠道自己填的 key 查询（网关 /v1/usage 的 Bearer 鉴权），因此同一渠道换 key
+  // 会看到另一个账号的额度，不会串号。
+  const commandCodeProviderEntry = useMemo(
+    () =>
+      effectiveConfig?.provider === COMMAND_CODE_PROVIDER_ID
+        ? (providerSettingsView?.providers.find(
+            (entry) => entry.providerId === COMMAND_CODE_PROVIDER_ID,
+          ) ?? null)
+        : null,
+    [effectiveConfig?.provider, providerSettingsView],
+  );
+  const commandCodeBaseUrl = commandCodeProviderEntry?.effectiveConfig.api?.baseUrl ?? "";
+  const commandCodeApiKey = useMemo(() => {
+    const access = commandCodeProviderEntry?.effectiveConfig.access;
+    return isApiKeyAccess(access) ? (access.apiKey ?? "") : "";
+  }, [commandCodeProviderEntry]);
+  // 没有选中该渠道时 baseUrl/key 为空串，hook 自身不下发请求（idle）。
+  const commandCodeQuotaView = useGatewayQuota({
+    baseUrl: commandCodeBaseUrl,
+    apiKey: commandCodeApiKey,
+  });
+  const commandCodeDashboardUrl = resolveGatewayDashboardUrl(commandCodeBaseUrl);
+  const platform = usePlatform();
+  const handleOpenCommandCodeDashboard = useCallback(() => {
+    if (!commandCodeDashboardUrl) {
+      return;
+    }
+    // 与设置页额度卡一致：优先内置浏览器（面板带登录态），无 Browser 面板时退回系统浏览器。
+    if (requestEmbeddedBrowserOpen(commandCodeDashboardUrl)) {
+      return;
+    }
+    platform.openExternal(commandCodeDashboardUrl);
+  }, [commandCodeDashboardUrl, platform]);
+  const commandCodeQuotaConfig = useMemo<ChatCommandCodeQuotaConfig | undefined>(() => {
+    // 渠道还没填 key 时不挂载：此时额度无从查询，挂上去只会在弹层里留一段空读数。
+    if (!commandCodeProviderEntry || !commandCodeApiKey) {
+      return undefined;
+    }
+    return {
+      loading: commandCodeQuotaView.status === "loading",
+      limits: commandCodeQuotaView.limits,
+      readings: commandCodeQuotaView.readings,
+      status: commandCodeQuotaView.status,
+      error: commandCodeQuotaView.errorMessage,
+      onAccess: commandCodeQuotaView.refresh,
+      ...(commandCodeDashboardUrl ? { onOpenDashboard: handleOpenCommandCodeDashboard } : {}),
+    };
+  }, [
+    commandCodeApiKey,
+    commandCodeDashboardUrl,
+    commandCodeProviderEntry,
+    commandCodeQuotaView.errorMessage,
+    commandCodeQuotaView.limits,
+    commandCodeQuotaView.readings,
+    commandCodeQuotaView.refresh,
+    commandCodeQuotaView.status,
+    handleOpenCommandCodeDashboard,
+  ]);
+
   // 高频交互排障只走 debug，避免生产日志量随每次选择增长。
   useEffect(() => {
     if (!draftMode) return;
@@ -1014,6 +1080,7 @@ function V4ComposerModelControlsImpl({
         codingPlanUsageRemaining={codingPlanUsageRemaining}
         taskUsage={taskUsage}
         startPlanBalance={contextStartPlanBalance}
+        commandCodeQuota={commandCodeQuotaConfig}
         selectedProvider={displayProvider}
         intl={intl}
         locale={locale}

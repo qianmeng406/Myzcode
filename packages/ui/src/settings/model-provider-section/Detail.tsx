@@ -3,6 +3,7 @@ import { useCodingPlanEntryGate } from "@/settings/CodingPlanEntryButton.js";
 import {
   BIGMODEL_PROVIDER_ID,
   BUILTIN_MODEL_PROVIDER_IDS,
+  COMMAND_CODE_PROVIDER_ID,
   ZAI_PROVIDER_ID,
   type BuiltinModelProviderId,
   type ProviderFamilyConnectionSelectionSettings,
@@ -17,6 +18,7 @@ import {
   getProviderFormApiKeyManagementUrl,
   type ProviderSettingsFormProvider,
 } from "@/lib/providerSettingsFormTypes.js";
+import { isApiKeyAccess } from "@zcode/provider";
 import { ArrowRightIcon, AstroidIcon, UsersIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -26,6 +28,7 @@ import {
   type ModelProviderNavItem,
 } from "./constants.js";
 import { InlineEditableProviderCard } from "./InlineEditableProviderCard.js";
+import { GatewayQuotaCard } from "./GatewayQuotaCard.js";
 import {
   ModelProviderLoadingCard,
   PresetProviderPlaceholderCard,
@@ -840,6 +843,32 @@ export function ModelProviderSectionDetail({
   const customApiKeyUrl = customProvider.templateId
     ? getProviderFormApiKeyManagementUrl(customProvider)
     : undefined;
+
+  // 内置网关渠道：名称与地址由内置目录下发，用户只填 Key；额度卡片按该 Key 查询。
+  // 不能走下面的自定义分支——那里的"可改名/可删除/可改地址"对内置渠道都是错的。
+  if (customProvider.providerId === COMMAND_CODE_PROVIDER_ID) {
+    return (
+      <InlineEditableProviderCard
+        provider={customProvider}
+        onSave={onSave}
+        {...modelEditingProps}
+        onTestModel={onTestModel}
+        readOnlyEndpoints
+        nameEditable={false}
+        statusSupplement={
+          <GatewayQuotaCard
+            baseUrl={customProvider.config.api?.baseUrl ?? ""}
+            apiKey={
+              isApiKeyAccess(customProvider.config.access)
+                ? (customProvider.config.access.apiKey ?? "")
+                : ""
+            }
+          />
+        }
+      />
+    );
+  }
+
   return (
     // 仅展示预设模板声明的入口，不根据地址猜测自定义 Provider 的 Key 控制台。
     <InlineEditableProviderCard
