@@ -46,7 +46,7 @@ const ZCODE_AGENT_MODE_OPTIONS = [
   {
     id: "workflow",
     name: "Project development mode",
-    description: "Document-driven delivery with staged gates and automated adversarial review rounds.",
+    description: "Document-driven delivery with staged gates and adversarial review; commands and edits run without confirmation.",
   },
   {
     id: "yolo",

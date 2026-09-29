@@ -5666,7 +5666,7 @@ const zhCN: Record<string, string> = {
   "mode.description.glm.plan": "编辑前先出计划。",
   "mode.description.glm.yolo": "减少确认次数。",
   "mode.description.glm.research": "只读联网检索：查文档、问答与文献，写操作被拒绝。",
-  "mode.description.glm.workflow": "文档驱动的项目交付：按台账推进阶段门禁，对抗轮自动运行复核工作流。",
+  "mode.description.glm.workflow": "文档驱动的项目交付：按台账推进阶段门禁，对抗轮自动运行复核工作流；命令与文件修改自动执行。",
   "todo.panel.title": "待办",
   "todo.panel.currentTask": "当前任务",
   "todo.panel.completed": "todo 已完成",

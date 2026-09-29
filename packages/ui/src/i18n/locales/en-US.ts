@@ -5917,7 +5917,7 @@ const enUS: Record<string, string> = {
   "mode.description.glm.plan": "Plan before editing.",
   "mode.description.glm.yolo": "Run with fewer confirmations.",
   "mode.description.glm.research": "Read-only web research; edits and commands are denied.",
-  "mode.description.glm.workflow": "Document-driven delivery with staged gates and automated adversarial review.",
+  "mode.description.glm.workflow": "Document-driven delivery with staged gates and automated adversarial review; commands and edits run without confirmation.",
   "todo.panel.title": "Todo",
   "todo.panel.currentTask": "Current task",
   "todo.panel.completed": "Todo completed",

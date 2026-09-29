@@ -35,6 +35,9 @@ test("workflow mode emits the full SOP on the first reminder", () => {
   assert.ok(body!.includes("接手盘点"));
   assert.ok(body!.includes("不要从零重做"));
   assert.ok(body!.includes("代码能跑 ≠ 已通过"));
+  // 权限语义：等同完全访问（自动执行），破坏性操作仍先说明。
+  assert.ok(body!.includes("权限等同「完全访问」"));
+  assert.ok(body!.includes("破坏性操作"));
 });
 
 test("workflow mode throttles like research mode within 5 human turns", () => {

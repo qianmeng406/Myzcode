@@ -133,8 +133,17 @@ export class PermissionService {
     }
 
     const planEnabled = context.planEnabled ?? context.mode === "plan";
-    if (context.mode === "yolo" && !planEnabled) {
-      return this.allow(context, capability, "mode.yolo", "Yolo mode bypasses permission prompts");
+    // workflow（项目开发模式）与 yolo 同级：交付流程按台账推进，命令与文件修改自动执行、
+    // 不逐次确认（纪律由 workflow reminder 承担）。ruleId 分开记，审计能区分两种来源。
+    if ((context.mode === "yolo" || context.mode === "workflow") && !planEnabled) {
+      return this.allow(
+        context,
+        capability,
+        context.mode === "workflow" ? "mode.workflow" : "mode.yolo",
+        context.mode === "workflow"
+          ? "Workflow mode executes commands and edits without per-action prompts"
+          : "Yolo mode bypasses permission prompts",
+      );
     }
 
     if (context.mode === "auto") {
@@ -180,9 +189,6 @@ export class PermissionService {
     if (context.mode === "research") {
       return this.checkResearchMode(context, capability);
     }
-
-    // workflow（项目开发模式）模式刻意不设专门分支：交付流程需要正常的读写权限，
-    // 直接落到链尾 checkBuildMode（读放行、写/命令按风险确认），纪律由 reminder 驱动。
 
     if (this.matchesProjectRules(projectRules, "allow", context, capability, rulePolicy)) {
       return this.allow(
