@@ -358,7 +358,7 @@ export interface SessionPaneProps {
   /** 通知行的产物 chip → 全尺寸查看 tab。 */
   onOpenWorkflowArtifact?: (request: OpenScopedWorkflowArtifactSideTabRequest) => void;
   onOpenWorkflowRunDirectory?: (request: OpenScopedWorkflowRunDirectorySideTabRequest) => void;
-  /** composer「工作流」标记 chip → 标准工作流阶段侧栏 tab。 */
+  /** composer「工作流」标记 chip → 项目开发模式阶段侧栏 tab。 */
   onOpenWorkflowStage?: (request: OpenScopedWorkflowStageSideTabRequest) => void;
   /** 工具卡上的子代理药丸 → transcript tab；与详情页子代理行同一个宿主处理器。 */
   onOpenWorkflowActorSession?: (request: OpenScopedWorkflowActorSessionSideTabRequest) => void;

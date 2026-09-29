@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** auto 保留为内部权限；plan 仅在旧格式读取边界接受；research 为只读资料查询模式；
- * workflow 为标准工作流交付模式（权限同 build，靠 reminder 驱动台账/阶段/对抗轮纪律）。 */
+ * workflow 为项目开发模式（标准工作流交付流程，权限同 build，靠 reminder 驱动台账/阶段/对抗轮纪律）。 */
 export const executionPermissionModeSchema = z.enum([
   "build",
   "edit",

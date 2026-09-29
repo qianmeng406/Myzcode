@@ -989,7 +989,7 @@ export function useAppPanels(options: {
           workspaceKey,
         }),
       );
-      logger.debug("[App] 打开标准工作流阶段右侧 tab", {
+      logger.debug("[App] 打开项目开发模式阶段右侧 tab", {
         parentSessionId: request.parentSessionId,
         workspaceKey,
       });

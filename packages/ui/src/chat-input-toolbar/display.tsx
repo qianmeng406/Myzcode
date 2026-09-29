@@ -215,7 +215,7 @@ export function resolveModeOptionIcon(value: unknown): LucideIcon {
   if (typeof value === "string" && value.toLocaleLowerCase() === "plan") return NotepadText;
   // research（资料查询）：只读检索语义，用望远镜与 plan 的记事本区分。
   if (typeof value === "string" && value.toLocaleLowerCase() === "research") return Telescope;
-  // workflow（标准工作流）：台账/检查单驱动的交付流程，用清单勾选图标。
+  // workflow（项目开发模式）：台账/检查单驱动的交付流程，用清单勾选图标。
   if (typeof value === "string" && value.toLocaleLowerCase() === "workflow") return ListChecks;
 
   if (typeof value === "string" && /^(auto|agent|autoEdit|edit)$/i.test(value)) {

@@ -26,7 +26,7 @@ function modeReminder(): RuntimeMessageEntry {
 test("workflow mode emits the full SOP on the first reminder", () => {
   const body = buildRuntimeModeReminderBody([], "workflow");
   assert.ok(body);
-  assert.ok(body!.includes("# 标准工作流模式"));
+  assert.ok(body!.includes("# 项目开发模式"));
   assert.ok(body!.includes("workflow/工作台账.md"));
   assert.ok(body!.includes("wf-fe-acceptance"));
   assert.ok(body!.includes("wf-adversarial-audit"));
@@ -51,8 +51,8 @@ test("workflow mode alternates to the sparse reminder when eligible", () => {
   ];
   const body = buildRuntimeModeReminderBody(entries, "workflow");
   assert.ok(body);
-  assert.ok(!body!.includes("# 标准工作流模式"));
-  assert.ok(body!.includes("标准工作流模式仍处于激活状态"));
+  assert.ok(!body!.includes("# 项目开发模式"));
+  assert.ok(body!.includes("项目开发模式仍处于激活状态"));
 });
 
 test("workflow mode cycles back to the full SOP every 5th attachment", () => {
@@ -72,7 +72,7 @@ test("workflow mode cycles back to the full SOP every 5th attachment", () => {
   const entries = [...fullAgain, ...Array.from({ length: 5 }, () => humanTurn())];
   const body = buildRuntimeModeReminderBody(entries, "workflow");
   assert.ok(body);
-  assert.ok(body!.includes("# 标准工作流模式"));
+  assert.ok(body!.includes("# 项目开发模式"));
 });
 
 test("research and plan modes are unaffected by the workflow branch", () => {

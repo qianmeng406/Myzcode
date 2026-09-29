@@ -220,7 +220,7 @@ function V4ComposerModeSwitchImpl({
         </span>
       )}
       {workflowStageActive && onOpenWorkflowStage ? (
-        // 标准工作流模式激活时的阶段面板入口：chip 只负责打开侧栏（与 plan chip 的
+        // 项目开发模式模式激活时的阶段面板入口：chip 只负责打开侧栏（与 plan chip 的
         // 「点击退出」不同，这里点击是导航而不是切模式——退出走模式下拉）。
         <span data-testid="v4-composer-workflow-marker" className="flex items-center gap-1">
           <span

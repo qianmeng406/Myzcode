@@ -285,7 +285,7 @@ export interface OpenWorkflowRunDirectorySideTabRequest {
 }
 
 /**
- * 标准工作流（workflow mode）的阶段进度 tab：读 `workflow/工作台账.md`，渲染 W0→W11
+ * 项目开发模式（workflow mode）的阶段进度 tab：读 `workflow/工作台账.md`，渲染 W0→W11
  * 阶段条与台账正文。
  *
  * 身份是 **对话**（同 workflow-directory）：一条对话只有一个项目台账，composer 的
@@ -1881,7 +1881,7 @@ export function openWorkflowRunDirectorySidePane(
 }
 
 /**
- * 打开或复用一条对话的标准工作流阶段 tab（身份与复用语义同 workflow-directory）。
+ * 打开或复用一条对话的项目开发模式阶段 tab（身份与复用语义同 workflow-directory）。
  * tab 不带台账数据：面板每次挂载自己读 `workflow/工作台账.md`，所以没有该回收的过期状态。
  */
 export function openWorkflowStageSidePane(

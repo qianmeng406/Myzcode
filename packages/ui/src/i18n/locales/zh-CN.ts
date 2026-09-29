@@ -891,7 +891,7 @@ const zhCN: Record<string, string> = {
   "sidePane.selectionChat": "辅助对话",
   "sidePane.workflowRun": "工作流实例",
   "sidePane.workflowDirectory": "工作流目录",
-  "sidePane.workflowStage": "标准工作流",
+  "sidePane.workflowStage": "项目开发模式",
   "sidePane.workflowActor": "工作流子代理",
   "sidePane.workflowScript": "脚本步骤",
   "sidePane.workflowArtifact": "产物",
@@ -915,8 +915,8 @@ const zhCN: Record<string, string> = {
   // 页脚行刻意是「已结束的工作流」而不是「已完成」：这个桶里也有失败与取消的 run，
   // 而恰恰是它们最值得回去看（可恢复的那些）。
   "chat.statusPanel.endedWorkflows": "已结束的工作流",
-  // 标准工作流（workflow mode）阶段侧栏：读 workflow/工作台账.md，渲染 W0→W11 阶段条。
-  "workflow.stagePane.title": "标准工作流",
+  // 项目开发模式（workflow mode）阶段侧栏：读 workflow/工作台账.md，渲染 W0→W11 阶段条。
+  "workflow.stagePane.title": "项目开发模式",
   "workflow.stagePane.refresh": "刷新台账",
   "workflow.stagePane.openMarker": "查看阶段进度",
   "workflow.stagePane.mainLane": "主线",
@@ -927,7 +927,7 @@ const zhCN: Record<string, string> = {
   "workflow.stagePane.noneAdversarial": "对抗轮已全部过去",
   "workflow.stagePane.unknownStage": "台账标记「{stage}」不在已知阶段集合内，以下不做先后推断。",
   "workflow.stagePane.noMarker": "台账中未找到阶段标记行（<!-- std-workflow v1 stage:… -->），以下为台账原文。",
-  "workflow.stagePane.empty": "未找到 workflow/工作台账.md。在「标准工作流」模式下发送消息，助手会从 W0 开始建立台账。",
+  "workflow.stagePane.empty": "未找到 workflow/工作台账.md。在「项目开发模式」下发送消息，助手会从 W0 开始建立台账。",
   "workflow.stagePane.readError": "台账读取失败（可能是远程工作区或权限问题），可点击右上角刷新重试。",
   "workflowDirectory.title": "工作流实例",
   "workflowDirectory.running": "正在运行",
@@ -5654,13 +5654,13 @@ const zhCN: Record<string, string> = {
 
   // 模式
   "mode.plan": "计划",
-  "mode.workflow": "工作流",
+  "mode.workflow": "项目开发",
   "mode.label.glm.build": "变更前确认",
   "mode.label.glm.edit": "自动编辑",
   "mode.label.glm.plan": "计划模式",
   "mode.label.glm.yolo": "完全访问",
   "mode.label.glm.research": "资料查询",
-  "mode.label.glm.workflow": "标准工作流",
+  "mode.label.glm.workflow": "项目开发模式",
   "mode.description.glm.build": "改文件前先问我。",
   "mode.description.glm.edit": "自动编辑文件。",
   "mode.description.glm.plan": "编辑前先出计划。",

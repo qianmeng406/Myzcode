@@ -431,7 +431,7 @@ interface ConversationComposerProps {
   onSwitchMode: (mode: string) => void;
   /** 打开当前 session 的 Status panel，并直达 Running 明细。 */
   onOpenRunningBackgroundWorks?: () => void;
-  /** live 模式为 workflow 时打开标准工作流阶段侧栏；scope（会话/workspace）由宿主组装。 */
+  /** live 模式为 workflow 时打开项目开发模式阶段侧栏；scope（会话/workspace）由宿主组装。 */
   onOpenWorkflowStage?: () => void;
   /**
    * 后台任务入口点击的落点：`"workflow-run"` = 唯一在跑的工作流直达详情页（宿主判定），

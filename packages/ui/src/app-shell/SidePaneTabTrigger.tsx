@@ -280,7 +280,7 @@ export function SidePaneTabIcon({ tab }: { tab: WorkspaceSidePaneTab }) {
   if (tab.type === "workflow-directory") {
     return <ListTreeIcon className="size-3.5" />;
   }
-  // 标准工作流阶段页与模式下拉同一枚字形（ListChecks，display.tsx 的 workflow 模式图标）：
+  // 项目开发模式阶段页与模式下拉同一枚字形（ListChecks，display.tsx 的 workflow 模式图标）：
   // 它是「模式状态的可视化」，来源与 tab 一致，点开不跳变。注意与 plan-detail 注释相反，
   // 这里刻意避开与 Todo 撞形的顾虑——模式图标优先复用。
   if (tab.type === "workflow-stage") {

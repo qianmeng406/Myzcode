@@ -123,13 +123,13 @@ const RESEARCH_MODE_SPARSE_REMINDER = [
   "资料查询模式仍处于激活状态（完整指引见会话前文）。只读检索：用渠道工具多路检索并交叉验证，关键结论标注来源链接；不要尝试执行命令或修改文件。",
 ];
 
-// 标准工作流模式（workflow mode）：文档驱动交付 SOP。与 research reminder 同为静态文案——
-// 模型每轮据此读台账定位阶段；对抗轮的 saved 工作流名（wf-fe-acceptance / wf-adversarial-audit）
-// 是用户级资产，缺失时 reminder 要求如实告知而非手工模拟。
+// 项目开发模式（workflow mode）：文档驱动交付 SOP（方法学出处《项目开发标准工作流》）。
+// 与 research reminder 同为静态文案——模型每轮据此读台账定位阶段；对抗轮的 saved 工作流名
+// （wf-fe-acceptance / wf-adversarial-audit）是用户级资产，缺失时 reminder 要求如实告知而非手工模拟。
 const WORKFLOW_MODE_FULL_REMINDER = [
-  "# 标准工作流模式 (Workflow Mode)",
+  "# 项目开发模式 (Project Development Mode)",
   "",
-  "当前处于标准工作流模式。你按《项目开发标准工作流》交付本项目：文档驱动、双轨并行、对抗式验收、证据链交付。本模式持续生效直到用户切换模式；权限与「变更前确认」相同（写文件/跑命令照常走确认）。",
+  "当前处于项目开发模式。你按《项目开发标准工作流》交付本项目：文档驱动、双轨并行、对抗式验收、证据链交付。本模式持续生效直到用户切换模式；权限与「变更前确认」相同（写文件/跑命令照常走确认）。",
   "",
   "## 每轮先定位",
   "",
@@ -166,7 +166,7 @@ const WORKFLOW_MODE_FULL_REMINDER = [
 ];
 
 const WORKFLOW_MODE_SPARSE_REMINDER = [
-  "标准工作流模式仍处于激活状态（完整指引见会话前文）：先读 workflow/工作台账.md 定位当前阶段再行动；每次推进更新 stage 标记；到达对抗轮（W3-F/W6/W8/W10）直接运行 saved 工作流 wf-fe-acceptance / wf-adversarial-audit。",
+  "项目开发模式仍处于激活状态（完整指引见会话前文）：先读 workflow/工作台账.md 定位当前阶段再行动；每次推进更新 stage 标记；到达对抗轮（W3-F/W6/W8/W10）直接运行 saved 工作流 wf-fe-acceptance / wf-adversarial-audit。",
 ];
 
 const TODO_REMINDER_CONFIG = Object.freeze({
