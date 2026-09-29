@@ -5680,6 +5680,8 @@ const zhCN: Record<string, string> = {
   "mode.label.glm.yolo": "完全访问",
   "mode.label.glm.research": "资料查询",
   "mode.label.glm.workflow": "项目开发模式",
+  "mode.label.glm.minimal": "极简模式",
+  "mode.label.glm.zcodeUpdate": "ZCode 更新模式",
   "mode.description.glm.build": "改文件前先问我。",
   "mode.description.glm.edit": "自动编辑文件。",
   "mode.description.glm.plan": "编辑前先出计划。",
@@ -5687,6 +5689,10 @@ const zhCN: Record<string, string> = {
   "mode.description.glm.research": "只读联网检索：查文档、问答与文献，写操作被拒绝。",
   "mode.description.glm.workflow":
     "文档驱动的项目交付：按台账推进阶段门禁，对抗轮自动运行复核工作流；命令与文件修改自动执行。",
+  "mode.description.glm.minimal":
+    "只下发系统工具与最小上下文：保留身份行与工作目录，去掉技能、记忆、项目指令与 MCP 工具。",
+  "mode.description.glm.zcodeUpdate":
+    "跟进官方发版：取每个版本的 diff、判定相关性、以本地改动落地并跑门禁验收；命令与文件修改自动执行。",
   "todo.panel.title": "待办",
   "todo.panel.currentTask": "当前任务",
   "todo.panel.completed": "todo 已完成",

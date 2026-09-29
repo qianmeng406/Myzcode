@@ -182,6 +182,54 @@ const WORKFLOW_MODE_SPARSE_REMINDER = [
   "项目开发模式仍处于激活状态（完整指引见会话前文）：先读 workflow/工作台账.md 定位当前阶段再行动（无台账的存量项目先接手盘点，不要从零重做）；每次推进更新 stage 标记；到达对抗轮（W3-F/W6/W8/W10）直接运行 saved 工作流 wf-fe-acceptance / wf-adversarial-audit。",
 ];
 
+// ZCode 更新模式（zcodeUpdate）：跟进官方发版的 SOP，四阶段固定，逐版本一条台账记录。
+// 与 workflow reminder 同为静态文案。最关键的一条约束：连不通上游时必须停在盘点阶段并
+// 明确报「代理未就绪」——拿不到 diff 就不许继续，更不许凭印象描述官方改了什么。
+const ZCODE_UPDATE_MODE_FULL_REMINDER = [
+  "# ZCode 更新模式 (ZCode Update Mode)",
+  "",
+  "当前处于 ZCode 更新模式。目标：跟进官方 ZCode 的每个版本，把**与本地二次开发相关**的改动以本地改动的方式落地并验收。本模式持续生效直到用户切换模式；权限等同「完全访问」：命令与文件修改自动执行、不再逐次确认——纪律全靠本指引与台账。破坏性操作（`git reset --hard`、清理未提交改动、强推）执行前仍先向用户说明。",
+  "",
+  "## 每轮先定位",
+  "",
+  "1. 读 `zcode-update/更新台账.md`（含机器标记行 `<!-- zcode-update v1 stage:S1 -->`，stage 取 S1/S2/S3/S4）。",
+  "2. 有台账 → 从未完成条目续接，不重跑已分析完的版本。",
+  "3. 无台账 → 从 S1 开始；S1 的首个产出就是把台账建起来。",
+  "4. 回复第一行用【Sx 阶段名】标注当前阶段。",
+  "",
+  "## S1 盘点（先验连通性，不通就停）",
+  "",
+  "1. `git ls-remote --tags origin` 验连通。**失败即停**：明确报「代理未就绪」并给出待办（配置 `git config --global http.proxy` 或代理环境变量后重试）。绝不在拿不到 diff 的情况下继续，更不许凭印象描述官方改了什么——那是编造。",
+  "2. `git fetch origin --tags` 拉取远端（只更新远端引用，不动工作区）。禁止 `git pull` / `git merge` 官方分支。",
+  "3. 列出本地基线到上游之间的版本清单（tag 与提交区间），连同当前 HEAD 一起写进台账。",
+  "",
+  "## S2 逐版本 diff 分析",
+  "",
+  "对清单里每个版本：`git diff <prev>..<next> --stat` 先看规模，再按需取全文。按层归类：内置目录/provider 目录、桌面 UI、agent-core、协议枚举、构建与脚本、依赖。逐条判定**相关性**：",
+  "- 与本地已改文件是否重叠（重叠即将来 rebase 的冲突源，必须标出来）；",
+  "- 是否修了本地也踩过的问题（例如 provider 目录 revision 覆盖、打包缺少必需配置）；",
+  "- 是否影响本地已交付的功能（Command Code 渠道、极简模式、本模式自身）。",
+  "",
+  "## S3 落地（重写成本地改动，不直接套用官方提交）",
+  "",
+  "对判定相关的条目：用本地改动实现，**不 cherry-pick、不 merge**（避免把官方提交历史与冲突带进来）。每条记录「官方改动 → 本地实现方式 → 涉及文件」。判定不相关的条目只记「不相关 + 理由」，不动代码。",
+  "",
+  "## S4 验收",
+  "",
+  "跑门禁：`pnpm typecheck`、`pnpm exec oxlint`、`pnpm exec oxfmt --check`、`pnpm architecture:check -- --changed`、相关单测；必要时重新 bundle 并验包内容。逐条勾销台账；门禁不过不许标记完成，也不许用「门禁通过」冒充「功能正确」。",
+  "",
+  "## 台账与边界",
+  "",
+  "台账 `zcode-update/更新台账.md`：每个版本一节（版本号 / 提交区间 / 分析结论 / 落地项与文件 / 门禁结果）。",
+  "- 只动本次相关文件；不 push；不改与本次无关的代码。",
+  "- 上游改动与本地实现冲突且无法判定时上报，不要硬合并——这种取舍需要用户拍板。",
+  "- 不伪造分析结论与门禁结果；拿不到 diff 就如实说拿不到。",
+];
+
+const ZCODE_UPDATE_MODE_SPARSE_REMINDER = [
+  "ZCode 更新模式仍处于激活状态（完整指引见会话前文）：先读 zcode-update/更新台账.md 定位阶段（S1 盘点 / S2 分析 / S3 落地 / S4 验收）；S1 必须先 `git ls-remote` 验连通、失败即停并报「代理未就绪」，不许凭印象编造官方改动；只把相关改动重写成本地补丁，不 merge 官方分支、不 push。",
+];
+
 const TODO_REMINDER_CONFIG = Object.freeze({
   TURNS_SINCE_WRITE: 10,
   TURNS_BETWEEN_REMINDERS: 10,
@@ -293,7 +341,11 @@ export function buildRuntimeModeReminderBody(
   // 此时权限真值是 plan 只读——必须给 plan 指引而不是宣称「完全访问」的 SOP，否则模型
   // 会按全权行事、每条命令被拒。所以 workflow 分支显式排除 planEnabled。
   const workflowEnabled = mode === "workflow" && !planEnabled;
-  if (!planEnabled && !researchEnabled && !workflowEnabled) return null;
+  // zcodeUpdate 与 workflow 同理：同样宣称全权，同样必须让位给 plan 只读指引。
+  const zcodeUpdateEnabled = mode === "zcodeUpdate" && !planEnabled;
+  // 极简模式**刻意不给任何 reminder**：它的定义就是不发注入，多一条模式提醒就自相矛盾。
+  // 若将来要给它加提醒，先确认那不与「极简」的语义冲突。
+  if (!planEnabled && !researchEnabled && !workflowEnabled && !zcodeUpdateEnabled) return null;
 
   const { foundRuntimeModeReminder, humanTurnsSinceReminder } =
     getRuntimeModeReminderTurnCount(entries);
@@ -311,6 +363,11 @@ export function buildRuntimeModeReminderBody(
   }
   if (workflowEnabled) {
     return (isFirstReminder ? WORKFLOW_MODE_FULL_REMINDER : WORKFLOW_MODE_SPARSE_REMINDER).join("\n");
+  }
+  if (zcodeUpdateEnabled) {
+    return (
+      isFirstReminder ? ZCODE_UPDATE_MODE_FULL_REMINDER : ZCODE_UPDATE_MODE_SPARSE_REMINDER
+    ).join("\n");
   }
   const reminderLines = isFirstReminder
     ? PLAN_MODE_FULL_REMINDER

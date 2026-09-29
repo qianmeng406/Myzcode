@@ -233,10 +233,14 @@ function normalizeCronAutomationMode(
     case "yolo":
     case "build":
       return mode;
-    // 定时自动化无人值守，research（只读资料查询）与 workflow（交互式交付 SOP，
-    // 依赖用户逐阶段确认与台账纪律）都不是合法的自动化形态，归位 build。
+    // 定时自动化无人值守，research（只读资料查询）、workflow（交互式交付 SOP，
+    // 依赖用户逐阶段确认与台账纪律）与 zcodeUpdate（跟进官方发版，冲突取舍必须用户拍板）
+    // 都不是合法的自动化形态，归位 build。minimal（极简上下文）权限姿态本就等同 build，
+    // 自动化侧没有对等档位，同样归位 build。
     case "research":
     case "workflow":
+    case "zcodeUpdate":
+    case "minimal":
     case "auto":
     case "autoEdit":
       return "build";

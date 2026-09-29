@@ -121,6 +121,15 @@ export interface ContextBuilderConfig {
    * 而不是像 `customSystemPrompt` 那样整段替换。与 `customSystemPrompt` 互斥。
    */
   workflowActor?: WorkflowActorContext;
+  /**
+   * 提示词档位。`minimal` 只下发身份行 + 环境（工作目录/平台），
+   * 其余段（身份行为、desktop context、session guidance、memory、output style、
+   * context management、git、skills、workspace instructions、当前日期）与 meta_user
+   * 附件全部不发；工具说明本就由 model request 的 tools 字段承载，不在 system 段内。
+   * 缺省即 `default`。仅极简模式使用；与 `customSystemPrompt` / `workflowActor` 不同路径，
+   * 三者同时在场属于接线错误，builder 会大声失败。
+   */
+  promptProfile?: "default" | "minimal";
   language?: string;
   outputStyle?: OutputStylePromptConfig;
   compact?: AutoCompactPolicyConfig;

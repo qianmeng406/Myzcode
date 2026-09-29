@@ -27,7 +27,7 @@ export type TuiSessionMetadata = Pick<
 
 export type TuiSwitchableMode = Extract<
   CollaborationMode,
-  "plan" | "build" | "edit" | "yolo" | "research" | "workflow"
+  "plan" | "build" | "edit" | "yolo" | "research" | "workflow" | "minimal" | "zcodeUpdate"
 >;
 
 export type TuiSetModeResult = {

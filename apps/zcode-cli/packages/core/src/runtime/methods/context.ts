@@ -135,6 +135,8 @@ export function createContextBuilderFromSnapshot(
     skillMetadataBudget: this.config.skillMetadataBudget,
     customSystemPrompt: this.config.systemPrompt,
     workflowActor: this.config.workflowActor,
+    // 极简模式：system 段只留身份行与环境，见 ContextBuilder 的 promptProfile 分支。
+    promptProfile: this.config.mode === "minimal" ? "minimal" : undefined,
     language: this.config.language,
     outputStyle: this.config.outputStyle,
     compact: this.config.compact,

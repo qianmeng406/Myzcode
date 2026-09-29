@@ -5933,6 +5933,8 @@ const enUS: Record<string, string> = {
   "mode.label.glm.yolo": "Full access",
   "mode.label.glm.research": "Research",
   "mode.label.glm.workflow": "Project development mode",
+  "mode.label.glm.minimal": "Minimal mode",
+  "mode.label.glm.zcodeUpdate": "ZCode update mode",
   "mode.description.glm.build": "Ask before file changes.",
   "mode.description.glm.edit": "Edit files automatically.",
   "mode.description.glm.plan": "Plan before editing.",
@@ -5940,6 +5942,10 @@ const enUS: Record<string, string> = {
   "mode.description.glm.research": "Read-only web research; edits and commands are denied.",
   "mode.description.glm.workflow":
     "Document-driven delivery with staged gates and automated adversarial review; commands and edits run without confirmation.",
+  "mode.description.glm.minimal":
+    "Send only the system tools with a bare identity line and working directory; no skills, memory, project instructions, or MCP tools.",
+  "mode.description.glm.zcodeUpdate":
+    "Track upstream releases: fetch each version's diff, judge relevance, re-implement locally, then verify; commands and edits run without confirmation.",
   "todo.panel.title": "Todo",
   "todo.panel.currentTask": "Current task",
   "todo.panel.completed": "Todo completed",

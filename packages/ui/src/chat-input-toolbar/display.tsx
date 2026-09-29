@@ -34,6 +34,8 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import {
   ChevronDownIcon,
+  Feather,
+  GitCompare,
   HandIcon,
   ListChecks,
   NotepadText,
@@ -202,8 +204,8 @@ function getConfigOptionEntryDescription(
 }
 
 function isHighPermissionModeValue(value: unknown): boolean {
-  // workflow 与 yolo 同为自动执行权限：旧工具栏的持续 warning 文字与盾牌语义要覆盖它。
-  return value === "yolo" || value === "workflow";
+  // yolo / workflow / zcodeUpdate 同为自动执行权限：旧工具栏的持续 warning 文字与盾牌语义要覆盖它们。
+  return value === "yolo" || value === "workflow" || value === "zcodeUpdate";
 }
 
 export function resolveModeOptionIcon(value: unknown): LucideIcon {
@@ -213,6 +215,10 @@ export function resolveModeOptionIcon(value: unknown): LucideIcon {
   if (typeof value === "string" && value.toLocaleLowerCase() === "research") return Telescope;
   // workflow（项目开发模式）：台账/检查单驱动的交付流程，用清单勾选图标。
   if (typeof value === "string" && value.toLocaleLowerCase() === "workflow") return ListChecks;
+  // minimal（极简模式）：只留工具与最小上下文，用羽毛表示「轻」。
+  if (typeof value === "string" && value.toLocaleLowerCase() === "minimal") return Feather;
+  // zcodeUpdate（更新模式）：逐版本 diff 对比，用差异对比图标。
+  if (typeof value === "string" && value.toLocaleLowerCase() === "zcodeupdate") return GitCompare;
 
   if (isHighPermissionModeValue(value)) {
     return ShieldAlertIcon;

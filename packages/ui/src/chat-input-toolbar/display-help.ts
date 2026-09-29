@@ -7,6 +7,8 @@ export const ZCODE_MODE_OPTION_LABEL_IDS: Record<ZCodeProvider, Record<string, s
     plan: "mode.label.glm.plan",
     research: "mode.label.glm.research",
     workflow: "mode.label.glm.workflow",
+    minimal: "mode.label.glm.minimal",
+    zcodeUpdate: "mode.label.glm.zcodeUpdate",
     yolo: "mode.label.glm.yolo",
   },
 };
@@ -18,6 +20,8 @@ export const ZCODE_MODE_OPTION_DESCRIPTION_IDS: Record<ZCodeProvider, Record<str
     plan: "mode.description.glm.plan",
     research: "mode.description.glm.research",
     workflow: "mode.description.glm.workflow",
+    minimal: "mode.description.glm.minimal",
+    zcodeUpdate: "mode.description.glm.zcodeUpdate",
     yolo: "mode.description.glm.yolo",
   },
 };

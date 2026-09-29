@@ -154,7 +154,9 @@ export type ZCodeTaskMode =
   | "autoEdit"
   | "build"
   | "research"
-  | "workflow";
+  | "workflow"
+  | "minimal"
+  | "zcodeUpdate";
 
 export type ZCodeOffPeakRunType = "init" | "resume";
 

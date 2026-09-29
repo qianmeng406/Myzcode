@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  executionPermissionModeSchema,
-  resolveExecutionState,
-} from "../src/execution-state.js";
+import { executionPermissionModeSchema, resolveExecutionState } from "../src/execution-state.js";
 import {
   deriveStdWorkflowStageStrip,
   parseStdWorkflowStageMarker,
@@ -37,14 +34,24 @@ test("resolveExecutionState still maps legacy plan to planEnabled", () => {
   assert.equal(state.planEnabled, true);
 });
 
+test("executionPermissionModeSchema accepts minimal and zcodeUpdate", () => {
+  assert.equal(executionPermissionModeSchema.safeParse("minimal").success, true);
+  assert.equal(executionPermissionModeSchema.safeParse("zcodeUpdate").success, true);
+});
+
+test("resolveExecutionState keeps the two new custom modes", () => {
+  const minimal = resolveExecutionState({ mode: "minimal" }, { mode: "build", planEnabled: false });
+  assert.deepEqual(minimal, { mode: "minimal", planEnabled: false });
+
+  const update = resolveExecutionState(
+    { mode: "zcodeUpdate" },
+    { mode: "build", planEnabled: false },
+  );
+  assert.deepEqual(update, { mode: "zcodeUpdate", planEnabled: false });
+});
+
 test("parseStdWorkflowStageMarker reads the canonical marker line", () => {
-  const text = [
-    "# 工作台账",
-    "",
-    "<!-- std-workflow v1 stage:W2-F -->",
-    "",
-    "## 记录",
-  ].join("\n");
+  const text = ["# 工作台账", "", "<!-- std-workflow v1 stage:W2-F -->", "", "## 记录"].join("\n");
   assert.deepEqual(parseStdWorkflowStageMarker(text), { version: 1, stage: "W2-F" });
 });
 
@@ -128,8 +135,14 @@ test("deriveStdWorkflowStageStrip treats tracks as done once the main line reach
       ["W11", "pending"],
     ],
   );
-  assert.equal(strip.frontend.every((entry) => entry.state === "done"), true);
-  assert.equal(strip.backend.every((entry) => entry.state === "done"), true);
+  assert.equal(
+    strip.frontend.every((entry) => entry.state === "done"),
+    true,
+  );
+  assert.equal(
+    strip.backend.every((entry) => entry.state === "done"),
+    true,
+  );
   assert.equal(strip.nextAdversarial?.stage, "W8");
 });
 
@@ -137,7 +150,10 @@ test("deriveStdWorkflowStageStrip degrades honestly on unknown stages", () => {
   const strip = deriveStdWorkflowStageStrip("W99");
   assert.equal(strip.known, false);
   assert.equal(strip.stage, "W99");
-  assert.equal(strip.main.every((entry) => entry.state === "pending"), true);
+  assert.equal(
+    strip.main.every((entry) => entry.state === "pending"),
+    true,
+  );
   // 未知阶段零推断：对抗轮口径同样缺席，不与「不做先后推断」横幅自相矛盾。
   assert.equal(strip.nextAdversarial, undefined);
   assert.equal(strip.adversarialInProgress, undefined);

@@ -71,6 +71,8 @@ const SWITCHABLE_MODES: ReadonlySet<string> = new Set([
   "yolo",
   "research",
   "workflow",
+  "minimal",
+  "zcodeUpdate",
 ]);
 
 /**

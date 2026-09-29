@@ -3279,6 +3279,10 @@ function toZCodeMode(mode: ZCodeTaskMode | undefined): ZCodeSessionMode | undefi
       return "research";
     case "workflow":
       return "workflow";
+    case "minimal":
+      return "minimal";
+    case "zcodeUpdate":
+      return "zcodeUpdate";
     case "build":
     case "autoEdit":
       return "build";

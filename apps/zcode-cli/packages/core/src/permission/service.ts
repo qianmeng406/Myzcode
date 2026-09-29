@@ -177,6 +177,19 @@ export class PermissionService {
       );
     }
 
+    // ZCode 更新模式：与 workflow 同一权限姿态——命令与文件修改自动执行、不逐次确认
+    // （纪律由 SOP reminder 与台账承担），同样**排在 disallowedTools 与项目 deny 之后**，
+    // 项目 ask 规则不生效。跟随官方发布要连续跑 git fetch/diff 与多轮改动，
+    // 逐次确认会让整条流程断在半途。
+    if (context.mode === "zcodeUpdate" && !planEnabled) {
+      return this.allow(
+        context,
+        capability,
+        "mode.zcodeUpdate",
+        "ZCode update mode executes commands and edits without per-action prompts",
+      );
+    }
+
     if (this.matchesProjectRules(projectRules, "ask", context, capability, rulePolicy)) {
       return this.ask(
         context,

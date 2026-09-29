@@ -46,7 +46,20 @@ const ZCODE_AGENT_MODE_OPTIONS = [
   {
     id: "workflow",
     name: "Project development mode",
-    description: "Document-driven delivery with staged gates and adversarial review; commands and edits run without confirmation.",
+    description:
+      "Document-driven delivery with staged gates and adversarial review; commands and edits run without confirmation.",
+  },
+  {
+    id: "minimal",
+    name: "Minimal mode",
+    description:
+      "Send only the system tools with a bare identity line and working directory; no skills, memory, project instructions, or MCP tools.",
+  },
+  {
+    id: "zcodeUpdate",
+    name: "ZCode update mode",
+    description:
+      "Track upstream ZCode releases: fetch each version's diff, judge relevance, re-implement locally, then verify.",
   },
   {
     id: "yolo",

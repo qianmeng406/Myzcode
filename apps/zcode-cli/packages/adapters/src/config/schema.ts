@@ -11,8 +11,11 @@ const modelStreamSchema = z.object({
 });
 
 const permissionSchema = z.object({
-  // 与 CliPermissionMode 同值域（CLI 接受 --mode research/workflow，配置文件必须同样能存）。
-  mode: z.enum(["plan", "build", "edit", "yolo", "auto", "research", "workflow"]).optional(),
+  // 与 CliPermissionMode 同值域（CLI 接受 --mode research/workflow/minimal/zcodeUpdate，
+  // 配置文件必须同样能存）。
+  mode: z
+    .enum(["plan", "build", "edit", "yolo", "auto", "research", "workflow", "minimal", "zcodeUpdate"])
+    .optional(),
   allowedTools: z.array(z.string()).optional(),
   disallowedTools: z.array(z.string()).optional(),
   autoApproveHighRisk: z.boolean().optional(),

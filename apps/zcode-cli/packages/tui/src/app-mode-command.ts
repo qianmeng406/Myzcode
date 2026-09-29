@@ -14,6 +14,10 @@ const MODE_DESCRIPTIONS: Record<TuiSwitchableMode, string> = {
   research: "Read-only web research; file edits and commands are denied.",
   workflow:
     "Document-driven delivery with staged gates and adversarial review; commands and edits run without confirmation.",
+  minimal:
+    "Send only the system tools with a bare identity line and working directory; no skills, memory, or MCP tools.",
+  zcodeUpdate:
+    "Track upstream ZCode releases: fetch each version's diff, judge relevance, re-implement locally, then verify.",
   yolo: "Edit and run commands with fewer confirmations.",
 };
 

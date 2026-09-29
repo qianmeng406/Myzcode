@@ -137,6 +137,8 @@ const STABLE_FORK_MODES = new Set<CollaborationMode>([
   "auto",
   "research",
   "workflow",
+  "minimal",
+  "zcodeUpdate",
 ]);
 
 function stableForkMode(value: string, fallback: CollaborationMode): CollaborationMode {
