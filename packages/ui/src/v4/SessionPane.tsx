@@ -231,6 +231,8 @@ import { useV4Conversation } from "@/v4/V4ConversationContext.js";
 import { useConversationProjection } from "@/v4/useConversationProjection.js";
 import { usePendingCommandRecovery } from "@/v4/usePendingCommandRecovery.js";
 import { useV4SessionQuotaBanner } from "@/v4/useV4SessionQuotaBanner.js";
+import { CodingPlanQuotaResetPrompt } from "@/v4/CodingPlanQuotaResetPrompt.js";
+import { CODING_PLAN_FIVE_HOUR_LIMIT_BUSINESS_CODE } from "@/lib/codingPlanQuotaResetPrompt.js";
 import { resolveMcpUnavailableNotice } from "@/v4/mcpUnavailableBannerNotice.js";
 import { shouldFocusTimelineAfterComposerSend } from "@/v4/promptScrollFocusPolicy.js";
 import {
@@ -4429,9 +4431,7 @@ export function SessionPane({
       onSelectModel={handleSelectModel}
       onSelectThought={handleSelectThought}
       onSwitchMode={handleSwitchMode}
-      onOpenWorkflowStage={
-        sessionId ? handleOpenWorkflowStageFromComposer : undefined
-      }
+      onOpenWorkflowStage={sessionId ? handleOpenWorkflowStageFromComposer : undefined}
       onOpenRunningBackgroundWorks={
         sessionId && runningBackgroundWorkCount > 0 ? handleOpenRunningBackgroundWorks : undefined
       }
@@ -4523,6 +4523,16 @@ export function SessionPane({
               : undefined
           }
           onDismiss={quotaBanner.dismiss}
+        />
+      ) : null}
+      {quotaBanner.providerLimitedCode === CODING_PLAN_FIVE_HOUR_LIMIT_BUSINESS_CODE &&
+      quotaBanner.state.visible &&
+      !quotaBanner.dismissed ? (
+        // 1308 = 5 小时窗口用完：在额度横幅旁追加「使用重置卡」小弹窗。
+        // 组件自持展示状态（同窗口只弹一次），这里只做挂载闸门。
+        <CodingPlanQuotaResetPrompt
+          providerId={snapshot?.config.provider ?? null}
+          usageStatsService={baseWorkspaceServices.usageStatsService}
         />
       ) : null}
       {recoverableCommand ? (
