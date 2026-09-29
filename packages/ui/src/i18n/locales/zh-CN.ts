@@ -927,7 +927,7 @@ const zhCN: Record<string, string> = {
   "workflow.stagePane.noneAdversarial": "对抗轮已全部过去",
   "workflow.stagePane.unknownStage": "台账标记「{stage}」不在已知阶段集合内，以下不做先后推断。",
   "workflow.stagePane.noMarker": "台账中未找到阶段标记行（<!-- std-workflow v1 stage:… -->），以下为台账原文。",
-  "workflow.stagePane.empty": "未找到 workflow/工作台账.md。在「项目开发模式」下发送消息，助手会从 W0 开始建立台账。",
+  "workflow.stagePane.empty": "未找到 workflow/工作台账.md。发送一条消息即可：新项目会从 W0 开始建立台账；已有项目会先做接手盘点（只读考古现状 → 与你确认分母与起点 → 从判定阶段续推），不会从零重做。",
   "workflow.stagePane.readError": "台账读取失败（可能是远程工作区或权限问题），可点击右上角刷新重试。",
   "workflowDirectory.title": "工作流实例",
   "workflowDirectory.running": "正在运行",

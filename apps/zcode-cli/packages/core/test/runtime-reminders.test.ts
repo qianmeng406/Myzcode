@@ -31,6 +31,10 @@ test("workflow mode emits the full SOP on the first reminder", () => {
   assert.ok(body!.includes("wf-fe-acceptance"));
   assert.ok(body!.includes("wf-adversarial-audit"));
   assert.ok(body!.includes("std-workflow v1 stage"));
+  // 接手已有项目：无台账的存量项目必须先盘点，不能从零重做。
+  assert.ok(body!.includes("接手盘点"));
+  assert.ok(body!.includes("不要从零重做"));
+  assert.ok(body!.includes("代码能跑 ≠ 已通过"));
 });
 
 test("workflow mode throttles like research mode within 5 human turns", () => {

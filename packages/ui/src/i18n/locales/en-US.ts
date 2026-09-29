@@ -1005,7 +1005,7 @@ const enUS: Record<string, string> = {
   "workflow.stagePane.noneAdversarial": "All adversarial rounds passed",
   "workflow.stagePane.unknownStage": "Ledger marker \"{stage}\" is not a known stage; no ordering inferred below.",
   "workflow.stagePane.noMarker": "No stage marker found in the ledger (<!-- std-workflow v1 stage:… -->); showing the raw ledger below.",
-  "workflow.stagePane.empty": "No workflow/工作台账.md found. Send a message in Project development mode and the agent will create the ledger from W0.",
+  "workflow.stagePane.empty": "No workflow/工作台账.md found. Send a message to begin: a greenfield project starts the ledger from W0, while an existing project gets a read-only takeover survey first (scan the current state, confirm the denominator and starting stage with you, then continue from there) — nothing is redone from scratch.",
   "workflow.stagePane.readError": "Failed to read the ledger (remote workspace or permissions). Try the refresh button above.",
   "workflowDirectory.title": "Workflow runs",
   "workflowDirectory.running": "Running",
