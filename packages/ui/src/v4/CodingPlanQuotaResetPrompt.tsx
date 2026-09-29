@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckIcon, GiftIcon, Loader2, XIcon } from "lucide-react";
+import type { SessionPhase } from "@zcode/shared/zcode-protocol-v4";
 import type { IUsageStatsService } from "@zcode/services";
 import { Button } from "@/components/ui/button.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -13,18 +14,19 @@ import {
   formatQuotaResetTime,
 } from "@/lib/codingPlanQuotaPresentation.js";
 import {
-  CODING_PLAN_FIVE_HOUR_LIMIT_BUSINESS_CODE,
+  CODING_PLAN_FIVE_HOUR_PROMPT_THRESHOLD_PERCENT,
   resolveCodingPlanQuotaResetPromptModel,
 } from "@/lib/codingPlanQuotaResetPrompt.js";
 
 /**
- * 5 小时额度用完时的「使用重置卡」小弹窗。
+ * 5 小时窗口剩余额度不足时的「使用重置卡」小弹窗。
  *
- * 检测端是 useV4SessionQuotaBanner 已有的 1308 归类（session 上报的 providerLimitedCode），
- * 本组件只负责：读 entitlement 快照确认窗口重置时刻 + 挂重置卡核销 hook + 渲染提示。
+ * 检测源是 entitlement 快照的剩余占比（≤10% 即提示，含用完），不是请求失败码——
+ * 提示要赶在用完**之前**。快照新鲜度由本组件负责：挂载拉一次，之后每个轮次结束
+ * （running/prewarming → idle）静默强刷一次，正好是消耗发生的时刻；不做空闲轮询。
  *
- * 同一 5 小时窗口只提示一次（按窗口重置时刻去重，renderer 会话内存活）；
- * 用户点「知道了」或重置成功后不再弹，窗口滚动后自然解锁。
+ * 仅官方 Coding Plan 供应商会激活（zhipu-account 账号访问缺失时整组件休眠、零请求）。
+ * 同一 5 小时窗口只提示一次（按窗口重置时刻去重，renderer 会话内存活）。
  */
 
 const RESET_DONE_AUTO_CLOSE_MS = 1_600;
@@ -32,13 +34,19 @@ const RESET_DONE_AUTO_CLOSE_MS = 1_600;
 /** renderer 会话内已提示过（用户关掉）的 5 小时窗口。 */
 const dismissedWindowKeys = new Set<string>();
 
+function isSessionActivePhase(phase: SessionPhase | null): boolean {
+  return phase === "running" || phase === "prewarming";
+}
+
 export function CodingPlanQuotaResetPrompt({
   providerId,
   usageStatsService,
+  phase,
   onDismiss,
 }: {
   providerId: string | null;
   usageStatsService: IUsageStatsService | undefined;
+  phase: SessionPhase | null;
   /** 仅用于让上层知道弹窗已关闭（重置成功或用户点掉）；展示状态由本组件自持。 */
   onDismiss?: () => void;
 }) {
@@ -66,6 +74,18 @@ export function CodingPlanQuotaResetPrompt({
     enabled: Boolean(accountAccess),
   });
 
+  // 轮次结束（活跃 → 非活跃）即刻强刷：消耗发生在轮次内，此刻的剩余占比最新鲜。
+  // 不做空闲轮询——空闲时额度不会变化，轮询只是烧配额。
+  const previousActiveRef = useRef(isSessionActivePhase(phase));
+  useEffect(() => {
+    const active = isSessionActivePhase(phase);
+    const previous = previousActiveRef.current;
+    previousActiveRef.current = active;
+    if (previous && !active && accountAccess) {
+      void entitlement.refresh({ force: true, silent: true, reason: "manual" });
+    }
+  }, [accountAccess, entitlement.refresh, phase]);
+
   const fiveHourLimit = findCodingPlanQuotaLimit(
     entitlement.snapshot?.quota?.limits ?? [],
     "TOKENS_LIMIT",
@@ -73,7 +93,6 @@ export function CodingPlanQuotaResetPrompt({
     5,
   );
   const model = resolveCodingPlanQuotaResetPromptModel({
-    providerLimitedCode: CODING_PLAN_FIVE_HOUR_LIMIT_BUSINESS_CODE,
     fiveHourLimit,
     entry: resetUi.enabled
       ? {
@@ -101,11 +120,7 @@ export function CodingPlanQuotaResetPrompt({
   }, [closed, model.visible, model.windowKey, onDismiss, resetUi.done]);
 
   if (closed) return null;
-
-  if (!model.visible) {
-    // 上层只在 1308 时挂载本组件；这里兜底处理窗口去重/已重置两种内部隐藏态。
-    return null;
-  }
+  if (!model.visible) return null;
 
   const close = () => {
     closedRef.current = true;
@@ -139,7 +154,10 @@ export function CodingPlanQuotaResetPrompt({
             {intl.formatMessage({ id: "chat.quota.resetPrompt.title" })}
           </div>
           <div className="mt-0.5 text-ui-sm text-foreground-subtle">
-            {intl.formatMessage({ id: "chat.quota.resetPrompt.body" })}
+            {intl.formatMessage(
+              { id: "chat.quota.resetPrompt.body" },
+              { percent: String(CODING_PLAN_FIVE_HOUR_PROMPT_THRESHOLD_PERCENT) },
+            )}
             {resetAtLabel ? (
               <span className="text-foreground">
                 {" "}

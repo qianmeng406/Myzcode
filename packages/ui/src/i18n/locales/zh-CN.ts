@@ -5556,8 +5556,8 @@ const zhCN: Record<string, string> = {
   "chat.quota.mcp.codingPlanRequired":
     "当前无 ZCode MCP「{server}」额度，请登录或开通 Coding Plan 使用。",
   "chat.quota.providerLimited": "当前账户额度或套餐已达到使用限制。请升级或调整套餐后继续。",
-  "chat.quota.resetPrompt.title": "5 小时额度已用完",
-  "chat.quota.resetPrompt.body": "检测到当前 5 小时窗口额度耗尽。",
+  "chat.quota.resetPrompt.title": "5 小时额度不足",
+  "chat.quota.resetPrompt.body": "当前 5 小时窗口剩余额度不足 {percent}%，可使用重置卡立即恢复。",
   "chat.quota.resetPrompt.resetAt": "将于 {time} 重置。",
   "chat.quota.resetPrompt.use": "使用重置卡",
   "chat.quota.resetPrompt.noCard": "暂无可用重置卡。",

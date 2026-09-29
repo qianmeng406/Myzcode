@@ -5815,8 +5815,9 @@ const enUS: Record<string, string> = {
     'No ZCode MCP "{server}" quota. Sign in or get a Coding Plan to use it.',
   "chat.quota.providerLimited":
     "The current account quota or plan limit has been reached. Upgrade or adjust the plan to continue.",
-  "chat.quota.resetPrompt.title": "5-hour quota used up",
-  "chat.quota.resetPrompt.body": "Your current 5-hour window quota is exhausted.",
+  "chat.quota.resetPrompt.title": "5-hour quota running low",
+  "chat.quota.resetPrompt.body":
+    "Less than {percent}% left in the current 5-hour window. Use a reset card to restore it now.",
   "chat.quota.resetPrompt.resetAt": "Resets at {time}.",
   "chat.quota.resetPrompt.use": "Use reset card",
   "chat.quota.resetPrompt.noCard": "No reset card available.",

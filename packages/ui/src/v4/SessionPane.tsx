@@ -232,7 +232,6 @@ import { useConversationProjection } from "@/v4/useConversationProjection.js";
 import { usePendingCommandRecovery } from "@/v4/usePendingCommandRecovery.js";
 import { useV4SessionQuotaBanner } from "@/v4/useV4SessionQuotaBanner.js";
 import { CodingPlanQuotaResetPrompt } from "@/v4/CodingPlanQuotaResetPrompt.js";
-import { CODING_PLAN_FIVE_HOUR_LIMIT_BUSINESS_CODE } from "@/lib/codingPlanQuotaResetPrompt.js";
 import { resolveMcpUnavailableNotice } from "@/v4/mcpUnavailableBannerNotice.js";
 import { shouldFocusTimelineAfterComposerSend } from "@/v4/promptScrollFocusPolicy.js";
 import {
@@ -4525,14 +4524,13 @@ export function SessionPane({
           onDismiss={quotaBanner.dismiss}
         />
       ) : null}
-      {quotaBanner.providerLimitedCode === CODING_PLAN_FIVE_HOUR_LIMIT_BUSINESS_CODE &&
-      quotaBanner.state.visible &&
-      !quotaBanner.dismissed ? (
-        // 1308 = 5 小时窗口用完：在额度横幅旁追加「使用重置卡」小弹窗。
-        // 组件自持展示状态（同窗口只弹一次），这里只做挂载闸门。
+      {snapshot?.config.provider ? (
+        // 5 小时窗口剩余 ≤10% 时弹「使用重置卡」小提示。
+        // 组件自持检测（账号访问缺失即休眠）与展示状态（同窗口只弹一次）。
         <CodingPlanQuotaResetPrompt
-          providerId={snapshot?.config.provider ?? null}
+          providerId={snapshot.config.provider}
           usageStatsService={baseWorkspaceServices.usageStatsService}
+          phase={snapshot?.control.phase ?? null}
         />
       ) : null}
       {recoverableCommand ? (

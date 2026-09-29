@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { UsageQuotaLimit } from "@zcode/shared";
 import {
-  CODING_PLAN_FIVE_HOUR_LIMIT_BUSINESS_CODE,
+  CODING_PLAN_FIVE_HOUR_PROMPT_THRESHOLD_PERCENT,
   resolveCodingPlanQuotaResetPromptModel,
 } from "../src/lib/codingPlanQuotaResetPrompt.js";
 
 function fiveHourLimit(overrides: Partial<UsageQuotaLimit> = {}): UsageQuotaLimit {
+  // percentage 是「已用占比」（quota 接口口径），剩余 = 100 - percentage。
   return {
     type: "TOKENS_LIMIT",
     usage: 14,
@@ -27,36 +28,49 @@ const ENTRY_AVAILABLE = {
   done: false,
 };
 
-test("1308 with a five-hour window and a card shows the prompt", () => {
+test("at exactly the threshold (10% remaining = 90% used) the prompt shows", () => {
   const model = resolveCodingPlanQuotaResetPromptModel({
-    providerLimitedCode: CODING_PLAN_FIVE_HOUR_LIMIT_BUSINESS_CODE,
-    fiveHourLimit: fiveHourLimit(),
+    fiveHourLimit: fiveHourLimit({ percentage: 90, remaining: 1.4 }),
     entry: ENTRY_AVAILABLE,
     dismissedWindowKeys: [],
   });
   assert.equal(model.visible, true);
+  assert.equal(model.remainingPercent, 10);
   assert.equal(model.canUseResetCard, true);
   assert.equal(model.windowKey, "1790000000000");
-  assert.equal(model.resetAtMs, 1_790_000_000_000);
-  assert.equal(model.opportunityCount, 2);
 });
 
-test("non-1308 codes never prompt (other banners keep their own behavior)", () => {
-  for (const code of ["1309", "1310", "1320", null, undefined]) {
-    const model = resolveCodingPlanQuotaResetPromptModel({
-      providerLimitedCode: code,
-      fiveHourLimit: fiveHourLimit(),
-      entry: ENTRY_AVAILABLE,
-      dismissedWindowKeys: [],
-    });
-    assert.equal(model.visible, false);
-    assert.equal(model.dismissReason, "not-five-hour-limit");
-  }
+test("above the threshold stays silent", () => {
+  const model = resolveCodingPlanQuotaResetPromptModel({
+    fiveHourLimit: fiveHourLimit({ percentage: 89, remaining: 1.54 }),
+    entry: ENTRY_AVAILABLE,
+    dismissedWindowKeys: [],
+  });
+  assert.equal(model.visible, false);
+  assert.equal(model.dismissReason, "quota-above-threshold");
+});
+
+test("an untouched window (100% remaining) never prompts", () => {
+  const model = resolveCodingPlanQuotaResetPromptModel({
+    fiveHourLimit: fiveHourLimit({ percentage: 0, remaining: 14 }),
+    entry: ENTRY_AVAILABLE,
+    dismissedWindowKeys: [],
+  });
+  assert.equal(model.visible, false);
+});
+
+test("fully exhausted (0% remaining) still prompts — the card is still usable", () => {
+  const model = resolveCodingPlanQuotaResetPromptModel({
+    fiveHourLimit: fiveHourLimit({ percentage: 100, remaining: 0 }),
+    entry: ENTRY_AVAILABLE,
+    dismissedWindowKeys: [],
+  });
+  assert.equal(model.visible, true);
+  assert.equal(model.remainingPercent, 0);
 });
 
 test("a dismissed window stays dismissed until the window rolls", () => {
   const model = resolveCodingPlanQuotaResetPromptModel({
-    providerLimitedCode: CODING_PLAN_FIVE_HOUR_LIMIT_BUSINESS_CODE,
     fiveHourLimit: fiveHourLimit(),
     entry: ENTRY_AVAILABLE,
     dismissedWindowKeys: ["1790000000000"],
@@ -64,9 +78,7 @@ test("a dismissed window stays dismissed until the window rolls", () => {
   assert.equal(model.visible, false);
   assert.equal(model.dismissReason, "window-dismissed");
 
-  // 窗口滚动（重置时刻变化）后是新的一集，重新允许提示。
   const nextWindow = resolveCodingPlanQuotaResetPromptModel({
-    providerLimitedCode: CODING_PLAN_FIVE_HOUR_LIMIT_BUSINESS_CODE,
     fiveHourLimit: fiveHourLimit({ nextResetTime: 1_790_086_400_000 }),
     entry: ENTRY_AVAILABLE,
     dismissedWindowKeys: ["1790000000000"],
@@ -77,7 +89,6 @@ test("a dismissed window stays dismissed until the window rolls", () => {
 
 test("an already-effective reset hides the prompt even with an undismissed window", () => {
   const model = resolveCodingPlanQuotaResetPromptModel({
-    providerLimitedCode: CODING_PLAN_FIVE_HOUR_LIMIT_BUSINESS_CODE,
     fiveHourLimit: fiveHourLimit(),
     entry: { ...ENTRY_AVAILABLE, done: true },
     dismissedWindowKeys: [],
@@ -86,27 +97,27 @@ test("an already-effective reset hides the prompt even with an undismissed windo
   assert.equal(model.dismissReason, "already-reset");
 });
 
-test("exhausted quota without any reset card still prompts, without the action", () => {
+test("low quota without any reset card still prompts, without the action", () => {
   const model = resolveCodingPlanQuotaResetPromptModel({
-    providerLimitedCode: CODING_PLAN_FIVE_HOUR_LIMIT_BUSINESS_CODE,
-    fiveHourLimit: fiveHourLimit(),
+    fiveHourLimit: fiveHourLimit({ percentage: 95 }),
     entry: { ...ENTRY_AVAILABLE, opportunityCount: 0 },
     dismissedWindowKeys: [],
   });
   assert.equal(model.visible, true);
   assert.equal(model.canUseResetCard, false);
-  assert.equal(model.opportunityCount, 0);
 });
 
-test("a missing snapshot degrades to the unknown window key without crashing", () => {
+test("an unknown remaining percentage stays silent instead of pretending", () => {
+  // percentage 缺失时提示文案承诺的「不足 10%」无从成立：沉默优于编造。
   const model = resolveCodingPlanQuotaResetPromptModel({
-    providerLimitedCode: CODING_PLAN_FIVE_HOUR_LIMIT_BUSINESS_CODE,
-    fiveHourLimit: null,
+    fiveHourLimit: fiveHourLimit({ percentage: undefined }),
     entry: ENTRY_AVAILABLE,
     dismissedWindowKeys: [],
   });
-  assert.equal(model.visible, true);
-  assert.equal(model.windowKey, "unknown");
-  assert.equal(model.resetAtMs, null);
-  assert.equal(model.canUseResetCard, true);
+  assert.equal(model.visible, false);
+  assert.equal(model.dismissReason, "quota-unknown");
+});
+
+test("threshold constant stays at 10 so the UI copy and the gate cannot drift", () => {
+  assert.equal(CODING_PLAN_FIVE_HOUR_PROMPT_THRESHOLD_PERCENT, 10);
 });
