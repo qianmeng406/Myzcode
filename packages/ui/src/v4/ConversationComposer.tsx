@@ -2095,7 +2095,12 @@ function ConversationComposerImpl({
         .map((provider) => ({
           key: provider.providerId,
           label: provider.providerName?.trim() || provider.providerId,
-          modelIds: provider.models.map((model) => model.modelId),
+          models: provider.models.map((model) => ({
+            modelId: model.modelId,
+            // 部分渠道（如 Command Code）在创建模型时强制要求推理档；
+            // 选中即带该模型的最低公开档，正好与辅助快速通道的绑定一致。
+            reasoningLevel: model.config.optionSpecs.reasoningLevel?.values[0],
+          })),
         })),
     [modelSelectionView],
   );
@@ -2178,17 +2183,24 @@ function ConversationComposerImpl({
                       <DropdownMenuLabel className="text-ui-xs text-foreground-subtlest">
                         {group.label}
                       </DropdownMenuLabel>
-                      {group.modelIds.map((modelId) => {
+                      {group.models.map((model) => {
                         const selected =
-                          optimizerModel?.providerId === group.key && optimizerModel.modelId === modelId;
+                          optimizerModel?.providerId === group.key &&
+                          optimizerModel.modelId === model.modelId;
                         return (
                           <DropdownMenuItem
-                            key={modelId}
+                            key={model.modelId}
                             onSelect={() =>
-                              handleSelectOptimizerModel({ providerId: group.key, modelId })
+                              handleSelectOptimizerModel({
+                                providerId: group.key,
+                                modelId: model.modelId,
+                                ...(model.reasoningLevel
+                                  ? { options: { reasoningLevel: model.reasoningLevel } }
+                                  : {}),
+                              })
                             }
                           >
-                            <span className="min-w-0 flex-1 truncate">{modelId}</span>
+                            <span className="min-w-0 flex-1 truncate">{model.modelId}</span>
                             {selected ? <CheckIcon className="size-3.5 shrink-0" /> : null}
                           </DropdownMenuItem>
                         );
