@@ -27,6 +27,10 @@ const CONNECTIVITY_PROBE_MAX_OUTPUT_TOKENS = 1;
 const CONNECTIVITY_PROBE_SYSTEM = "You are ZCode connectivity probe.";
 const CONNECTIVITY_PROBE_USER = "hi";
 const GIT_COMMIT_MESSAGE_QUERY_SOURCE = "git_commit_message";
+// 提示词优化与 Git 提交消息同为「快进快出」的辅助调用：最低推理档 + 辅助预算，
+// 不吃调用方自带的 maxOutputTokens，避免思考模型把小预算烧在推理上输出为空。
+const PROMPT_OPTIMIZER_QUERY_SOURCE = "prompt_optimizer";
+const AUXILIARY_QUERY_SOURCES = new Set([GIT_COMMIT_MESSAGE_QUERY_SOURCE, PROMPT_OPTIMIZER_QUERY_SOURCE]);
 
 export interface WorkspaceGenerateTextInput {
   selection: ModelSelection;
@@ -146,10 +150,9 @@ async function generateWorkspaceTextImpl(
   const querySource = input.querySource.trim() || "workspace_generate_text";
   const baseModel = createRuntimeModel(this, { selection: requestedSelection });
   // 辅助请求需要的是最低公开档位，不是扫描 off/nothink 等名称后强制关闭。
-  const model =
-    querySource === GIT_COMMIT_MESSAGE_QUERY_SOURCE
-      ? baseModel.bind(auxiliaryModelOptions(baseModel))
-      : baseModel;
+  const model = AUXILIARY_QUERY_SOURCES.has(querySource)
+    ? baseModel.bind(auxiliaryModelOptions(baseModel))
+    : baseModel;
   const baseTraceContext = options?.traceContext ?? this.rootTraceContext;
   const modelTraceContext = createChildTraceContext(baseTraceContext, {
     attributes: {
@@ -183,8 +186,9 @@ async function generateWorkspaceTextImpl(
     options?.abortSignal ?? AbortSignal.timeout(WORKSPACE_GENERATE_TEXT_TIMEOUT_MS);
   // Git Commit 调用方曾传入固定 256，Core 又按 querySource 丢弃，形成虚假接口。
   // 通用生成入口只处理调用方真实提供的预算；Git 辅助调用不再由上游伪造固定上限。
-  const requestMaxOutputTokens =
-    querySource === GIT_COMMIT_MESSAGE_QUERY_SOURCE ? undefined : input.maxOutputTokens;
+  const requestMaxOutputTokens = AUXILIARY_QUERY_SOURCES.has(querySource)
+    ? undefined
+    : input.maxOutputTokens;
 
   const modelRequest = {
     abortSignal,

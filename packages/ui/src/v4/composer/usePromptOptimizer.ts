@@ -17,7 +17,6 @@ const PROMPT_OPTIMIZER_QUERY_SOURCE = "prompt_optimizer";
 const MAX_CONTEXT_HISTORY_ENTRIES = 6;
 const MAX_CONTEXT_CHARS_PER_ENTRY = 200;
 const OPTIMIZE_REQUEST_TIMEOUT_MS = 30_000;
-const OPTIMIZE_MAX_OUTPUT_TOKENS = 600;
 
 export interface PromptOptimizerRequest {
   draft: string;
@@ -111,7 +110,7 @@ export function usePromptOptimizer(options: {
         (await services?.modelSelectionService.getView().catch(() => null))?.preferredSelection ??
         null;
       if (!selection) {
-        toast(intl.formatMessage({ id: "composer.optimizePromptNoModel" }));
+        toast(intl.formatMessage({ id: "chat.composer.optimizePromptNoModel" }));
         return null;
       }
 
@@ -132,7 +131,6 @@ export function usePromptOptimizer(options: {
             projectName: getPathLeaf(options.workspacePath) || options.workspacePath,
           }),
           querySource: PROMPT_OPTIMIZER_QUERY_SOURCE,
-          maxOutputTokens: OPTIMIZE_MAX_OUTPUT_TOKENS,
           signal: abortController.signal,
           requestTimeoutMs: OPTIMIZE_REQUEST_TIMEOUT_MS + 5_000,
         });
@@ -156,7 +154,9 @@ export function usePromptOptimizer(options: {
         });
         // 主动超时/切走不弹错误，避免“快速小请求”变成打扰。
         if (!aborted) {
-          toast(intl.formatMessage({ id: "composer.optimizePromptFailed" }));
+          const detail =
+            error instanceof Error && error.message ? ` · ${error.message.slice(0, 120)}` : "";
+          toast(intl.formatMessage({ id: "chat.composer.optimizePromptFailed" }) + detail);
         }
         return null;
       } finally {

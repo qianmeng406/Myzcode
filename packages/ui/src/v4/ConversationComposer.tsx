@@ -2063,7 +2063,7 @@ function ConversationComposerImpl({
       }),
     [onSelectModel],
   );
-  const optimizePromptTitle = intl.formatMessage({ id: "composer.optimizePrompt" });
+  const optimizePromptTitle = intl.formatMessage({ id: "chat.composer.optimizePrompt" });
   const submitControlNode = useMemo(
     () => (
       <div className="flex min-w-0 items-center gap-1">
