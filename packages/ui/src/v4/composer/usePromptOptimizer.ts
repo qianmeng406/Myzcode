@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { ModelSelection } from "@zcode/shared";
 import { toast } from "@/components/ui/toast.js";
 import { useOptionalServices } from "@/hooks/useServices.js";
@@ -84,16 +84,7 @@ export function usePromptOptimizer(options: {
   const { intl } = useZCodeIntl();
   const services = useOptionalServices();
   const [optimizing, setOptimizing] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
   const optimizingRef = useRef(false);
-
-  useEffect(
-    () => () => {
-      // 卸载时中断仍在飞行的请求；失败是 best-effort。
-      abortRef.current?.abort();
-    },
-    [],
-  );
 
   const optimize = useCallback(
     async (request: PromptOptimizerRequest): Promise<string | null> => {
@@ -116,9 +107,6 @@ export function usePromptOptimizer(options: {
 
       optimizingRef.current = true;
       setOptimizing(true);
-      const abortController = new AbortController();
-      abortRef.current = abortController;
-      const timeout = window.setTimeout(() => abortController.abort(), OPTIMIZE_REQUEST_TIMEOUT_MS);
       try {
         const result = await agentService.generateWorkspaceText({
           workspacePath: options.workspacePath,
@@ -131,8 +119,9 @@ export function usePromptOptimizer(options: {
             projectName: getPathLeaf(options.workspacePath) || options.workspacePath,
           }),
           querySource: PROMPT_OPTIMIZER_QUERY_SOURCE,
-          signal: abortController.signal,
-          requestTimeoutMs: OPTIMIZE_REQUEST_TIMEOUT_MS + 5_000,
+          // 超时只能走协议层 requestTimeoutMs：AbortSignal 不可跨 RPC 序列化，
+          // 对端只会拿到丢失方法的普通对象（signal?.addEventListener is not a function）。
+          requestTimeoutMs: OPTIMIZE_REQUEST_TIMEOUT_MS,
         });
         const optimized = cleanupOptimizedPromptText(result.text);
         if (!optimized) {
@@ -145,25 +134,17 @@ export function usePromptOptimizer(options: {
         });
         return optimized;
       } catch (error) {
-        const aborted =
-          abortController.signal.aborted || (error as Error)?.name === "AbortError";
         logger.warn("[PromptOptimizer] 提示词优化失败", {
           workspacePath: options.workspacePath,
-          aborted,
           error: error instanceof Error ? error.message : String(error),
         });
-        // 主动超时/切走不弹错误，避免“快速小请求”变成打扰。
-        if (!aborted) {
+        {
           const detail =
             error instanceof Error && error.message ? ` · ${error.message.slice(0, 120)}` : "";
           toast(intl.formatMessage({ id: "chat.composer.optimizePromptFailed" }) + detail);
         }
         return null;
       } finally {
-        window.clearTimeout(timeout);
-        if (abortRef.current === abortController) {
-          abortRef.current = null;
-        }
         optimizingRef.current = false;
         setOptimizing(false);
       }
