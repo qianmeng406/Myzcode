@@ -1222,6 +1222,7 @@ export function AnimatedSidePanePanel({
                             workspaceIdentity={workspaceIdentity}
                             workspaceRemoteSessionId={workspaceRemoteSessionId}
                             canOpenLocalFileManager={isDesktop}
+                            active={isVisible && tab.id === visibleActiveTabId}
                             onOpenBrowserUrl={isDesktop ? onOpenBrowserUrl : undefined}
                             onOpenCodeViewer={onOpenCodeViewer}
                           />
