@@ -75,6 +75,47 @@ export function cleanupOptimizedPromptText(raw: string): string {
   return text.trim();
 }
 
+const OPTIMIZER_MODEL_STORAGE_KEY = "zcode-prompt-optimizer-model";
+
+/** 用户指定的优化模型（全局偏好）；null = 跟随会话模型。 */
+export function readStoredOptimizerModelSelection(): ModelSelection | null {
+  try {
+    const raw = localStorage.getItem(OPTIMIZER_MODEL_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof (parsed as ModelSelection).providerId === "string" &&
+      typeof (parsed as ModelSelection).modelId === "string" &&
+      (parsed as ModelSelection).providerId.trim() &&
+      (parsed as ModelSelection).modelId.trim()
+    ) {
+      return {
+        providerId: (parsed as ModelSelection).providerId,
+        modelId: (parsed as ModelSelection).modelId,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeStoredOptimizerModelSelection(selection: ModelSelection | null): void {
+  try {
+    if (!selection) {
+      localStorage.removeItem(OPTIMIZER_MODEL_STORAGE_KEY);
+    } else {
+      localStorage.setItem(OPTIMIZER_MODEL_STORAGE_KEY, JSON.stringify(selection));
+    }
+  } catch {
+    // localStorage 不可用（隐私模式等）时静默放弃持久化，选择仍在本会话内生效。
+  }
+}
+
 export function usePromptOptimizer(options: {
   workspacePath: string;
   workspaceIdentity?: string;

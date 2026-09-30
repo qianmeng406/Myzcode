@@ -149,6 +149,8 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.connectionMode.switchToStartPlan": "Switch to Start Plan",
   "chat.composer.contextSearchHint": "Type to search plugins, files, and chats",
   "chat.composer.optimizePrompt": "Optimize prompt",
+  "chat.composer.optimizeModel": "Optimization model",
+  "chat.composer.optimizeModelFollow": "Follow session model",
   "chat.composer.optimizePromptFailed": "Failed to optimize the prompt. Try again later",
   "chat.composer.optimizePromptNoModel": "No model available. Select one in model settings first",
   "chat.composer.contextShortcut": "Add context",

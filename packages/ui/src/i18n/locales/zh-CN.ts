@@ -140,6 +140,8 @@ const zhCN: Record<string, string> = {
   "settings.modelProvider.connectionMode.switchToStartPlan": "切换至体验套餐",
   "chat.composer.contextSearchHint": "输入内容以搜索插件、文件和对话",
   "chat.composer.optimizePrompt": "优化提示词",
+  "chat.composer.optimizeModel": "优化用模型",
+  "chat.composer.optimizeModelFollow": "跟随会话模型",
   "chat.composer.optimizePromptFailed": "提示词优化失败，请稍后重试",
   "chat.composer.optimizePromptNoModel": "没有可用的模型，请先在模型设置中选择",
   "chat.composer.contextShortcut": "添加上下文",

@@ -41,6 +41,7 @@ import {
   TID_V4_ATTACHMENT_UPLOAD_RETRY,
   TID_V4_STOP,
   testId,
+  type ModelSelection,
   type PlanIdentitySnapshot,
   type ZCodeProvider,
 } from "@zcode/shared";
@@ -51,6 +52,8 @@ import type {
 } from "@zcode/shared/zcode-protocol-v4";
 import {
   ArrowUpIcon,
+  CheckIcon,
+  ChevronDownIcon,
   ClipboardPenLineIcon,
   InfoIcon,
   RotateCcwIcon,
@@ -59,6 +62,14 @@ import {
   XIcon,
 } from "lucide-react";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu.js";
 import {
   ChatErrorBanner,
   resolveChatErrorBannerDisplayMessage,
@@ -135,7 +146,11 @@ import {
 } from "@/v4/composer/followupModeSettings.js";
 import { isAppleKeyboardPlatform } from "@/lib/keyboardShortcuts.js";
 import { usePrimaryFollowupModifier } from "@/v4/composer/usePrimaryFollowupModifier.js";
-import { usePromptOptimizer } from "@/v4/composer/usePromptOptimizer.js";
+import {
+  readStoredOptimizerModelSelection,
+  usePromptOptimizer,
+  writeStoredOptimizerModelSelection,
+} from "@/v4/composer/usePromptOptimizer.js";
 import { consumeV4ComposerDraftWorkspaceTransferRequest } from "@/v4/composer/composerDraftWorkspaceTransfer.js";
 import { useComposerAttachments } from "@/v4/composer/useComposerAttachments.js";
 import type { ConversationDropTargetController } from "@/v4/composer/conversationDropTarget.js";
@@ -1110,6 +1125,14 @@ function ConversationComposerImpl({
   const canStop = Boolean(snapshot?.control.canStop);
   const modifiedEnterReversesDelivery = modifiedEnterSubmits && canStop;
   const hasText = text.trim().length > 0;
+  // 优化用模型：null = 跟随会话模型；用户显式选择后全局记住。
+  const [optimizerModel, setOptimizerModel] = useState<ModelSelection | null>(
+    () => readStoredOptimizerModelSelection(),
+  );
+  const handleSelectOptimizerModel = useCallback((selection: ModelSelection | null) => {
+    setOptimizerModel(selection);
+    writeStoredOptimizerModelSelection(selection);
+  }, []);
   const handleOptimizePrompt = useCallback(async () => {
     const draft = textRef.current.trim();
     if (!draft || promptOptimizer.optimizing || pendingRef.current) {
@@ -1118,14 +1141,14 @@ function ConversationComposerImpl({
     const optimized = await promptOptimizer.optimize({
       draft,
       history: promptHistory,
-      selection: modelSelectionView?.preferredSelection ?? null,
+      selection: optimizerModel ?? modelSelectionView?.preferredSelection ?? null,
     });
     if (optimized && optimized !== draft) {
       // 与草稿恢复同一条写入路径：先设编辑器实例，再同步 ref 与草稿持久化。
       inputApiRef.current?.setText(optimized);
       updateText(optimized);
     }
-  }, [modelSelectionView, promptHistory, promptOptimizer, updateText]);
+  }, [modelSelectionView, optimizerModel, promptHistory, promptOptimizer, updateText]);
   const hasDraftToSubmit =
     hasText ||
     hasAttachments ||
@@ -2064,6 +2087,24 @@ function ConversationComposerImpl({
     [onSelectModel],
   );
   const optimizePromptTitle = intl.formatMessage({ id: "chat.composer.optimizePrompt" });
+  // ✨ 旁的下拉：优化用模型清单（按 provider 分组）。没有可用模型时整个下拉不渲染。
+  const optimizerModelGroups = useMemo(
+    () =>
+      (modelSelectionView?.providers ?? [])
+        .filter((provider) => provider.models.length > 0)
+        .map((provider) => ({
+          key: provider.providerId,
+          label: provider.providerName?.trim() || provider.providerId,
+          modelIds: provider.models.map((model) => model.modelId),
+        })),
+    [modelSelectionView],
+  );
+  const optimizeModelMenuTitle = intl.formatMessage({ id: "chat.composer.optimizeModel" });
+  const optimizeModelFollowLabel = intl.formatMessage({ id: "chat.composer.optimizeModelFollow" });
+  const optimizePromptTooltip =
+    optimizerModel && promptOptimizer.optimizing === false
+      ? `${optimizePromptTitle}（${optimizerModel.modelId}）`
+      : optimizePromptTitle;
   const submitControlNode = useMemo(
     () => (
       <div className="flex min-w-0 items-center gap-1">
@@ -2091,24 +2132,73 @@ function ConversationComposerImpl({
           />
         </span>
         {!showStopControl && !pending ? (
-          <ControlHintTooltip title={optimizePromptTitle}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-md"
-              disabled={disabled || !hasText || promptOptimizer.optimizing}
-              onClick={handleOptimizePrompt}
-              data-testid="v4-composer-optimize-prompt"
-              aria-label={optimizePromptTitle}
-            >
-              {promptOptimizer.optimizing ? (
-                <Spinner className="size-4" />
-              ) : (
-                <SparklesIcon className="size-4" />
-              )}
-              <span className="sr-only">{optimizePromptTitle}</span>
-            </Button>
-          </ControlHintTooltip>
+          <>
+            <ControlHintTooltip title={optimizePromptTooltip}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-md"
+                disabled={disabled || !hasText || promptOptimizer.optimizing}
+                onClick={handleOptimizePrompt}
+                data-testid="v4-composer-optimize-prompt"
+                aria-label={optimizePromptTooltip}
+              >
+                {promptOptimizer.optimizing ? (
+                  <Spinner className="size-4" />
+                ) : (
+                  <SparklesIcon className="size-4" />
+                )}
+                <span className="sr-only">{optimizePromptTooltip}</span>
+              </Button>
+            </ControlHintTooltip>
+            {optimizerModelGroups.length > 0 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={disabled}
+                    data-testid="v4-composer-optimize-model"
+                    aria-label={optimizeModelMenuTitle}
+                  >
+                    <ChevronDownIcon className="size-3 text-foreground-subtle" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="max-h-72 w-56 overflow-y-auto">
+                  <DropdownMenuItem
+                    onSelect={() => handleSelectOptimizerModel(null)}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{optimizeModelFollowLabel}</span>
+                    {optimizerModel === null ? <CheckIcon className="size-3.5 shrink-0" /> : null}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {optimizerModelGroups.map((group) => (
+                    <div key={group.key}>
+                      <DropdownMenuLabel className="text-ui-xs text-foreground-subtlest">
+                        {group.label}
+                      </DropdownMenuLabel>
+                      {group.modelIds.map((modelId) => {
+                        const selected =
+                          optimizerModel?.providerId === group.key && optimizerModel.modelId === modelId;
+                        return (
+                          <DropdownMenuItem
+                            key={modelId}
+                            onSelect={() =>
+                              handleSelectOptimizerModel({ providerId: group.key, modelId })
+                            }
+                          >
+                            <span className="min-w-0 flex-1 truncate">{modelId}</span>
+                            {selected ? <CheckIcon className="size-3.5 shrink-0" /> : null}
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+          </>
         ) : null}
         {showStopControl ? (
           <ControlHintTooltip title={stopTooltipTitle} shortcut="Esc">
@@ -2154,8 +2244,14 @@ function ConversationComposerImpl({
       composerUsage,
       disabled,
       handleOptimizePrompt,
+      handleSelectOptimizerModel,
       hasText,
+      optimizerModel,
+      optimizerModelGroups,
+      optimizeModelFollowLabel,
+      optimizeModelMenuTitle,
       optimizePromptTitle,
+      optimizePromptTooltip,
       promptOptimizer.optimizing,
       draftConfig,
       draftMode,
