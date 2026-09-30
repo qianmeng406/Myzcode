@@ -1398,6 +1398,8 @@ const zhCN: Record<string, string> = {
   "appHeader.selectOpenApp": "选择打开方式",
   "appHeader.copyPath": "复制路径",
   "fileActions.copyAbsolutePath": "复制绝对路径",
+  "fileActions.copyFile": "复制文件",
+  "fileActions.copyFileFailed": "复制文件失败",
   "fileActions.copyRelativePath": "复制相对路径",
   "appHeader.copyTaskPath": "复制任务路径",
   "appHeader.reloadSession": "重载会话",

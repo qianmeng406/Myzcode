@@ -252,6 +252,9 @@ export function WorkspaceFileTree({
       copyRelativePath: intl.formatMessage({
         id: "fileActions.copyRelativePath",
       }),
+      copyFile: intl.formatMessage({
+        id: "fileActions.copyFile",
+      }),
       open: intl.formatMessage({ id: "common.open" }),
       openInBrowser: intl.formatMessage({
         id: "workspaceFileTree.openInBrowser",

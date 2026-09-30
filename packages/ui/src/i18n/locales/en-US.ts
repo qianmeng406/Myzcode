@@ -1513,6 +1513,8 @@ const enUS: Record<string, string> = {
   "appHeader.selectOpenApp": "Choose app",
   "appHeader.copyPath": "Copy path",
   "fileActions.copyAbsolutePath": "Copy absolute path",
+  "fileActions.copyFile": "Copy file",
+  "fileActions.copyFileFailed": "Failed to copy file",
   "fileActions.copyRelativePath": "Copy relative path",
   "appHeader.copyTaskPath": "Copy task path",
   "appHeader.copySessionId": "Copy session ID",
