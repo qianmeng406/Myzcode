@@ -3192,6 +3192,10 @@ const zhCN: Record<string, string> = {
   "settings.modelProvider.modelConfigIncomplete": "模型配置不完整",
   "settings.modelProvider.models": "模型列表",
   "settings.modelProvider.modelsEmpty": "当前没有配置模型，添加模型后可在聊天中使用。",
+  "settings.modelProvider.removedModels": "已移除的模型（{count}）",
+  "settings.modelProvider.modelsAllRemoved": "所有模型都已移除，展开下方列表可随时恢复。",
+  "settings.modelProvider.removedModelsHint":
+    "关闭开关即视为移除，模型不会再出现在模型选择器中；展开此处可随时恢复。",
   "settings.modelProvider.addModel": "添加模型",
   "settings.modelProvider.modelId": "模型 ID",
   "settings.modelProvider.modelDisplayName": "显示名称",

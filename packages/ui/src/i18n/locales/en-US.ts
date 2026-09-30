@@ -3414,6 +3414,11 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.modelConfigIncomplete": "Model configuration is incomplete",
   "settings.modelProvider.models": "Model list",
   "settings.modelProvider.modelsEmpty": "No models are configured. Add a model to use it in chat.",
+  "settings.modelProvider.removedModels": "Removed models ({count})",
+  "settings.modelProvider.modelsAllRemoved":
+    "All models are removed. Expand the list below to restore them.",
+  "settings.modelProvider.removedModelsHint":
+    "Turning a model off removes it from the list and from the model picker. Expand to restore it at any time.",
   "settings.modelProvider.addModel": "Add model",
   "settings.modelProvider.modelId": "Model ID",
   "settings.modelProvider.modelDisplayName": "Display name",
