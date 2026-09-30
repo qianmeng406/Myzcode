@@ -40,6 +40,7 @@ import {
 import { ResizableHandle, ResizablePanel } from "@/components/ui/resizable.js";
 import { Tabs, TabsContent, TabsList } from "@/components/ui/tabs.js";
 import { SidePaneTabOverview } from "@/app-shell/SidePaneTabOverview.js";
+import { FileExplorerSidePane } from "@/app-shell/FileExplorerSidePane.js";
 import { SubagentSessionSidePane } from "@/app-shell/SubagentSessionSidePane.js";
 import { SubagentDirectorySidePane } from "@/app-shell/SubagentDirectorySidePane.js";
 import { SelectionSideChatPane } from "@/app-shell/SelectionSideChatPane.js";
@@ -93,6 +94,7 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import {
   BugIcon,
   FileDiffIcon,
+  FolderIcon,
   GlobeIcon,
   MessageSquareTextIcon,
   PlusIcon,
@@ -316,6 +318,7 @@ export function AnimatedSidePanePanel({
   onOpenDeveloperTools,
   onOpenTerminalTab,
   onOpenReviewTab,
+  onOpenFileExplorerTab,
   onOpenSelectionSideConversation,
   onRevealGitFileInTree,
   onOpenBrowserUrl,
@@ -381,6 +384,7 @@ export function AnimatedSidePanePanel({
   onOpenDeveloperTools: () => void;
   onOpenTerminalTab: () => void;
   onOpenReviewTab: () => void;
+  onOpenFileExplorerTab: () => void;
   onOpenSelectionSideConversation: () => void;
   onRevealGitFileInTree?: (path: string) => void;
   onOpenBrowserUrl: (url: string) => void;
@@ -449,6 +453,7 @@ export function AnimatedSidePanePanel({
   const previousIsVisibleRef = useRef(isVisible);
   const panelLayout = resolveAnimatedSidePanePanelLayout();
   const hasReviewTab = visibleTabs.some((tab) => tab.type === "git");
+  const hasFileExplorerTab = visibleTabs.some((tab) => tab.type === "file-explorer");
   const canOpenSelectionSideConversation = shouldOfferSelectionSideConversation({
     activeTaskId,
   });
@@ -716,6 +721,17 @@ export function AnimatedSidePanePanel({
             <span>{intl.formatMessage({ id: "sidePane.review" })}</span>
           </DropdownMenuItem>
         ) : null}
+        {!hasFileExplorerTab ? (
+          <DropdownMenuItem
+            data-side-pane-add-item="file-explorer"
+            onSelect={() => {
+              onOpenFileExplorerTab();
+            }}
+          >
+            <FolderIcon className="size-4" />
+            <span>{intl.formatMessage({ id: "fileExplorer.title" })}</span>
+          </DropdownMenuItem>
+        ) : null}
         {/* 画板入口未启用 */}
         {/* <DropdownMenuItem
           onSelect={() => {
@@ -774,6 +790,12 @@ export function AnimatedSidePanePanel({
       icon: FileDiffIcon,
       onOpen: onOpenReviewTab,
     },
+    "file-explorer": {
+      id: "file-explorer",
+      label: intl.formatMessage({ id: "fileExplorer.title" }),
+      icon: FolderIcon,
+      onOpen: onOpenFileExplorerTab,
+    },
     terminal: {
       id: "terminal",
       label: intl.formatMessage({ id: "terminal.title" }),
@@ -797,6 +819,7 @@ export function AnimatedSidePanePanel({
     canOpenSelectionSideConversation,
     developerToolsEnabled,
     hasReviewTab,
+    hasFileExplorerTab,
     supportsEmbeddedBrowser,
   })
     .filter((itemId) => !isOfficeMode || (itemId !== "terminal" && itemId !== "review"))
@@ -878,6 +901,7 @@ export function AnimatedSidePanePanel({
         browserTitle: intl.formatMessage({ id: "browser.title" }),
         reviewTitle: intl.formatMessage({ id: "sidePane.review" }),
         codeViewerTitle: intl.formatMessage({ id: "codeViewer.title" }),
+        fileExplorerTitle: intl.formatMessage({ id: "fileExplorer.title" }),
         treemappingTitle: intl.formatMessage({ id: "treemapping.title" }),
         whiteboardTitle: intl.formatMessage({ id: "whiteboard.title" }),
         modelTrajectoryTitle: intl.formatMessage({
@@ -1191,6 +1215,15 @@ export function AnimatedSidePanePanel({
                             {...(onRevealGitFileInTree === undefined
                               ? {}
                               : { onRevealFileInTree: onRevealGitFileInTree })}
+                          />
+                        ) : tab.type === "file-explorer" ? (
+                          <FileExplorerSidePane
+                            workspacePath={workspaceAbsPath}
+                            workspaceIdentity={workspaceIdentity}
+                            workspaceRemoteSessionId={workspaceRemoteSessionId}
+                            canOpenLocalFileManager={isDesktop}
+                            onOpenBrowserUrl={isDesktop ? onOpenBrowserUrl : undefined}
+                            onOpenCodeViewer={onOpenCodeViewer}
                           />
                         ) : tab.type === "code-viewer" ? (
                           <PreviewPane

@@ -33,6 +33,21 @@ export interface GitSidePaneTab {
   openedAt?: number;
 }
 
+/**
+ * 工作区文件树标签（加号菜单 / 打开标签页选择器里的「文件」）。
+ *
+ * 身份是 **workspace**：一条 workspace 永远只有一份文件树，所以 id 是固定常量，
+ * 重复点击幂等地聚焦同一个 tab（同 git）。树数据不冻进 tab——面板每次挂载自己
+ * 读目录，重启后恢复的 tab 不会显示过期状态。
+ */
+export interface FileExplorerSidePaneTab {
+  id: "file-explorer";
+  type: "file-explorer";
+  ownerTaskId?: string | null;
+  workspaceKey?: string | null;
+  openedAt?: number;
+}
+
 export interface CodeViewerSidePaneTab {
   id: string;
   type: "code-viewer";
@@ -547,6 +562,7 @@ export type WorkspaceSidePaneTab =
   | BackgroundBashSidePaneTab
   | BrowserSidePaneTab
   | GitSidePaneTab
+  | FileExplorerSidePaneTab
   | CodeViewerSidePaneTab
   | TreemappingSidePaneTab
   | WhiteboardSidePaneTab
@@ -679,6 +695,10 @@ function createBrowserSidePaneTab(options?: {
 
 function createGitSidePaneTab(): GitSidePaneTab {
   return { id: "git", type: "git", openedAt: Date.now() };
+}
+
+function createFileExplorerSidePaneTab(): FileExplorerSidePaneTab {
+  return { id: "file-explorer", type: "file-explorer", openedAt: Date.now() };
 }
 
 function createModelTrajectorySidePaneTab(options: {
@@ -1104,6 +1124,7 @@ export function sidePaneOwnerKey(taskId: string | null | undefined): string {
 
 const WORKSPACE_GLOBAL_SIDE_PANE_TAB_TYPES = new Set<WorkspaceSidePaneTab["type"]>([
   "git",
+  "file-explorer",
   "developer-tools",
   "treemapping",
 ]);
@@ -1609,6 +1630,18 @@ export function activateGitSidePane(
   current: WorkspaceSidePaneState | null,
 ): WorkspaceSidePaneState {
   return activateSidePaneTab(current, createGitSidePaneTab());
+}
+
+/**
+ * 打开（或聚焦已打开的）工作区文件树标签。
+ *
+ * 固定 id 使重复点击幂等；文件树是 workspace 级状态，不随对话切换回收
+ * （见 WORKSPACE_GLOBAL_SIDE_PANE_TAB_TYPES）。
+ */
+export function openFileExplorerSidePane(
+  current: WorkspaceSidePaneState | null,
+): WorkspaceSidePaneState {
+  return activateSidePaneTab(current, createFileExplorerSidePaneTab());
 }
 
 export function openWhiteboardSidePane(

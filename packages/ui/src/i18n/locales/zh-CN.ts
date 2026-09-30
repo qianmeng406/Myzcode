@@ -964,6 +964,7 @@ const zhCN: Record<string, string> = {
   "sidePane.openFileEmpty": "没有找到文件。",
   "sidePane.openFile.category": "文件",
   "sidePane.openFile.emptyQuery": "输入内容搜索文件",
+  "fileExplorer.title": "文件",
   "sidePane.review": "审查",
   "whiteboard.title": "画板",
   "whiteboard.defaultName": "画板",

@@ -1045,6 +1045,7 @@ const enUS: Record<string, string> = {
   "sidePane.openFileEmpty": "No files found.",
   "sidePane.openFile.category": "Files",
   "sidePane.openFile.emptyQuery": "Type to search files",
+  "fileExplorer.title": "Files",
   "sidePane.review": "Review",
   "whiteboard.title": "Whiteboard",
   "whiteboard.defaultName": "Whiteboard",
