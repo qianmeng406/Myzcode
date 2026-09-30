@@ -51,12 +51,9 @@ test("Command Code 渠道作为内置条目存在且配置完整", () => {
   assert.equal(provider.api?.baseUrl, "http://47.101.52.182:3050/v1");
   assert.equal(provider.logo?.type, "builtin");
 
-  // 渠道开箱可用：必须自带模型，否则用户进来看到的是空列表。
-  assert.ok(
-    (provider.builtinModelIds?.length ?? 0) > 0,
-    "Command Code 渠道没有任何内置模型",
-  );
-  // 带入的模型必须同时在内置模型规则里声明，否则模型没有能力配置可用。
+  // 渠道的模型由用户自建：目录带入的内置模型既不能删除也不能改名，
+  // 会把该渠道的模型列表变成"写死"的一份，所以这里显式要求目录不预置。
+  assert.equal(provider.builtinModelIds?.length ?? 0, 0, "Command Code 渠道不应预置内置模型");
   const modelRules = catalog.config.modelConfigRules as {
     builtinProviderModelRules: { providerId: string; modelId: string }[];
   };
@@ -65,6 +62,9 @@ test("Command Code 渠道作为内置条目存在且配置完整", () => {
       .filter((rule) => rule.providerId === COMMAND_CODE_PROVIDER_ID)
       .map((rule) => rule.modelId),
   );
+  assert.equal(declared.size, 0, "Command Code 渠道不应预置内置模型规则");
+  // 若目录将来重新预置，带入的模型必须同时在内置模型规则里声明，
+  // 否则模型没有能力配置可用。
   for (const modelId of provider.builtinModelIds ?? []) {
     assert.ok(declared.has(modelId), `模型 ${modelId} 缺少 builtinProviderModelRules 声明`);
   }

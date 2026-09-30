@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 31,
+  "revision": 32,
   "config": {
     "providerConfigRules": {
       "templateRules": [
@@ -864,14 +864,6 @@
           "providerName": "Command Code",
           "config": {
             "group": "command-code",
-            "builtinModelIds": [
-              "deepseek/deepseek-v4-flash",
-              "deepseek/deepseek-v4-flash-vision-exp",
-              "deepseek/deepseek-v4.1-flash",
-              "z-ai/glm-5.3-flash",
-              "zai-org/GLM-5.3",
-              "moonshotai/Kimi-K3"
-            ],
             "access": {
               "type": "api-key"
             },
@@ -6228,48 +6220,6 @@
         {
           "providerId": "account:bigmodel-offpeak-idle-plan",
           "modelId": "GLM-5.3",
-          "config": {
-            "enabled": true
-          }
-        },
-        {
-          "providerId": "command-code",
-          "modelId": "deepseek/deepseek-v4-flash",
-          "config": {
-            "enabled": true
-          }
-        },
-        {
-          "providerId": "command-code",
-          "modelId": "deepseek/deepseek-v4-flash-vision-exp",
-          "config": {
-            "enabled": true
-          }
-        },
-        {
-          "providerId": "command-code",
-          "modelId": "deepseek/deepseek-v4.1-flash",
-          "config": {
-            "enabled": true
-          }
-        },
-        {
-          "providerId": "command-code",
-          "modelId": "z-ai/glm-5.3-flash",
-          "config": {
-            "enabled": true
-          }
-        },
-        {
-          "providerId": "command-code",
-          "modelId": "zai-org/GLM-5.3",
-          "config": {
-            "enabled": true
-          }
-        },
-        {
-          "providerId": "command-code",
-          "modelId": "moonshotai/Kimi-K3",
           "config": {
             "enabled": true
           }
