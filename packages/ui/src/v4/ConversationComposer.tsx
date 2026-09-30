@@ -54,6 +54,7 @@ import {
   ClipboardPenLineIcon,
   InfoIcon,
   RotateCcwIcon,
+  SparklesIcon,
   SquareIcon,
   XIcon,
 } from "lucide-react";
@@ -134,6 +135,7 @@ import {
 } from "@/v4/composer/followupModeSettings.js";
 import { isAppleKeyboardPlatform } from "@/lib/keyboardShortcuts.js";
 import { usePrimaryFollowupModifier } from "@/v4/composer/usePrimaryFollowupModifier.js";
+import { usePromptOptimizer } from "@/v4/composer/usePromptOptimizer.js";
 import { consumeV4ComposerDraftWorkspaceTransferRequest } from "@/v4/composer/composerDraftWorkspaceTransfer.js";
 import { useComposerAttachments } from "@/v4/composer/useComposerAttachments.js";
 import type { ConversationDropTargetController } from "@/v4/composer/conversationDropTarget.js";
@@ -550,6 +552,13 @@ function ConversationComposerImpl({
   const draftScopeId = sessionId ?? V4_DRAFT_SCOPE_ROOT;
   const workspaceKey = workspaceIdentity?.trim() || workspacePath;
   const configPickerScopeKey = `${workspaceKey}\0${draftScopeId}`;
+  // 提示词优化：会话外的一次性快速请求，不进对话历史。
+  const promptOptimizer = usePromptOptimizer({
+    workspacePath,
+    workspaceIdentity,
+    remoteSessionId,
+    locale,
+  });
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
   const [configPickerState, setConfigPickerState] = useState<{
@@ -1101,6 +1110,22 @@ function ConversationComposerImpl({
   const canStop = Boolean(snapshot?.control.canStop);
   const modifiedEnterReversesDelivery = modifiedEnterSubmits && canStop;
   const hasText = text.trim().length > 0;
+  const handleOptimizePrompt = useCallback(async () => {
+    const draft = textRef.current.trim();
+    if (!draft || promptOptimizer.optimizing || pendingRef.current) {
+      return;
+    }
+    const optimized = await promptOptimizer.optimize({
+      draft,
+      history: promptHistory,
+      selection: modelSelectionView?.preferredSelection ?? null,
+    });
+    if (optimized && optimized !== draft) {
+      // 与草稿恢复同一条写入路径：先设编辑器实例，再同步 ref 与草稿持久化。
+      inputApiRef.current?.setText(optimized);
+      updateText(optimized);
+    }
+  }, [modelSelectionView, promptHistory, promptOptimizer, updateText]);
   const hasDraftToSubmit =
     hasText ||
     hasAttachments ||
@@ -2038,6 +2063,7 @@ function ConversationComposerImpl({
       }),
     [onSelectModel],
   );
+  const optimizePromptTitle = intl.formatMessage({ id: "composer.optimizePrompt" });
   const submitControlNode = useMemo(
     () => (
       <div className="flex min-w-0 items-center gap-1">
@@ -2064,6 +2090,26 @@ function ConversationComposerImpl({
             onSendCompressionCommand={onSendCompressionCommand}
           />
         </span>
+        {!showStopControl && !pending ? (
+          <ControlHintTooltip title={optimizePromptTitle}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-md"
+              disabled={disabled || !hasText || promptOptimizer.optimizing}
+              onClick={handleOptimizePrompt}
+              data-testid="v4-composer-optimize-prompt"
+              aria-label={optimizePromptTitle}
+            >
+              {promptOptimizer.optimizing ? (
+                <Spinner className="size-4" />
+              ) : (
+                <SparklesIcon className="size-4" />
+              )}
+              <span className="sr-only">{optimizePromptTitle}</span>
+            </Button>
+          </ControlHintTooltip>
+        ) : null}
         {showStopControl ? (
           <ControlHintTooltip title={stopTooltipTitle} shortcut="Esc">
             <Button
@@ -2107,6 +2153,10 @@ function ConversationComposerImpl({
       composerPhase,
       composerUsage,
       disabled,
+      handleOptimizePrompt,
+      hasText,
+      optimizePromptTitle,
+      promptOptimizer.optimizing,
       draftConfig,
       draftMode,
       handleStopClick,
