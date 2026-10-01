@@ -1684,7 +1684,13 @@ function ConversationComposerImpl({
       }
       inputApiRef.current?.setText(fixPrompt);
       updateText(fixPrompt);
-      void submit();
+      // Lexical 的 onChange 在 replaceEditorText 之后异步回吐一次 updateText，会把
+      // contentRevision 推到 submit 冻结的 cleanupRevision 之后——发送成功后
+      // 「revision 未变才清空输入框」的检查因此永不成立，已发送的修复提示词会留在
+      // 输入栏。推迟一个宏任务让编辑器事件先 settle，使本路径与手打发送完全同构。
+      window.setTimeout(() => {
+        void submit();
+      }, 0);
     },
     [submit, updateText],
   );
