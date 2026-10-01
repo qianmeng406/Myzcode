@@ -1424,6 +1424,19 @@ function ConversationTurnGroupImpl({
               onFork={canForkLatestAssistant ? onFork : undefined}
               onRetry={canRetryLatestAssistant ? onRetry : undefined}
               onFeedbackChange={onFeedbackChange}
+              // 审查这一回合：只给「成功结束 + 有文件改动 + 未撤销」的回合提供入口；
+              // 结果统一显示在 composer 上方的 Oracle 横幅，一次只保留最近一次审查。
+              onReviewTurn={
+                context.reviewTurn &&
+                unit.header?.entityId &&
+                unit.header.state === "completedSuccess" &&
+                (unit.header.fileChanges?.files ?? 0) > 0 &&
+                unit.header.fileChanges?.state !== "reverted"
+                  ? () => {
+                      if (unit.header) context.reviewTurn?.(unit.header);
+                    }
+                  : undefined
+              }
               hookInvocations={unit.hookInvocations}
               turnId={unit.turnId}
               className="opacity-0 transition-opacity group-hover/assistant-turn:opacity-100 focus-within:opacity-100"

@@ -11,6 +11,7 @@ import {
   GitBranchIcon,
   GoalIcon,
   PencilIcon,
+  ShieldCheckIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,
   TrendingUpDownIcon,
@@ -26,6 +27,7 @@ import {
   TID_V4_FEEDBACK_DISLIKE,
   TID_V4_FEEDBACK_LIKE,
   TID_V4_FORK,
+  TID_V4_ORACLE_REVIEW,
   TID_V4_ROW,
   TID_V4_ROW_ATTACHMENTS,
   testId,
@@ -1318,6 +1320,7 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
   turnId,
   onFork,
   onFeedbackChange,
+  onReviewTurn,
   className,
 }: {
   rowId: number;
@@ -1331,6 +1334,8 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
   onFork?: (target: ConversationRowTarget) => void;
   onRetry?: (target: ConversationRowTarget) => void;
   onFeedbackChange?: AssistantFeedbackHandler;
+  /** 审查这一回合：由轮尾装配处按「已完成 + 有 diff」裁决后传入；缺席即不渲染。 */
+  onReviewTurn?: () => void;
   className?: string;
 }) {
   const { intl, locale } = useZCodeIntl();
@@ -1450,6 +1455,17 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
             </span>
           </MessageAction>
         </>
+      ) : null}
+      {onReviewTurn ? (
+        <MessageAction
+          aria-label={intl.formatMessage({ id: "chat.oracleReview.reviewTurn" })}
+          label={intl.formatMessage({ id: "chat.oracleReview.reviewTurn" })}
+          tooltip={intl.formatMessage({ id: "chat.oracleReview.reviewTurn" })}
+          data-testid={testId(TID_V4_ORACLE_REVIEW, String(rowId))}
+          onClick={onReviewTurn}
+        >
+          <ShieldCheckIcon className="size-3.5" />
+        </MessageAction>
       ) : null}
       {onFork && entityId ? (
         <MessageAction

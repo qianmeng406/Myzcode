@@ -173,6 +173,8 @@ export interface ConversationRowRenderContext {
     target: ConversationRowTarget,
     options: ConversationFileChangesRequestOptions,
   ) => Promise<V4ConversationFileChangesResult>;
+  /** 轮尾工具栏「审查这一回合」：SessionPane 绑定 Oracle hook；缺席即不渲染按钮。 */
+  reviewTurn?: (header: TurnHeaderRow) => void;
   previewFileRewind?: (
     target: ConversationRowTarget,
   ) => Promise<V4ConversationFileRewindPreviewResult>;

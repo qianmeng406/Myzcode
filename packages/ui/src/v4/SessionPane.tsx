@@ -22,6 +22,7 @@ import {
   TID_CHAT_EMPTY,
   TID_V4_SESSION_PANE,
   testId,
+  type ModelSelection,
   ZCODE_AGENT_PROVIDER,
 } from "@zcode/shared";
 import type {
@@ -229,6 +230,11 @@ import {
 import { useSlashCommands } from "@/hooks/useSlashCommands.js";
 import { useV4Conversation } from "@/v4/V4ConversationContext.js";
 import { useConversationProjection } from "@/v4/useConversationProjection.js";
+import {
+  readStoredOracleModelSelection,
+  writeStoredOracleModelSelection,
+} from "@/v4/oracleReview/oracleReviewSupport.js";
+import { useOracleReview } from "@/v4/oracleReview/useOracleReview.js";
 import { usePendingCommandRecovery } from "@/v4/usePendingCommandRecovery.js";
 import { useV4SessionQuotaBanner } from "@/v4/useV4SessionQuotaBanner.js";
 import { CodingPlanQuotaResetPrompt } from "@/v4/CodingPlanQuotaResetPrompt.js";
@@ -1289,6 +1295,23 @@ export function SessionPane({
     useZCodeSessionStore.getState().invalidateDraftRuntime(workspacePath, workspaceIdentity);
   }, [draftConfigRef, modelSelectionView?.revision, sessionId, workspaceIdentity, workspacePath]);
   const recommendStartPlan = useStartPlanRecommendation(modelSelectionView);
+  // Oracle 把关：hook 挂在 pane 层——同一份状态既喂 composer（横幅/盾牌/模型下拉），
+  // 也经 row context 喂轮尾工具栏的「审查这一回合」。模型偏好存 renderer localStorage。
+  const [oracleModel, setOracleModel] = useState<ModelSelection | null>(() =>
+    readStoredOracleModelSelection(),
+  );
+  const handleSelectOracleModel = useCallback((selection: ModelSelection | null) => {
+    setOracleModel(selection);
+    writeStoredOracleModelSelection(selection);
+  }, []);
+  const oracleReview = useOracleReview({
+    snapshot,
+    workspacePath,
+    workspaceIdentity,
+    ...(remoteSessionId ? { remoteSessionId } : {}),
+    oracleModel,
+    modelSelectionView,
+  });
   const createSubmissionFromComposer = useCallback(
     () => createComposerSubmissionConfig(draftConfigRef.current, modelSelectionView),
     [draftConfigRef, modelSelectionView],
@@ -2229,6 +2252,7 @@ export function SessionPane({
       workflowGraphByToolCallId,
       workflowDraftByToolCallId,
       fetchFileChanges: handleFetchFileChanges,
+      reviewTurn: oracleReview.reviewTurnHeader,
       previewFileRewind: workspaceFileRewindEnabled ? handlePreviewFileRewind : undefined,
       applyFileRewind: workspaceFileRewindEnabled ? handleApplyFileRewind : undefined,
       readAttachment: attachmentRead,
@@ -2240,6 +2264,7 @@ export function SessionPane({
       workspaceIdentity,
       remoteSessionId,
       modelSelectionView,
+      oracleReview.reviewTurnHeader,
       snapshot?.logEpoch,
       theme,
       codePreviewSettings,
@@ -4385,6 +4410,15 @@ export function SessionPane({
       // Snapshot 仍服务用量、路由与运行态；工具栏的 mode/model 只读下方 Composer Draft。
       snapshot={snapshot}
       sessionId={sessionId}
+      oracleReview={{
+        state: oracleReview.state,
+        enabled: oracleReview.enabled,
+        manualReview: oracleReview.manualReview,
+        reviewTurnHeader: oracleReview.reviewTurnHeader,
+        dismiss: oracleReview.dismiss,
+        model: oracleModel,
+        onSelectModel: handleSelectOracleModel,
+      }}
       // 草稿 taskId 仍为 null，但 prewarm 已经拥有独立 AgentRuntime。
       // 只给 Skill catalog 下发 effective id，避免 UI 扫到 prewarm runtime 尚未加载的新 Skill。
       skillCatalogSessionId={effectiveSessionId}

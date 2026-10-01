@@ -121,13 +121,13 @@ export function useOracleReview(params: {
   }, [sessionId, setOracleState]);
 
   const reviewTurn = useCallback(
-    async (mode: OracleReviewRequestMode) => {
+    async (mode: OracleReviewRequestMode, headerOverride?: TurnHeaderRow) => {
       const snapshot = snapshotRef.current;
       const agentService = services?.zcodeAgentService;
       if (!snapshot || !agentService || stateRef.current.status === "pending") {
         return;
       }
-      const header = findLastCompletedTurnHeader(snapshot);
+      const header = headerOverride ?? findLastCompletedTurnHeader(snapshot);
       if (!header) {
         setOracleState({ status: "error", mode, failure: { kind: "no-turn" } });
         return;
@@ -257,9 +257,29 @@ export function useOracleReview(params: {
     void reviewTurn("manual");
   }, [reviewTurn]);
 
+  // 轮尾工具栏「审查这一回合」：按钮只在有 diff 的已完成回合渲染，这里不再重复校验。
+  const reviewTurnHeader = useCallback(
+    (header: TurnHeaderRow) => {
+      void reviewTurn("manual", header);
+    },
+    [reviewTurn],
+  );
+
   const dismiss = useCallback(() => {
     setOracleState({ status: "idle" });
   }, [setOracleState]);
 
-  return { state, enabled, manualReview, dismiss };
+  return { state, enabled, manualReview, reviewTurnHeader, dismiss };
+}
+
+/** SessionPane → composer / 行渲染注入的完整控制面；composer 不再自持 hook 实例。 */
+export interface OracleReviewController {
+  state: OracleReviewState;
+  enabled: boolean;
+  manualReview: () => void;
+  reviewTurnHeader: (header: TurnHeaderRow) => void;
+  dismiss: () => void;
+  /** 把关模型偏好（localStorage 全局）；下拉的受控值。 */
+  model: ModelSelection | null;
+  onSelectModel: (selection: ModelSelection | null) => void;
 }

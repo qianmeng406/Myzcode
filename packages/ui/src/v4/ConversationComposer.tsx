@@ -153,11 +153,7 @@ import {
   writeStoredOptimizerModelSelection,
 } from "@/v4/composer/usePromptOptimizer.js";
 import { OracleReviewBanner } from "@/v4/oracleReview/OracleReviewBanner.js";
-import {
-  readStoredOracleModelSelection,
-  writeStoredOracleModelSelection,
-} from "@/v4/oracleReview/oracleReviewSupport.js";
-import { useOracleReview } from "@/v4/oracleReview/useOracleReview.js";
+import type { OracleReviewController } from "@/v4/oracleReview/useOracleReview.js";
 import { consumeV4ComposerDraftWorkspaceTransferRequest } from "@/v4/composer/composerDraftWorkspaceTransfer.js";
 import { useComposerAttachments } from "@/v4/composer/useComposerAttachments.js";
 import type { ConversationDropTargetController } from "@/v4/composer/conversationDropTarget.js";
@@ -410,11 +406,12 @@ interface ConversationComposerProps {
    */
   blockingRequestId?: string | null;
   disabled?: boolean;
-  /**
-   * 是否在新建任务 / 切换会话 / 挂载后自动把光标聚焦到输入框（默认开）。
+  /** 是否在新建任务 / 切换会话 / 挂载后自动把光标聚焦到输入框（默认开）。
    * 竖切多 pane 时由宿主传入 SessionPane.focused，仅焦点 pane 聚焦、后台 pane 不抢焦点。
    */
   autoFocusEnabled?: boolean;
+  /** Oracle 把关控制面由 SessionPane 注入（轮尾「审查这一回合」与 composer 共用同一实例）。 */
+  oracleReview?: OracleReviewController;
   /** 当前 composer 是否运行在手机 Web 远控壳中。 */
   workspacePath: string;
   workspaceIdentity?: string;
@@ -524,6 +521,7 @@ function ConversationComposerImpl({
   blockingRequestId = null,
   disabled = false,
   autoFocusEnabled = true,
+  oracleReview,
   workspacePath,
   workspaceIdentity,
   remoteSessionId,
@@ -1133,29 +1131,13 @@ function ConversationComposerImpl({
   const modifiedEnterReversesDelivery = modifiedEnterSubmits && canStop;
   const hasText = text.trim().length > 0;
   // 优化用模型：null = 跟随会话模型；用户显式选择后全局记住。
-  const [optimizerModel, setOptimizerModel] = useState<ModelSelection | null>(
-    () => readStoredOptimizerModelSelection(),
+  const [optimizerModel, setOptimizerModel] = useState<ModelSelection | null>(() =>
+    readStoredOptimizerModelSelection(),
   );
   const handleSelectOptimizerModel = useCallback((selection: ModelSelection | null) => {
     setOptimizerModel(selection);
     writeStoredOptimizerModelSelection(selection);
   }, []);
-  // Oracle 把关模型：null = 跟随会话模型；与优化用模型同款存取（全局 localStorage 偏好）。
-  const [oracleModel, setOracleModel] = useState<ModelSelection | null>(() =>
-    readStoredOracleModelSelection(),
-  );
-  const handleSelectOracleModel = useCallback((selection: ModelSelection | null) => {
-    setOracleModel(selection);
-    writeStoredOracleModelSelection(selection);
-  }, []);
-  const oracleReview = useOracleReview({
-    snapshot,
-    workspacePath,
-    workspaceIdentity,
-    remoteSessionId,
-    oracleModel,
-    modelSelectionView,
-  });
   const handleOptimizePrompt = useCallback(async () => {
     const draft = textRef.current.trim();
     if (!draft || promptOptimizer.optimizing || pendingRef.current) {
@@ -2215,9 +2197,7 @@ function ConversationComposerImpl({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="max-h-72 w-56 overflow-y-auto">
-                  <DropdownMenuItem
-                    onSelect={() => handleSelectOptimizerModel(null)}
-                  >
+                  <DropdownMenuItem onSelect={() => handleSelectOptimizerModel(null)}>
                     <span className="min-w-0 flex-1 truncate">{optimizeModelFollowLabel}</span>
                     {optimizerModel === null ? <CheckIcon className="size-3.5 shrink-0" /> : null}
                   </DropdownMenuItem>
@@ -2254,21 +2234,23 @@ function ConversationComposerImpl({
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
-            <ControlHintTooltip title={oracleReviewButtonTitle}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-md"
-                disabled={disabled}
-                onClick={oracleReview.manualReview}
-                data-testid="v4-composer-oracle-review"
-                aria-label={oracleReviewButtonTitle}
-              >
-                <ShieldCheckIcon className="size-4" />
-                <span className="sr-only">{oracleReviewButtonTitle}</span>
-              </Button>
-            </ControlHintTooltip>
-            {optimizerModelGroups.length > 0 ? (
+            {oracleReview ? (
+              <ControlHintTooltip title={oracleReviewButtonTitle}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-md"
+                  disabled={disabled}
+                  onClick={oracleReview.manualReview}
+                  data-testid="v4-composer-oracle-review"
+                  aria-label={oracleReviewButtonTitle}
+                >
+                  <ShieldCheckIcon className="size-4" />
+                  <span className="sr-only">{oracleReviewButtonTitle}</span>
+                </Button>
+              </ControlHintTooltip>
+            ) : null}
+            {oracleReview && optimizerModelGroups.length > 0 ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -2283,11 +2265,11 @@ function ConversationComposerImpl({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="max-h-72 w-56 overflow-y-auto">
-                  <DropdownMenuItem
-                    onSelect={() => handleSelectOracleModel(null)}
-                  >
+                  <DropdownMenuItem onSelect={() => oracleReview.onSelectModel(null)}>
                     <span className="min-w-0 flex-1 truncate">{oracleModelFollowLabel}</span>
-                    {oracleModel === null ? <CheckIcon className="size-3.5 shrink-0" /> : null}
+                    {oracleReview.model === null ? (
+                      <CheckIcon className="size-3.5 shrink-0" />
+                    ) : null}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {optimizerModelGroups.map((group) => (
@@ -2297,13 +2279,13 @@ function ConversationComposerImpl({
                       </DropdownMenuLabel>
                       {group.models.map((model) => {
                         const selected =
-                          oracleModel?.providerId === group.key &&
-                          oracleModel.modelId === model.modelId;
+                          oracleReview.model?.providerId === group.key &&
+                          oracleReview.model.modelId === model.modelId;
                         return (
                           <DropdownMenuItem
                             key={model.modelId}
                             onSelect={() =>
-                              handleSelectOracleModel({
+                              oracleReview.onSelectModel({
                                 providerId: group.key,
                                 modelId: model.modelId,
                                 ...(model.oracleReasoningLevel
@@ -2503,12 +2485,14 @@ function ConversationComposerImpl({
           />
         </div>
       ) : null}
-      <OracleReviewBanner
-        state={oracleReview.state}
-        onRereview={oracleReview.manualReview}
-        onDismiss={oracleReview.dismiss}
-        onFix={handleOracleFixRequest}
-      />
+      {oracleReview ? (
+        <OracleReviewBanner
+          state={oracleReview.state}
+          onRereview={oracleReview.manualReview}
+          onDismiss={oracleReview.dismiss}
+          onFix={handleOracleFixRequest}
+        />
+      ) : null}
       <div
         className={cn(
           "chat-composer-input-surface w-full",

@@ -147,6 +147,7 @@ const zhCN: Record<string, string> = {
   "chat.composer.oracleReview": "审查上一回合（Oracle）",
   "chat.composer.oracleModel": "Oracle 把关模型",
   "chat.composer.oracleModelFollow": "跟随会话模型",
+  "chat.oracleReview.reviewTurn": "审查这一回合（Oracle）",
   "chat.oracleReview.pending": "Oracle 审查中…",
   "chat.oracleReview.verdict.pass": "通过",
   "chat.oracleReview.verdict.warn": "有注意事项",

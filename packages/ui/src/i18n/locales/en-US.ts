@@ -156,6 +156,7 @@ const enUS: Record<string, string> = {
   "chat.composer.oracleReview": "Review last turn (Oracle)",
   "chat.composer.oracleModel": "Oracle review model",
   "chat.composer.oracleModelFollow": "Follow session model",
+  "chat.oracleReview.reviewTurn": "Review this turn (Oracle)",
   "chat.oracleReview.pending": "Oracle is reviewing…",
   "chat.oracleReview.verdict.pass": "Pass",
   "chat.oracleReview.verdict.warn": "Warnings",
