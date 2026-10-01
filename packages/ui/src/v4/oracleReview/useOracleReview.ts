@@ -145,7 +145,16 @@ export function useOracleReview(params: {
     async (mode: OracleReviewRequestMode, headerOverride?: TurnHeaderRow) => {
       const snapshot = snapshotRef.current;
       const agentService = services?.zcodeAgentService;
-      if (!snapshot || !agentService || stateRef.current.status === "pending") {
+      if (!snapshot || !agentService) {
+        return;
+      }
+      if (stateRef.current.status === "pending") {
+        // 单横幅设计：审查进行中（最长 ~10 分钟）的重复点击只能静默忽略——
+        // 横幅此时显示「审查中」。留痕日志，避免「点了没反应」无从排查。
+        logger.info("[OracleReview] 已有审查在进行中，忽略本次请求", {
+          mode,
+          overrideTurnRowId: headerOverride?.rowId ?? null,
+        });
         return;
       }
       const header = headerOverride ?? findLastCompletedTurnHeader(snapshot);
@@ -153,6 +162,14 @@ export function useOracleReview(params: {
         setOracleState({ status: "error", mode, failure: { kind: "no-turn" } });
         return;
       }
+      // 诊断留痕：逐轮按钮审历史旧轮与默认「最近回合」共用本函数，日志区分入口
+      // 与目标轮，便于把失败归因到具体路径。
+      logger.info("[OracleReview] 发起回合审查", {
+        mode,
+        turnRowId: header.rowId,
+        override: headerOverride !== undefined,
+        files: header.fileChanges?.files ?? 0,
+      });
       if (mode === "auto") {
         // 自动把关每回合至多一次；手动按钮不受限（重审同一回合是明确意图）。
         if (autoReviewedTurnRowIdsRef.current.has(header.rowId)) {
