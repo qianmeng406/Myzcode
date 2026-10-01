@@ -57,6 +57,7 @@ import {
   ClipboardPenLineIcon,
   InfoIcon,
   RotateCcwIcon,
+  ShieldCheckIcon,
   SparklesIcon,
   SquareIcon,
   XIcon,
@@ -151,6 +152,12 @@ import {
   usePromptOptimizer,
   writeStoredOptimizerModelSelection,
 } from "@/v4/composer/usePromptOptimizer.js";
+import { OracleReviewBanner } from "@/v4/oracleReview/OracleReviewBanner.js";
+import {
+  readStoredOracleModelSelection,
+  writeStoredOracleModelSelection,
+} from "@/v4/oracleReview/oracleReviewSupport.js";
+import { useOracleReview } from "@/v4/oracleReview/useOracleReview.js";
 import { consumeV4ComposerDraftWorkspaceTransferRequest } from "@/v4/composer/composerDraftWorkspaceTransfer.js";
 import { useComposerAttachments } from "@/v4/composer/useComposerAttachments.js";
 import type { ConversationDropTargetController } from "@/v4/composer/conversationDropTarget.js";
@@ -1133,6 +1140,22 @@ function ConversationComposerImpl({
     setOptimizerModel(selection);
     writeStoredOptimizerModelSelection(selection);
   }, []);
+  // Oracle 把关模型：null = 跟随会话模型；与优化用模型同款存取（全局 localStorage 偏好）。
+  const [oracleModel, setOracleModel] = useState<ModelSelection | null>(() =>
+    readStoredOracleModelSelection(),
+  );
+  const handleSelectOracleModel = useCallback((selection: ModelSelection | null) => {
+    setOracleModel(selection);
+    writeStoredOracleModelSelection(selection);
+  }, []);
+  const oracleReview = useOracleReview({
+    snapshot,
+    workspacePath,
+    workspaceIdentity,
+    remoteSessionId,
+    oracleModel,
+    modelSelectionView,
+  });
   const handleOptimizePrompt = useCallback(async () => {
     const draft = textRef.current.trim();
     if (!draft || promptOptimizer.optimizing || pendingRef.current) {
@@ -1671,6 +1694,18 @@ function ConversationComposerImpl({
   const resolvedSendTooltipShortcut = modifierTooltip?.shortcut ?? sendShortcut;
   const stopTooltipTitle = intl.formatMessage({ id: "chat.stop" });
   const visibleError = error && !shouldSuppressChatErrorBanner(error) ? error : null;
+  // Oracle 一键修复：把问题清单写入输入框后直接走主发送路径（含草稿抢占/队列语义）。
+  const handleOracleFixRequest = useCallback(
+    (fixPrompt: string) => {
+      if (!fixPrompt || pendingRef.current) {
+        return;
+      }
+      inputApiRef.current?.setText(fixPrompt);
+      updateText(fixPrompt);
+      void submit();
+    },
+    [submit, updateText],
+  );
 
   useEffect(() => {
     if (!visibleError || !conversationTelemetry || !telemetryVisible) return;
@@ -2088,6 +2123,8 @@ function ConversationComposerImpl({
   );
   const optimizePromptTitle = intl.formatMessage({ id: "chat.composer.optimizePrompt" });
   // ✨ 旁的下拉：优化用模型清单（按 provider 分组）。没有可用模型时整个下拉不渲染。
+  // Oracle 复用同一份模型清单；推理档两者取向相反：优化取最低档走辅助快速通道，
+  // Oracle 取最高档让把关模型尽量深想。
   const optimizerModelGroups = useMemo(
     () =>
       (modelSelectionView?.providers ?? [])
@@ -2100,12 +2137,19 @@ function ConversationComposerImpl({
             // 部分渠道（如 Command Code）在创建模型时强制要求推理档；
             // 选中即带该模型的最低公开档，正好与辅助快速通道的绑定一致。
             reasoningLevel: model.config.optionSpecs.reasoningLevel?.values[0],
+            oracleReasoningLevel:
+              model.config.optionSpecs.reasoningLevel?.values[
+                (model.config.optionSpecs.reasoningLevel?.values.length ?? 1) - 1
+              ],
           })),
         })),
     [modelSelectionView],
   );
   const optimizeModelMenuTitle = intl.formatMessage({ id: "chat.composer.optimizeModel" });
   const optimizeModelFollowLabel = intl.formatMessage({ id: "chat.composer.optimizeModelFollow" });
+  const oracleReviewButtonTitle = intl.formatMessage({ id: "chat.composer.oracleReview" });
+  const oracleModelMenuTitle = intl.formatMessage({ id: "chat.composer.oracleModel" });
+  const oracleModelFollowLabel = intl.formatMessage({ id: "chat.composer.oracleModelFollow" });
   const optimizePromptTooltip =
     optimizerModel && promptOptimizer.optimizing === false
       ? `${optimizePromptTitle}（${optimizerModel.modelId}）`
@@ -2196,6 +2240,74 @@ function ConversationComposerImpl({
                                 modelId: model.modelId,
                                 ...(model.reasoningLevel
                                   ? { options: { reasoningLevel: model.reasoningLevel } }
+                                  : {}),
+                              })
+                            }
+                          >
+                            <span className="min-w-0 flex-1 truncate">{model.modelId}</span>
+                            {selected ? <CheckIcon className="size-3.5 shrink-0" /> : null}
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+            <ControlHintTooltip title={oracleReviewButtonTitle}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-md"
+                disabled={disabled}
+                onClick={oracleReview.manualReview}
+                data-testid="v4-composer-oracle-review"
+                aria-label={oracleReviewButtonTitle}
+              >
+                <ShieldCheckIcon className="size-4" />
+                <span className="sr-only">{oracleReviewButtonTitle}</span>
+              </Button>
+            </ControlHintTooltip>
+            {optimizerModelGroups.length > 0 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={disabled}
+                    data-testid="v4-composer-oracle-model"
+                    aria-label={oracleModelMenuTitle}
+                  >
+                    <ChevronDownIcon className="size-3 text-foreground-subtle" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="max-h-72 w-56 overflow-y-auto">
+                  <DropdownMenuItem
+                    onSelect={() => handleSelectOracleModel(null)}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{oracleModelFollowLabel}</span>
+                    {oracleModel === null ? <CheckIcon className="size-3.5 shrink-0" /> : null}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {optimizerModelGroups.map((group) => (
+                    <div key={group.key}>
+                      <DropdownMenuLabel className="text-ui-xs text-foreground-subtlest">
+                        {group.label}
+                      </DropdownMenuLabel>
+                      {group.models.map((model) => {
+                        const selected =
+                          oracleModel?.providerId === group.key &&
+                          oracleModel.modelId === model.modelId;
+                        return (
+                          <DropdownMenuItem
+                            key={model.modelId}
+                            onSelect={() =>
+                              handleSelectOracleModel({
+                                providerId: group.key,
+                                modelId: model.modelId,
+                                ...(model.oracleReasoningLevel
+                                  ? { options: { reasoningLevel: model.oracleReasoningLevel } }
                                   : {}),
                               })
                             }
@@ -2391,6 +2503,12 @@ function ConversationComposerImpl({
           />
         </div>
       ) : null}
+      <OracleReviewBanner
+        state={oracleReview.state}
+        onRereview={oracleReview.manualReview}
+        onDismiss={oracleReview.dismiss}
+        onFix={handleOracleFixRequest}
+      />
       <div
         className={cn(
           "chat-composer-input-surface w-full",

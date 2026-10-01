@@ -1092,6 +1092,22 @@ export function SettingsPage({
     },
     [updateSharedSettings],
   );
+  // Oracle 双模型把关：同 keepAwake 的共享设置链；把关模型选择存 renderer 本地（composer 菜单）。
+  const handleOracleReviewEnabledChange = useCallback(
+    async (enabled: boolean) => {
+      await runSettingsActionAsync({
+        featureId: "settings.desktop",
+        action: "toggle_oracle_review",
+        trigger: "switch",
+        operation: () => updateSharedSettings({ oracleReviewEnabled: enabled }),
+        completed: {
+          resultSource: "shared_settings",
+          stateAfter: enabled ? "enabled" : "disabled",
+        },
+      });
+    },
+    [updateSharedSettings],
+  );
   const handleDesktopChromiumHardwareAccelerationChange = useCallback(
     async (enabled: boolean) => {
       await runSettingsActionAsync({
@@ -1663,6 +1679,7 @@ export function SettingsPage({
                             notificationSoundEnabled={notificationSoundEnabled}
                             closeToTrayOnWindows={closeToTrayOnWindows}
                             keepAwakeWhileRunning={sharedSettings?.keepAwakeWhileRunning ?? false}
+                            oracleReviewEnabled={sharedSettings?.oracleReviewEnabled ?? false}
                             desktopChromiumHardwareAccelerationEnabled={
                               desktopChromiumHardwareAccelerationEnabled
                             }
@@ -1744,6 +1761,7 @@ export function SettingsPage({
                             }
                             onCloseToTrayOnWindowsChange={handleCloseToTrayOnWindowsChange}
                             onKeepAwakeWhileRunningChange={handleKeepAwakeWhileRunningChange}
+                            onOracleReviewEnabledChange={handleOracleReviewEnabledChange}
                             onDesktopChromiumHardwareAccelerationChange={
                               handleDesktopChromiumHardwareAccelerationChange
                             }

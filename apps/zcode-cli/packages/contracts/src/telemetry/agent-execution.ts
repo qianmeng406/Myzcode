@@ -8,6 +8,7 @@ export const AgentTelemetryOperation = {
   ContextCompaction: "context_compaction",
   GoalCompletionVerification: "goal_completion_verification",
   GoalTitleGeneration: "goal_title_generation",
+  OracleTurnReview: "oracle_turn_review",
   ProjectMemoryExtract: "project_memory_extract",
   ReadSessionContextExtract: "read_session_context_extract",
   ReadSessionContextSynthesize: "read_session_context_synthesize",
