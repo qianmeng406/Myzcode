@@ -4413,6 +4413,7 @@ export function SessionPane({
       oracleReview={{
         state: oracleReview.state,
         enabled: oracleReview.enabled,
+        pendingElapsedSeconds: oracleReview.pendingElapsedSeconds,
         manualReview: oracleReview.manualReview,
         reviewTurnHeader: oracleReview.reviewTurnHeader,
         dismiss: oracleReview.dismiss,

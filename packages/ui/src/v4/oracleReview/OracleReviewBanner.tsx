@@ -21,6 +21,9 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { ORACLE_REVIEW_REQUEST_TIMEOUT_MS, buildOracleFixPrompt } from "./oracleReviewSupport.js";
 import type { OracleReviewFailure, OracleReviewState } from "./useOracleReview.js";
 
+/** 等待超过该秒数后在 pending 卡片上提示「渠道响应慢，可换把关模型」。 */
+const SLOW_REVIEW_HINT_SECONDS = 120;
+
 /**
  * Oracle 审查结果横幅：挂在输入框上方（与 ChatErrorBanner 同层）。
  * pending 展示审查中；result 展示裁决 + 摘要 + 可折叠的问题清单与一键修复；
@@ -97,11 +100,14 @@ function failureDetail(state: Extract<OracleReviewState, { status: "error" }>): 
 
 export function OracleReviewBanner({
   state,
+  pendingElapsedSeconds = 0,
   onRereview,
   onDismiss,
   onFix,
 }: {
   state: OracleReviewState;
+  /** pending 已等待秒数（宿主每秒更新）；驱动时长跳动与慢渠道提示。 */
+  pendingElapsedSeconds?: number;
   onRereview: () => void;
   onDismiss: () => void;
   onFix: (fixPrompt: string) => void;
@@ -139,8 +145,20 @@ export function OracleReviewBanner({
             <>
               <Loader2Icon className="size-4 shrink-0 animate-spin text-foreground-subtle" />
               <span className="min-w-0 flex-1 truncate text-ui-base text-foreground">
-                {intl.formatMessage({ id: "chat.oracleReview.pending" })}
+                {intl.formatMessage(
+                  { id: "chat.oracleReview.pending" },
+                  {
+                    model: state.modelLabel,
+                    minutes: String(Math.floor(pendingElapsedSeconds / 60)),
+                    seconds: String(pendingElapsedSeconds % 60).padStart(2, "0"),
+                  },
+                )}
               </span>
+              {pendingElapsedSeconds >= SLOW_REVIEW_HINT_SECONDS ? (
+                <span className="hidden shrink-0 text-ui-sm text-foreground-subtle md:inline">
+                  {intl.formatMessage({ id: "chat.oracleReview.pendingSlow" })}
+                </span>
+              ) : null}
             </>
           ) : null}
           {state.status === "error"

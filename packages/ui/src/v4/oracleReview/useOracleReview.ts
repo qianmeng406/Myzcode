@@ -39,7 +39,12 @@ export type OracleReviewFailure =
 
 export type OracleReviewState =
   | { status: "idle" }
-  | { status: "pending"; mode: OracleReviewRequestMode }
+  | {
+      status: "pending";
+      mode: OracleReviewRequestMode;
+      /** 本次审查实际使用的把关模型（providerId/modelId），卡片 pending 时展示。 */
+      modelLabel: string;
+    }
   | {
       status: "result";
       mode: OracleReviewRequestMode;
@@ -194,7 +199,8 @@ export function useOracleReview(params: {
         setOracleState({ status: "error", mode, failure: { kind: "no-turn" } });
         return;
       }
-      setOracleState({ status: "pending", mode });
+      const pendingModelLabel = `${requestOptions.selection.providerId}/${requestOptions.selection.modelId}`;
+      setOracleState({ status: "pending", mode, modelLabel: pendingModelLabel });
       const requestSeq = requestSeqRef.current + 1;
       requestSeqRef.current = requestSeq;
       const applyIfCurrent = (next: OracleReviewState) => {
@@ -322,6 +328,30 @@ export function useOracleReview(params: {
     void reviewTurn("auto");
   }, [phase, reviewTurn]);
 
+  // 审查等待时长：pending 期间每秒跳一次，让用户确认「还在跑」；协议无流式通道，
+  // 跨进程 token 级进度不可得，等待时长 + 慢渠道提示是零协议改动的替代指示。
+  const [pendingElapsedSeconds, setPendingElapsedSeconds] = useState(0);
+  const pendingStartedAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (state.status !== "pending") {
+      pendingStartedAtRef.current = null;
+      setPendingElapsedSeconds(0);
+      return;
+    }
+    if (pendingStartedAtRef.current === null) {
+      pendingStartedAtRef.current = Date.now();
+    }
+    const startedAt = pendingStartedAtRef.current;
+    const tick = () => {
+      setPendingElapsedSeconds(Math.max(0, Math.round((Date.now() - startedAt) / 1000)));
+    };
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [state.status]);
+
   const manualReview = useCallback(() => {
     void reviewTurn("manual");
   }, [reviewTurn]);
@@ -338,13 +368,15 @@ export function useOracleReview(params: {
     setOracleState({ status: "idle" });
   }, [setOracleState]);
 
-  return { state, enabled, manualReview, reviewTurnHeader, dismiss };
+  return { state, enabled, pendingElapsedSeconds, manualReview, reviewTurnHeader, dismiss };
 }
 
 /** SessionPane → composer / 行渲染注入的完整控制面；composer 不再自持 hook 实例。 */
 export interface OracleReviewController {
   state: OracleReviewState;
   enabled: boolean;
+  /** pending 已等待秒数（每秒跳动）；结果/错误态归零。 */
+  pendingElapsedSeconds: number;
   manualReview: () => void;
   reviewTurnHeader: (header: TurnHeaderRow) => void;
   dismiss: () => void;
