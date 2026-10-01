@@ -8,8 +8,11 @@ import type { ModelSelection } from "@zcode/shared";
  */
 
 export const ORACLE_TURN_REVIEW_QUERY_SOURCE = "oracle_turn_review";
-export const ORACLE_REVIEW_REQUEST_TIMEOUT_MS = 120_000;
-export const ORACLE_REVIEW_MAX_OUTPUT_TOKENS = 2048;
+// 无输出上限 + 深审大 diff 时思考可能很久；5 分钟是客户端 deadline，横幅不阻塞输入。
+export const ORACLE_REVIEW_REQUEST_TIMEOUT_MS = 300_000;
+// 刻意不传 maxOutputTokens：思考模型深审大 diff 时 reasoning 也计入输出预算，
+// 设上限会被思考吃光、正文为空（实测 2048 上限返回空文本）。放开让模型想完，
+// 审查结论从返回内容里解析；超时与空响应各有兜底。
 
 const MAX_DIFF_FILES = 12;
 const MAX_DIFF_CHARS_PER_FILE = 4_000;
@@ -133,21 +136,44 @@ export interface OracleVerdictParse {
   findings: string;
 }
 
-/** 模型偶尔不守格式：宽松解析，解析不出 VERDICT 时降级 unknown 并保留原文。 */
+const ORACLE_VERDICT_LINE_PATTERN =
+  /^\s*(?:\*\*)?(?:VERDICT|结论|判定)(?:\*\*)?\s*[:：]\s*(?:\*\*)?\s*(.+?)(?:\*\*)?\s*$/i;
+const ORACLE_SUMMARY_LINE_PATTERN =
+  /^\s*(?:\*\*)?(?:SUMMARY|总结|总评)(?:\*\*)?\s*[:：]\s*(?:\*\*)?\s*(.*?)(?:\*\*)?\s*$/i;
+const ORACLE_FINDINGS_LINE_PATTERN = /^\s*(?:\*\*)?(?:FINDINGS|问题清单)(?:\*\*)?\s*[:：]?\s*$/i;
+
+/** 宽松归一：认英文 PASS/WARN/FAIL 与中文同义表达；认不出返回 unknown。 */
+function normalizeOracleVerdictWord(word: string): OracleVerdict {
+  const w = word.trim().toLowerCase();
+  if (!w) return "unknown";
+  // 顺序即语义：不通过→fail（含「通过」字样），通过但…→warn，纯通过/PASS→pass。
+  if (/^fail\b|失败|需要修复|不通过|不满足/.test(w)) return "fail";
+  if (/^warn\b|注意|警告/.test(w)) return "warn";
+  if (/^pass\b|通过/.test(w)) return "pass";
+  return "unknown";
+}
+
+/** 模型偶尔不守格式：剥代码块/加粗包壳、认中文标签、扫前 10 行；解析不出降级 unknown 并保留原文。 */
 export function parseOracleVerdict(raw: string): OracleVerdictParse {
-  const text = raw.trim();
+  let text = raw.trim();
+  const fence = text.match(/^```[a-zA-Z]*\n([\s\S]*?)\n?```$/);
+  if (fence?.[1]) {
+    text = fence[1].trim();
+  }
   const lines = text.split("\n");
   let verdict: OracleVerdict = "unknown";
   let summary = "";
-  for (const line of lines.slice(0, 6)) {
-    const verdictMatch = line.match(/^\s*VERDICT\s*[:：]\s*(PASS|WARN|FAIL)\b/i);
+  for (const line of lines.slice(0, 10)) {
+    const verdictMatch = line.match(ORACLE_VERDICT_LINE_PATTERN);
     if (verdictMatch) {
-      verdict = verdictMatch[1]!.toLowerCase() as Exclude<OracleVerdict, "unknown">;
-      break;
+      verdict = normalizeOracleVerdictWord(verdictMatch[1]!);
+      if (verdict !== "unknown") {
+        break;
+      }
     }
   }
-  for (const line of lines.slice(0, 8)) {
-    const summaryMatch = line.match(/^\s*SUMMARY\s*[:：]\s*(.*)$/i);
+  for (const line of lines.slice(0, 10)) {
+    const summaryMatch = line.match(ORACLE_SUMMARY_LINE_PATTERN);
     if (summaryMatch) {
       summary = summaryMatch[1]!.trim();
       break;
@@ -156,7 +182,7 @@ export function parseOracleVerdict(raw: string): OracleVerdictParse {
   if (verdict === "unknown") {
     return { verdict, summary, findings: text };
   }
-  const findingsIndex = lines.findIndex((line) => /^\s*FINDINGS\s*[:：]?\s*$/i.test(line));
+  const findingsIndex = lines.findIndex((line) => ORACLE_FINDINGS_LINE_PATTERN.test(line));
   if (findingsIndex >= 0) {
     return {
       verdict,
@@ -167,10 +193,12 @@ export function parseOracleVerdict(raw: string): OracleVerdictParse {
         .trim(),
     };
   }
-  const verdictLineIndex = lines.findIndex((line) => /^\s*VERDICT\s*[:：]/i.test(line));
+  const verdictLineIndex = lines.findIndex(
+    (line) => /^\s*(?:\*\*)?VERDICT/i.test(line) || /^\s*(?:\*\*)?结论/i.test(line),
+  );
   const rest = lines
     .slice(verdictLineIndex + 1)
-    .filter((line) => !/^\s*SUMMARY\s*[:：]/i.test(line))
+    .filter((line) => !ORACLE_SUMMARY_LINE_PATTERN.test(line))
     .join("\n")
     .trim();
   return { verdict, summary, findings: rest };

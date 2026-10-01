@@ -7,7 +7,6 @@ import { useSettings } from "@/hooks/useSettingService.js";
 import { getPathLeaf } from "@/lib/path.js";
 import { logger } from "@/logger.js";
 import {
-  ORACLE_REVIEW_MAX_OUTPUT_TOKENS,
   ORACLE_REVIEW_REQUEST_TIMEOUT_MS,
   ORACLE_TURN_REVIEW_QUERY_SOURCE,
   buildOracleDiffSections,
@@ -31,6 +30,8 @@ export type OracleReviewFailure =
   | { kind: "no-turn" }
   | { kind: "no-changes" }
   | { kind: "no-model" }
+  /** 模型返回空正文：多为输出预算被 reasoning 耗尽（finishReason 可佐证）。 */
+  | { kind: "empty-response"; finishReason?: string }
   | { kind: "request"; message: string };
 
 export type OracleReviewState =
@@ -188,16 +189,40 @@ export function useOracleReview(params: {
             projectName: getPathLeaf(params.workspacePath) || params.workspacePath,
           }),
           querySource: ORACLE_TURN_REVIEW_QUERY_SOURCE,
-          maxOutputTokens: ORACLE_REVIEW_MAX_OUTPUT_TOKENS,
+          // 不传 maxOutputTokens：审查模型放开想（reasoning 也占输出预算，设上限
+          // 会导致空正文），只解析返回内容里的审查结论；超时由 requestTimeoutMs 兜底。
           requestTimeoutMs: ORACLE_REVIEW_REQUEST_TIMEOUT_MS,
         });
         const parsed = parseOracleVerdict(result.text);
+        if (!result.text.trim()) {
+          // 空正文：thinking 模型在输出预算内没留下可见文本。单独成类错误，
+          // 不伪装成「无法解析结论」；带 finishReason 便于判断是不是长度截断。
+          logger.warn("[OracleReview] 模型返回空正文", {
+            workspacePath: params.workspacePath,
+            turnRowId: header.rowId,
+            finishReason: result.finishReason ?? null,
+            outputTokens: result.usage?.outputTokens ?? null,
+            reasoningTokens: result.usage?.reasoningTokens ?? null,
+          });
+          applyIfCurrent({
+            status: "error",
+            mode,
+            failure: {
+              kind: "empty-response",
+              ...(result.finishReason ? { finishReason: result.finishReason } : {}),
+            },
+          });
+          return;
+        }
         logger.info("[OracleReview] 回合审查完成", {
           workspacePath: params.workspacePath,
           turnRowId: header.rowId,
           verdict: parsed.verdict,
           providerId: result.selection.providerId,
           model: result.selection.modelId,
+          finishReason: result.finishReason ?? null,
+          outputTokens: result.usage?.outputTokens ?? null,
+          reasoningTokens: result.usage?.reasoningTokens ?? null,
         });
         applyIfCurrent({
           status: "result",

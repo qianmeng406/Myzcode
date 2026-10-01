@@ -66,6 +66,24 @@ test("parseOracleVerdict 宽松兼容：全角冒号、小写、无 FINDINGS 段
   );
 });
 
+test("parseOracleVerdict 认中文标签、加粗与代码块包壳", () => {
+  assert.equal(parseOracleVerdict("结论：通过\n总结：没问题").verdict, "pass");
+  assert.equal(parseOracleVerdict("**VERDICT:** FAIL\n**SUMMARY:** 有错误").verdict, "fail");
+  assert.equal(parseOracleVerdict("```verdict\nVERDICT: PASS\nSUMMARY: ok\n```").verdict, "pass");
+  assert.equal(parseOracleVerdict("判定：不通过，缺少测试").verdict, "fail");
+  assert.equal(parseOracleVerdict("结论：通过，但要注意边界情况").verdict, "warn");
+  assert.equal(parseOracleVerdict("结论：警告，临时方案").verdict, "warn");
+});
+
+test("parseOracleVerdict 正文前有多行铺垫时仍能命中 VERDICT", () => {
+  const parsed = parseOracleVerdict(
+    "让我逐个文件分析这个 diff。\n\n第一个文件改动合理。\n第二个文件有问题。\n\nVERDICT: WARN\nSUMMARY: 基本可用\nFINDINGS:\n- [中] a.ts:2 — 边界",
+  );
+  assert.equal(parsed.verdict, "warn");
+  assert.equal(parsed.summary, "基本可用");
+  assert.ok(parsed.findings.includes("a.ts:2"));
+});
+
 test("parseOracleVerdict 无法解析时降级 unknown 并保留原文", () => {
   const parsed = parseOracleVerdict("这个改动看起来没问题。");
   assert.equal(parsed.verdict, "unknown");

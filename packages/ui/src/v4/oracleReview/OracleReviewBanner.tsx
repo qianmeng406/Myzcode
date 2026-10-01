@@ -65,6 +65,11 @@ function failureDetail(state: Extract<OracleReviewState, { status: "error" }>): 
       return { titleKey: "chat.oracleReview.error.noChanges" };
     case "no-model":
       return { titleKey: "chat.oracleReview.error.noModel" };
+    case "empty-response":
+      return {
+        titleKey: "chat.oracleReview.error.emptyResponse",
+        detail: state.failure.finishReason,
+      };
     case "request":
       return {
         titleKey: "chat.oracleReview.error.request",

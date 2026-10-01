@@ -172,6 +172,8 @@ const enUS: Record<string, string> = {
   "chat.oracleReview.error.noTurn": "No completed turn to review",
   "chat.oracleReview.error.noChanges": "The last turn changed no files; nothing to review",
   "chat.oracleReview.error.noModel": "No review model available. Select one in model settings first",
+  "chat.oracleReview.error.emptyResponse":
+    "The model returned no text (the output budget was likely consumed by reasoning). Review again; if this keeps happening, pick another review model",
   "chat.oracleReview.error.request": "Review request failed",
   "chat.composer.contextShortcut": "Add context",
   "chat.composer.capabilityShortcut": "Choose capabilities",

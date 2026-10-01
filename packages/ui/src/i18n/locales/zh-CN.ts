@@ -163,6 +163,8 @@ const zhCN: Record<string, string> = {
   "chat.oracleReview.error.noTurn": "没有已完成的回合可审查",
   "chat.oracleReview.error.noChanges": "最近的回合没有文件改动，无需审查",
   "chat.oracleReview.error.noModel": "没有可用的把关模型，请先在模型设置中选择",
+  "chat.oracleReview.error.emptyResponse":
+    "模型没有返回正文（输出预算可能被思考耗尽），请重新审查；反复出现可换一个把关模型",
   "chat.oracleReview.error.request": "审查请求失败",
   "chat.composer.contextShortcut": "添加上下文",
   "chat.composer.capabilityShortcut": "选择能力",
