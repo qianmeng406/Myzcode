@@ -240,8 +240,10 @@ export function useOracleReview(params: {
             projectName: getPathLeaf(params.workspacePath) || params.workspacePath,
           }),
           querySource: ORACLE_TURN_REVIEW_QUERY_SOURCE,
-          // 流式传输（与主会话/子代理同一 streamText 管道）：思考增量让连接持续活跃，
-          // 上游不再按「~60s 无产出」掐断长思考（此前一次性请求 8 连败的根因）；
+          // 流式传输（与主会话/子代理同一 streamText 管道）。日志观察（2026-10-01
+          // 23:26-23:36，~/.zcode/v2/logs/）：一次性请求路径 8 次尝试均在 ~55-60s
+          // 无产出后终止（客户端各超时均 ≥180s，可排除客户端超时）；推断为上游对
+          // 静默连接的容忍窗口。流式的思考增量使连接持续活跃，避开该窗口。
           // 指纹头同源——审查请求本就走同一套 provider runtime headers。
           stream: true,
           // 输出预算跟随模型声明的上限（resolveOracleRequestOptions 注释详述取舍）；

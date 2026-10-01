@@ -293,9 +293,11 @@ function assertWorkspaceModelInput(input: WorkspaceGenerateTextInput): void {
 /**
  * 流式聚合：与主会话同一 streamText 管道，把增量事件折叠成与 generateText 同形的
  * ModelTextResult。思考增量持续产生 provider 事件，连接不静默——上游不会像对一次性
- * 请求那样在 ~60s 无产出时掐断长思考。审查类调用没有工具，tool_call 事件仍如实聚合。
+ * 请求那样在无产出时掐断长思考（日志实测：一次性路径每次尝试 ~55-60s 无产出被断，
+ * 客户端各超时均 ≥180s，出处 ~/.zcode/v2/logs/2026-10-01.log 23:26-23:36）。
  */
-async function streamModelTextResult(
+/** 导出仅为单测；生产调用方走 generateWorkspaceText 的 stream 旗标。 */
+export async function streamModelTextResult(
   model: Model,
   request: ModelRequest,
 ): Promise<{
@@ -303,24 +305,53 @@ async function streamModelTextResult(
   finishReason: string;
   usage: ModelUsage;
   toolCalls?: ModelToolCall[];
-}> {
-  let text = "";
+}> {  let text = "";
+  let eventCount = 0;
   let finishReason = "unknown";
   let usage: ModelUsage | undefined;
   const toolCalls: ModelToolCall[] = [];
+  const pushedToolCallIds = new Set<string>();
+  // 两种 provider 语义并存：完整 tool_call 事件，或 tool_input_start/delta/end 增量序列。
+  // 按 id 去重，两种都到时只收一次；增量在 end 时解析 JSON 输入。
+  const pendingToolInputs = new Map<string, { name: string; parts: string[] }>();
+  const pushToolCall = (toolCall: ModelToolCall) => {
+    if (pushedToolCallIds.has(toolCall.id)) return;
+    pushedToolCallIds.add(toolCall.id);
+    toolCalls.push(toolCall);
+  };
   for await (const event of model.streamText(request)) {
+    eventCount += 1;
     if (event.type === "error") throw normalizeStreamError(event.error);
     if (event.type === "text_delta") {
       text += event.text;
     } else if (event.type === "tool_call") {
-      toolCalls.push(event.toolCall);
+      pushToolCall(event.toolCall);
+    } else if (event.type === "tool_input_start") {
+      pendingToolInputs.set(event.id, { name: event.toolName, parts: [] });
+    } else if (event.type === "tool_input_delta") {
+      pendingToolInputs.get(event.id)?.parts.push(event.delta);
+    } else if (event.type === "tool_input_end") {
+      const pending = pendingToolInputs.get(event.id);
+      pendingToolInputs.delete(event.id);
+      if (!pending) continue;
+      let input: unknown;
+      try {
+        input = pending.parts.length > 0 ? (JSON.parse(pending.parts.join("")) as unknown) : {};
+      } catch {
+        input = { _raw: pending.parts.join("") };
+      }
+      pushToolCall({ id: event.id, name: pending.name, input });
     } else if (event.type === "finish") {
       finishReason = event.finishReason;
       usage = event.usage;
     }
   }
   if (!usage) {
-    throw new Error("模型流在 finish 事件前结束");
+    // 正常流必以 finish 收尾（error 事件已提前抛）；缺 finish 说明流被提前截断。
+    // 带上聚合进度便于定位是哪个 provider/哪类响应形态没给出收尾。
+    throw new Error(
+      `模型流在 finish 事件前结束（events=${eventCount}, textLength=${text.length}, toolCalls=${toolCalls.length}）`,
+    );
   }
   return {
     text,
