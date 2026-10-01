@@ -2081,6 +2081,8 @@ export const zcodeWorkspaceGenerateTextParamsSchema = z
     tools: z.array(zcodeWorkspaceModelToolSchema).optional(),
     querySource: nonEmptyString,
     maxOutputTokens: z.number().int().positive().optional(),
+    /** 流式传输（与主会话同一 streamText 管道）；深思考型调用传 true 避免上游掐断静默连接。 */
+    stream: z.boolean().optional(),
     operationId: nonEmptyString.optional(),
   })
   .strict()

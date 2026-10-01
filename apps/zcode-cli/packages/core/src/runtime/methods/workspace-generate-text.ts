@@ -5,6 +5,7 @@ import {
   traceContextToLogContext,
 } from "../deps.js";
 import type {
+  Model,
   ModelInputMessage,
   ModelSelection,
   ModelRequest,
@@ -39,6 +40,12 @@ export interface WorkspaceGenerateTextInput {
   tools?: ModelToolContract[];
   querySource: string;
   maxOutputTokens?: number;
+  /**
+   * 流式传输（与主会话/子代理同一 streamText 管道）：思考增量持续产生 provider 事件，
+   * 连接不静默，上游不会按「无产出」掐断长思考请求。缺省保持一次性 generateText
+   * （旧调用方语义不变）；深思考型调用（如 Oracle 审查）应显式传 true。
+   */
+  stream?: boolean;
 }
 
 export interface WorkspaceGenerateTextResult {
@@ -220,7 +227,10 @@ async function generateWorkspaceTextImpl(
         traceContext: modelTraceContext,
       }),
     },
-    () => model.generateText(modelRequest),
+    () =>
+      input.stream
+        ? streamModelTextResult(model, modelRequest)
+        : model.generateText(modelRequest),
   ).catch(async (error: unknown) => {
     await recordModelUsageFact(this, {
       error,
@@ -278,4 +288,44 @@ function assertWorkspaceModelInput(input: WorkspaceGenerateTextInput): void {
   if (input.messages && input.messages.length > 0) return;
   if (input.prompt?.trim()) return;
   throw new Error("模型文本生成 prompt 或 messages 不能为空");
+}
+
+/**
+ * 流式聚合：与主会话同一 streamText 管道，把增量事件折叠成与 generateText 同形的
+ * ModelTextResult。思考增量持续产生 provider 事件，连接不静默——上游不会像对一次性
+ * 请求那样在 ~60s 无产出时掐断长思考。审查类调用没有工具，tool_call 事件仍如实聚合。
+ */
+async function streamModelTextResult(
+  model: Model,
+  request: ModelRequest,
+): Promise<{
+  text: string;
+  finishReason: string;
+  usage: ModelUsage;
+  toolCalls?: ModelToolCall[];
+}> {
+  let text = "";
+  let finishReason = "unknown";
+  let usage: ModelUsage | undefined;
+  const toolCalls: ModelToolCall[] = [];
+  for await (const event of model.streamText(request)) {
+    if (event.type === "error") throw normalizeStreamError(event.error);
+    if (event.type === "text_delta") {
+      text += event.text;
+    } else if (event.type === "tool_call") {
+      toolCalls.push(event.toolCall);
+    } else if (event.type === "finish") {
+      finishReason = event.finishReason;
+      usage = event.usage;
+    }
+  }
+  if (!usage) {
+    throw new Error("模型流在 finish 事件前结束");
+  }
+  return {
+    text,
+    finishReason,
+    usage,
+    ...(toolCalls.length > 0 ? { toolCalls } : {}),
+  };
 }

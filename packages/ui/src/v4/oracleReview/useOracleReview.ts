@@ -54,7 +54,13 @@ export type OracleReviewState =
       findings: string;
       modelLabel: string;
     }
-  | { status: "error"; mode: OracleReviewRequestMode; failure: OracleReviewFailure };
+  | {
+      status: "error";
+      mode: OracleReviewRequestMode;
+      failure: OracleReviewFailure;
+      /** 发起请求后的把关模型（providerId/modelId）；错误卡片展示，渠道选错一眼可辨。请求前早退（无回合等）缺席。 */
+      modelLabel?: string;
+    };
 
 /**
  * 解析把关请求的执行选项：模型选择（缺推理档时补该模型最高公开档）+ 输出预算。
@@ -234,6 +240,10 @@ export function useOracleReview(params: {
             projectName: getPathLeaf(params.workspacePath) || params.workspacePath,
           }),
           querySource: ORACLE_TURN_REVIEW_QUERY_SOURCE,
+          // 流式传输（与主会话/子代理同一 streamText 管道）：思考增量让连接持续活跃，
+          // 上游不再按「~60s 无产出」掐断长思考（此前一次性请求 8 连败的根因）；
+          // 指纹头同源——审查请求本就走同一套 provider runtime headers。
+          stream: true,
           // 输出预算跟随模型声明的上限（resolveOracleRequestOptions 注释详述取舍）；
           // 超时由 requestTimeoutMs 兜底，审查结论从返回内容里解析。
           ...(requestOptions.maxOutputTokens !== undefined
@@ -296,6 +306,7 @@ export function useOracleReview(params: {
           status: "error",
           mode,
           failure: isTimeout ? { kind: "timeout", message } : { kind: "request", message },
+          modelLabel: pendingModelLabel,
         });
       }
     },

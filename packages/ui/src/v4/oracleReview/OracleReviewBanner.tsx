@@ -171,6 +171,14 @@ export function OracleReviewBanner({
                       {intl.formatMessage({ id: detail.titleKey }, detail.titleValues)}
                       {detail.detail ? ` · ${detail.detail.slice(0, 160)}` : ""}
                     </span>
+                    {state.modelLabel ? (
+                      <span
+                        className="hidden shrink-0 font-mono text-ui-xs text-foreground-subtle md:inline"
+                        title={state.modelLabel}
+                      >
+                        {state.modelLabel}
+                      </span>
+                    ) : null}
                   </>
                 );
               })()

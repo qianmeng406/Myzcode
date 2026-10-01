@@ -311,6 +311,8 @@ export interface ZCodeAgentGenerateWorkspaceTextParams extends ZCodeAgentWorkspa
   tools?: ZCodeWorkspaceGenerateTextParams["tools"];
   querySource: string;
   maxOutputTokens?: number;
+  /** 流式传输（与主会话同一 streamText 管道）；深思考型调用传 true 避免上游掐断静默连接。 */
+  stream?: boolean;
   signal?: AbortSignal;
   /**
    * 协议层 RPC 超时。thinking 模型的长请求会超过协议 client 默认的
