@@ -410,6 +410,9 @@ const SESSION_SUBSCRIBE_MAX_ATTEMPTS = 8;
 const MAX_TRACKED_SESSION_EVENT_IDS = 10_000;
 const SSH_REMOTE_WORKSPACE_IDENTITY_PREFIX = "remote:ssh:";
 const WSL_REMOTE_WORKSPACE_IDENTITY_PREFIX = "remote:wsl:";
+// 经 IPC 代理调用的 renderer 无法传真实 AbortSignal；宿主按调用方 requestTimeoutMs
+// 派生 signal 时，在客户端 deadline 之后追加这个缓冲再发取消通知，让 CLI 侧操作收尾。
+const WORKSPACE_GENERATE_TEXT_CANCEL_BUFFER_MS = 5_000;
 
 function supportsLegacyRemoteTaskAllowlist(workspaceIdentity: string | undefined): boolean {
   return Boolean(
@@ -4361,7 +4364,18 @@ export function createZCodeAgentService(
         reason: "workspace_generate_text",
         workspace: params,
       });
-      const operationId = params.signal ? randomUUID() : undefined;
+      // 经 IPC 代理调用的 renderer 无法传真实 AbortSignal（序列化后是丢失方法的普通
+      // 对象，会让 signal?.addEventListener 抛错）；声明了 requestTimeoutMs 的调用方
+      // 在宿主侧派生等价 signal：1) 生成 operationId，CLI 侧拿到 abortSignal 后跳过
+      // WORKSPACE_GENERATE_TEXT_TIMEOUT_MS 60s 默认超时（思考模型深审普遍超 60s，
+      // 否则会被误取消为 "Model request was cancelled"）；2) 客户端 deadline+缓冲后
+      // 仍发取消通知，服务端操作不悬挂。
+      const signal =
+        params.signal ??
+        (params.requestTimeoutMs
+          ? AbortSignal.timeout(params.requestTimeoutMs + WORKSPACE_GENERATE_TEXT_CANCEL_BUFFER_MS)
+          : undefined);
+      const operationId = signal ? randomUUID() : undefined;
       const cancel = () => {
         if (!operationId) return;
         void client
@@ -4381,7 +4395,7 @@ export function createZCodeAgentService(
             });
           });
       };
-      params.signal?.addEventListener("abort", cancel, { once: true });
+      signal?.addEventListener("abort", cancel, { once: true });
       try {
         return await client.request(
           zcodeProtocolMethods.workspaceGenerateText,
@@ -4400,12 +4414,12 @@ export function createZCodeAgentService(
           // 先于调用方自身 deadline 触发，并被 onRequestTimeout 误判 stale 杀进程。
           // 调用方显式传入 requestTimeoutMs（自身 deadline + 取消缓冲）时以其为准。
           {
-            signal: params.signal,
+            signal,
             ...(params.requestTimeoutMs ? { timeoutMs: params.requestTimeoutMs } : {}),
           },
         );
       } finally {
-        params.signal?.removeEventListener("abort", cancel);
+        signal?.removeEventListener("abort", cancel);
       }
     },
 
