@@ -10,9 +10,9 @@ import type { ModelSelection } from "@zcode/shared";
 export const ORACLE_TURN_REVIEW_QUERY_SOURCE = "oracle_turn_review";
 // 无输出上限 + 深审大 diff 时思考可能很久；5 分钟是客户端 deadline，横幅不阻塞输入。
 export const ORACLE_REVIEW_REQUEST_TIMEOUT_MS = 300_000;
-// 刻意不传 maxOutputTokens：思考模型深审大 diff 时 reasoning 也计入输出预算，
-// 设上限会被思考吃光、正文为空（实测 2048 上限返回空文本）。放开让模型想完，
-// 审查结论从返回内容里解析；超时与空响应各有兜底。
+// maxOutputTokens 由 useOracleReview 按模型声明的上限（optionSpecs.maxOutputTokens.max）
+// 传入：省略会被 adapters 校验拒绝（outside the model option range），设小了会被
+// 思考模型的 reasoning 吃光导致空正文（实测 2048 上限 GLM 返回空文本）。
 
 const MAX_DIFF_FILES = 12;
 const MAX_DIFF_CHARS_PER_FILE = 4_000;

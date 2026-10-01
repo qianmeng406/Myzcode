@@ -49,14 +49,22 @@ export type OracleReviewState =
     }
   | { status: "error"; mode: OracleReviewRequestMode; failure: OracleReviewFailure };
 
-/** 用户显式选了把关模型但没带推理档时，补该模型的最高公开档（与辅助通道取最低档相反）。 */
-function resolveOracleSelection(
+/**
+ * 解析把关请求的执行选项：模型选择（缺推理档时补该模型最高公开档）+ 输出预算。
+ *
+ * maxOutputTokens 跟随模型声明的上限（optionSpecs.maxOutputTokens.max，与主回合
+ * 「打满模型声明上限」同语义）：省略会被 adapters 的 validateOptions 以
+ * 「outside the model option range」拒绝；设小了会被思考模型的 reasoning 吃光
+ * 导致空正文（实测 2048 上限 GLM 返回空文本）。模型视图缺席该值时才省略并让
+ * 错误如实上报。
+ */
+function resolveOracleRequestOptions(
   oracleModel: ModelSelection | null,
   modelSelectionView: ModelSelectionView | null | undefined,
-): ModelSelection | null {
+): { selection: ModelSelection; maxOutputTokens?: number } | null {
   const selection = oracleModel ?? modelSelectionView?.preferredSelection ?? null;
-  if (!selection || selection.options?.reasoningLevel) {
-    return selection;
+  if (!selection) {
+    return null;
   }
   const provider = modelSelectionView?.providers.find(
     (candidate) => candidate.providerId === selection.providerId,
@@ -64,7 +72,17 @@ function resolveOracleSelection(
   const model = provider?.models.find((candidate) => candidate.modelId === selection.modelId);
   const levels = model?.config.optionSpecs.reasoningLevel?.values;
   const highestLevel = levels?.length ? levels[levels.length - 1] : undefined;
-  return highestLevel ? { ...selection, options: { reasoningLevel: highestLevel } } : selection;
+  const resolvedSelection =
+    selection.options?.reasoningLevel || !highestLevel
+      ? selection
+      : { ...selection, options: { reasoningLevel: highestLevel } };
+  const specMax = model?.config.optionSpecs.maxOutputTokens?.max;
+  return {
+    selection: resolvedSelection,
+    ...(typeof specMax === "number" && Number.isFinite(specMax) && specMax > 0
+      ? { maxOutputTokens: specMax }
+      : {}),
+  };
 }
 
 function findLastCompletedTurnHeader(snapshot: ConversationSnapshot): TurnHeaderRow | null {
@@ -144,8 +162,11 @@ export function useOracleReview(params: {
         setOracleState({ status: "error", mode, failure: { kind: "no-changes" } });
         return;
       }
-      const selection = resolveOracleSelection(params.oracleModel, params.modelSelectionView);
-      if (!selection) {
+      const requestOptions = resolveOracleRequestOptions(
+        params.oracleModel,
+        params.modelSelectionView,
+      );
+      if (!requestOptions) {
         setOracleState({ status: "error", mode, failure: { kind: "no-model" } });
         return;
       }
@@ -181,7 +202,7 @@ export function useOracleReview(params: {
           workspacePath: params.workspacePath,
           ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
           ...(params.remoteSessionId ? { remoteSessionId: params.remoteSessionId } : {}),
-          selection,
+          selection: requestOptions.selection,
           prompt: buildOracleReviewPrompt({
             userRequest: findUserRequestBeforeTurn(snapshot, header.rowId),
             diffSections: sections,
@@ -189,8 +210,11 @@ export function useOracleReview(params: {
             projectName: getPathLeaf(params.workspacePath) || params.workspacePath,
           }),
           querySource: ORACLE_TURN_REVIEW_QUERY_SOURCE,
-          // 不传 maxOutputTokens：审查模型放开想（reasoning 也占输出预算，设上限
-          // 会导致空正文），只解析返回内容里的审查结论；超时由 requestTimeoutMs 兜底。
+          // 输出预算跟随模型声明的上限（resolveOracleRequestOptions 注释详述取舍）；
+          // 超时由 requestTimeoutMs 兜底，审查结论从返回内容里解析。
+          ...(requestOptions.maxOutputTokens !== undefined
+            ? { maxOutputTokens: requestOptions.maxOutputTokens }
+            : {}),
           requestTimeoutMs: ORACLE_REVIEW_REQUEST_TIMEOUT_MS,
         });
         const parsed = parseOracleVerdict(result.text);
