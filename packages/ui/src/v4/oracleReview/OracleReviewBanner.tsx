@@ -70,6 +70,8 @@ function failureDetail(state: Extract<OracleReviewState, { status: "error" }>): 
         titleKey: "chat.oracleReview.error.emptyResponse",
         detail: state.failure.finishReason,
       };
+    case "timeout":
+      return { titleKey: "chat.oracleReview.error.timeout" };
     case "request":
       return {
         titleKey: "chat.oracleReview.error.request",

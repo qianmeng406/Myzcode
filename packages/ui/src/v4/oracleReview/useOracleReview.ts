@@ -32,6 +32,8 @@ export type OracleReviewFailure =
   | { kind: "no-model" }
   /** 模型返回空正文：多为输出预算被 reasoning 耗尽（finishReason 可佐证）。 */
   | { kind: "empty-response"; finishReason?: string }
+  /** 客户端 deadline 到点：多为渠道限流或深思考无首 token 的重试循环。 */
+  | { kind: "timeout" }
   | { kind: "request"; message: string };
 
 export type OracleReviewState =
@@ -256,17 +258,19 @@ export function useOracleReview(params: {
           modelLabel: `${result.selection.providerId}/${result.selection.modelId}`,
         });
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         logger.warn("[OracleReview] 回合审查失败", {
           workspacePath: params.workspacePath,
-          error: error instanceof Error ? error.message : String(error),
+          error: message,
         });
+        // 客户端 deadline 到点：日志实测此时模型侧多为「每次尝试约 60s 无首 token
+        // 被掐 + 指数退避重试」循环（渠道限流或深思考无产出），干等不会好转。
+        // 给专门的文案指引换把关模型，而不是复用通用失败语。
+        const isTimeout = /timed out|timeout/i.test(message);
         applyIfCurrent({
           status: "error",
           mode,
-          failure: {
-            kind: "request",
-            message: error instanceof Error ? error.message : String(error),
-          },
+          failure: isTimeout ? { kind: "timeout" } : { kind: "request", message },
         });
       }
     },
