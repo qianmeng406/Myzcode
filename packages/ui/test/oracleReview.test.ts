@@ -5,6 +5,7 @@ import {
   buildOracleFixPrompt,
   buildOracleReviewPrompt,
   formatOraclePatch,
+  isOracleDeadlineTimeoutError,
   parseOracleVerdict,
   readStoredOracleModelSelection,
   writeStoredOracleModelSelection,
@@ -121,6 +122,22 @@ test("一键修复 prompt 引用 findings 原文并要求逐条复述", () => {
   const prompt = buildOracleFixPrompt("- [高] a.ts:1 — 空");
   assert.ok(prompt.includes("- [高] a.ts:1 — 空"));
   assert.ok(prompt.includes("逐条修复"));
+});
+
+test("超时判定只认协议超时错误类型，不匹配消息字样", () => {
+  const protocolTimeout = new Error("ZCode Protocol request timed out: workspace/generateText");
+  protocolTimeout.name = "ZCodeProtocolRequestTimeoutError";
+  assert.equal(isOracleDeadlineTimeoutError(protocolTimeout), true);
+  // AbortError（消息不含 timeout 字样）→ 不误判
+  const abort = new DOMException("This operation was aborted", "AbortError");
+  assert.equal(isOracleDeadlineTimeoutError(abort), false);
+  // ETIMEDOUT 系统错误（name 非 protocol 超时类）→ 不误判
+  const etimedout = new Error("connect ETIMEDOUT 1.2.3.4:443");
+  etimedout.name = "Error";
+  assert.equal(isOracleDeadlineTimeoutError(etimedout), false);
+  // 普通错误恰好包含 timeout 字样（如服务端 60s 超时文案）→ 不误判为客户端 deadline
+  assert.equal(isOracleDeadlineTimeoutError(new Error("upstream timeout after 60s")), false);
+  assert.equal(isOracleDeadlineTimeoutError("not an error"), false);
 });
 
 test("Oracle 模型偏好：存取对称、非法形状拒收、null 即清除", () => {

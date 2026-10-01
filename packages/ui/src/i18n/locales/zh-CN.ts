@@ -165,7 +165,7 @@ const zhCN: Record<string, string> = {
   "chat.oracleReview.error.emptyResponse":
     "模型没有返回正文（输出预算可能被思考耗尽），请重新审查；反复出现可换一个把关模型",
   "chat.oracleReview.error.timeout":
-    "审查超时（10 分钟无结果）——通常是把关渠道限流，或深思考模型长时间没有产出。建议在输入框旁的盾牌菜单换一个把关模型（如 GLM-5.3-Flash 或 DeepSeek），或稍后重试",
+    "审查超时（{minutes} 分钟无结果）——通常是把关渠道限流，或深思考模型长时间没有产出。建议在盾牌菜单换一个响应更快的把关模型，或稍后重试",
   "chat.oracleReview.error.request": "审查请求失败",
   "chat.composer.contextShortcut": "添加上下文",
   "chat.composer.capabilityShortcut": "选择能力",

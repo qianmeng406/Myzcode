@@ -18,8 +18,8 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
-import { buildOracleFixPrompt } from "./oracleReviewSupport.js";
-import type { OracleReviewState } from "./useOracleReview.js";
+import { ORACLE_REVIEW_REQUEST_TIMEOUT_MS, buildOracleFixPrompt } from "./oracleReviewSupport.js";
+import type { OracleReviewFailure, OracleReviewState } from "./useOracleReview.js";
 
 /**
  * Oracle 审查结果横幅：挂在输入框上方（与 ChatErrorBanner 同层）。
@@ -57,8 +57,11 @@ const VERDICT_PRESETS = {
 function failureDetail(state: Extract<OracleReviewState, { status: "error" }>): {
   titleKey: string;
   detail?: string;
+  /** i18n 插值（如超时分钟数），与代码常量共享，不在文案里硬编码时长。 */
+  titleValues?: Record<string, string>;
 } {
-  switch (state.failure.kind) {
+  const failure: OracleReviewFailure = state.failure;
+  switch (failure.kind) {
     case "no-turn":
       return { titleKey: "chat.oracleReview.error.noTurn" };
     case "no-changes":
@@ -68,15 +71,27 @@ function failureDetail(state: Extract<OracleReviewState, { status: "error" }>): 
     case "empty-response":
       return {
         titleKey: "chat.oracleReview.error.emptyResponse",
-        detail: state.failure.finishReason,
+        detail: failure.finishReason,
       };
     case "timeout":
-      return { titleKey: "chat.oracleReview.error.timeout" };
+      return {
+        titleKey: "chat.oracleReview.error.timeout",
+        // 展示底层真实错误消息，误判或新场景下用户能看到实际原因。
+        detail: failure.message,
+        titleValues: {
+          minutes: String(Math.round(ORACLE_REVIEW_REQUEST_TIMEOUT_MS / 60_000)),
+        },
+      };
     case "request":
       return {
         titleKey: "chat.oracleReview.error.request",
-        detail: state.failure.message,
+        detail: failure.message,
       };
+    default: {
+      // 穷举保护：新增 failure kind 而漏改本 switch 时在编译期之外再拦一道。
+      const exhaustive: never = failure;
+      throw new Error(`Unhandled oracle review failure: ${String(exhaustive)}`);
+    }
   }
 }
 
@@ -128,17 +143,20 @@ export function OracleReviewBanner({
               </span>
             </>
           ) : null}
-          {state.status === "error" ? (
-            <>
-              <OctagonAlertIcon className="size-4 shrink-0 text-foreground-subtle" />
-              <span className="min-w-0 flex-1 truncate text-ui-base text-foreground">
-                {intl.formatMessage({ id: failureDetail(state).titleKey })}
-                {failureDetail(state).detail
-                  ? ` · ${failureDetail(state).detail!.slice(0, 160)}`
-                  : ""}
-              </span>
-            </>
-          ) : null}
+          {state.status === "error"
+            ? (() => {
+                const detail = failureDetail(state);
+                return (
+                  <>
+                    <OctagonAlertIcon className="size-4 shrink-0 text-foreground-subtle" />
+                    <span className="min-w-0 flex-1 truncate text-ui-base text-foreground">
+                      {intl.formatMessage({ id: detail.titleKey }, detail.titleValues)}
+                      {detail.detail ? ` · ${detail.detail.slice(0, 160)}` : ""}
+                    </span>
+                  </>
+                );
+              })()
+            : null}
           {result && verdictPreset ? (
             <>
               <verdictPreset.icon className={cn("size-4 shrink-0", verdictPreset.iconClassName)} />

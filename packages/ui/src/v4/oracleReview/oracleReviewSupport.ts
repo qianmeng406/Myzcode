@@ -101,6 +101,16 @@ export function buildOracleReviewPrompt(params: {
 
 export type OracleVerdict = "pass" | "warn" | "fail" | "unknown";
 
+/**
+ * 客户端 deadline 超时判定：协议 client 的 ZCodeProtocolRequestTimeoutError 有专属
+ * name，且 RPC 层显式序列化/还原 name（channelServer/channelClient），因此按类型标记
+ * 判定而不是匹配 message——AbortError、ETIMEDOUT、服务端自带 "timeout" 字样的错误
+ * 都不会被误判进超时分支，原样走通用失败文案展示真实消息。
+ */
+export function isOracleDeadlineTimeoutError(error: unknown): boolean {
+  return error instanceof Error && error.name === "ZCodeProtocolRequestTimeoutError";
+}
+
 export interface OracleVerdictParse {
   verdict: OracleVerdict;
   summary: string;

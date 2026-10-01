@@ -174,7 +174,7 @@ const enUS: Record<string, string> = {
   "chat.oracleReview.error.emptyResponse":
     "The model returned no text (the output budget was likely consumed by reasoning). Review again; if this keeps happening, pick another review model",
   "chat.oracleReview.error.timeout":
-    "Review timed out (no result in 10 minutes) — usually the review channel is rate-limited, or a deep-thinking model produced no output in time. Pick a different review model from the shield menu (e.g. GLM-5.3-Flash or DeepSeek), or retry later",
+    "Review timed out (no result in {minutes} minutes) — usually the review channel is rate-limited, or a deep-thinking model produced no output in time. Pick a faster review model from the shield menu, or retry later",
   "chat.oracleReview.error.request": "Review request failed",
   "chat.composer.contextShortcut": "Add context",
   "chat.composer.capabilityShortcut": "Choose capabilities",
