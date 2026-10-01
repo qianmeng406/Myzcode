@@ -14,9 +14,6 @@ export const ORACLE_REVIEW_REQUEST_TIMEOUT_MS = 300_000;
 // 传入：省略会被 adapters 校验拒绝（outside the model option range），设小了会被
 // 思考模型的 reasoning 吃光导致空正文（实测 2048 上限 GLM 返回空文本）。
 
-const MAX_DIFF_FILES = 12;
-const MAX_DIFF_CHARS_PER_FILE = 4_000;
-const MAX_DIFF_TOTAL_CHARS = 24_000;
 const MAX_USER_REQUEST_CHARS = 4_000;
 
 export interface OracleReviewDiffHunk {
@@ -37,7 +34,6 @@ export interface OracleReviewDiffItem {
 export interface OracleDiffSection {
   path: string;
   text: string;
-  truncated: boolean;
 }
 
 /** 把 v4 fileChanges 的 hunk 拼成 unified diff 文本（形状同 ConversationFileSummaryPanel 的局部 formatPatch）。 */
@@ -54,48 +50,24 @@ export function formatOraclePatch(path: string, patches: readonly OracleReviewDi
 }
 
 /**
- * 按预算把 diff 裁成 prompt 段落：≤12 文件 / 每文件 ≤4000 字符 / 总 ≤24000 字符。
- * 超预算必须在 prompt 与结果卡里明示截断，不能让模型把不完整的 diff 当全貌。
- * 空 patch（二进制/无文本差异）先跳过再计配额，不占用文件名额。
+ * 上轮全部 diff 原样进 prompt，不做任何裁剪——截断会让审查结论只覆盖部分改动，
+ * 用户明确要求全量审查。空 patch（二进制/无文本差异）跳过。超大 diff 若顶到模型
+ * 上下文上限，会让上游报错并如实显示在横幅里，不静默截断。
  */
-export function buildOracleDiffSections(items: readonly OracleReviewDiffItem[]): {
-  sections: OracleDiffSection[];
-  truncated: boolean;
-} {
+export function buildOracleDiffSections(
+  items: readonly OracleReviewDiffItem[],
+): OracleDiffSection[] {
   const sections: OracleDiffSection[] = [];
-  let totalChars = 0;
-  let truncated = false;
   for (const item of items) {
     if (item.patches.length === 0) continue;
-    if (sections.length >= MAX_DIFF_FILES) {
-      truncated = true;
-      break;
-    }
-    const fullText = formatOraclePatch(item.path, item.patches);
-    if (totalChars + fullText.length > MAX_DIFF_TOTAL_CHARS) {
-      truncated = true;
-      break;
-    }
-    if (fullText.length > MAX_DIFF_CHARS_PER_FILE) {
-      sections.push({
-        path: item.path,
-        text: `${fullText.slice(0, MAX_DIFF_CHARS_PER_FILE)}\n…（该文件 diff 已截断）`,
-        truncated: true,
-      });
-      totalChars += MAX_DIFF_CHARS_PER_FILE;
-      truncated = true;
-    } else {
-      sections.push({ path: item.path, text: fullText, truncated: false });
-      totalChars += fullText.length;
-    }
+    sections.push({ path: item.path, text: formatOraclePatch(item.path, item.patches) });
   }
-  return { sections, truncated };
+  return sections;
 }
 
 export function buildOracleReviewPrompt(params: {
   userRequest: string;
   diffSections: readonly OracleDiffSection[];
-  diffTruncated: boolean;
   projectName: string;
 }): string {
   const userRequest = params.userRequest.trim().slice(0, MAX_USER_REQUEST_CHARS);
@@ -112,8 +84,7 @@ export function buildOracleReviewPrompt(params: {
     "## 用户这回合的要求",
     userRequest || "（未找到原始请求文本）",
     "",
-    "## 本回合改动（unified diff）",
-    ...(params.diffTruncated ? ["（注意：diff 超出预算已截断，只覆盖部分文件/内容）"] : []),
+    "## 本回合改动（unified diff，全量未裁剪）",
     diffText,
     "",
     "## 输出格式（严格遵守）",

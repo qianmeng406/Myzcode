@@ -45,7 +45,6 @@ export type OracleReviewState =
       summary: string;
       findings: string;
       modelLabel: string;
-      diffTruncated: boolean;
     }
   | { status: "error"; mode: OracleReviewRequestMode; failure: OracleReviewFailure };
 
@@ -193,7 +192,7 @@ export function useOracleReview(params: {
           baseRevision: snapshot.revision,
           baseLogEpoch: snapshot.logEpoch,
         });
-        const { sections, truncated } = buildOracleDiffSections(fileChanges.items);
+        const sections = buildOracleDiffSections(fileChanges.items);
         if (sections.length === 0) {
           applyIfCurrent({ status: "error", mode, failure: { kind: "no-changes" } });
           return;
@@ -206,7 +205,6 @@ export function useOracleReview(params: {
           prompt: buildOracleReviewPrompt({
             userRequest: findUserRequestBeforeTurn(snapshot, header.rowId),
             diffSections: sections,
-            diffTruncated: truncated,
             projectName: getPathLeaf(params.workspacePath) || params.workspacePath,
           }),
           querySource: ORACLE_TURN_REVIEW_QUERY_SOURCE,
@@ -256,7 +254,6 @@ export function useOracleReview(params: {
           summary: parsed.summary,
           findings: parsed.findings,
           modelLabel: `${result.selection.providerId}/${result.selection.modelId}`,
-          diffTruncated: truncated,
         });
       } catch (error) {
         logger.warn("[OracleReview] 回合审查失败", {

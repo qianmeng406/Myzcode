@@ -18,31 +18,23 @@ function hunk(lines: string[], newStart = 1): OracleReviewDiffHunk {
 test("审查 prompt 含用户请求、项目目录、diff 与输出格式约束", () => {
   const prompt = buildOracleReviewPrompt({
     userRequest: "修复登录按钮",
-    diffSections: [
-      {
-        path: "src/a.ts",
-        text: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@",
-        truncated: false,
-      },
-    ],
-    diffTruncated: false,
+    diffSections: [{ path: "src/a.ts", text: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@" }],
     projectName: "demo-app",
   });
   assert.ok(prompt.includes("修复登录按钮"));
   assert.ok(prompt.includes("项目目录：demo-app"));
   assert.ok(prompt.includes("### src/a.ts"));
   assert.ok(prompt.includes("VERDICT: PASS|WARN|FAIL"));
+  assert.ok(prompt.includes("全量未裁剪"));
   assert.ok(!prompt.includes("已截断"));
 });
 
-test("审查 prompt 在截断与空请求时给出明示", () => {
+test("审查 prompt 在空请求与空 diff 时给出明示", () => {
   const prompt = buildOracleReviewPrompt({
     userRequest: "  ",
     diffSections: [],
-    diffTruncated: true,
     projectName: "p",
   });
-  assert.ok(prompt.includes("diff 超出预算已截断"));
   assert.ok(prompt.includes("未找到原始请求文本"));
   assert.ok(prompt.includes("没有可审查的文本差异"));
 });
@@ -99,26 +91,24 @@ function makeItems(count: number, linesPerFile: number) {
   }));
 }
 
-test("diff 裁剪：空 patch 跳过、文件数超限置截断", () => {
-  const { sections, truncated } = buildOracleDiffSections([
+test("diff 全量输入：空 patch 跳过、文件数不再受限", () => {
+  const sections = buildOracleDiffSections([
     { path: "empty.ts", additions: 0, deletions: 0, patches: [] },
     ...makeItems(15, 10),
   ]);
-  assert.equal(sections.length, 12);
-  assert.ok(truncated);
+  assert.equal(sections.length, 15);
+  assert.ok(sections.every((section) => section.text.length > 0));
 });
 
-test("diff 裁剪：单文件超长截断且总预算生效", () => {
+test("diff 全量输入：单文件超长不再截断", () => {
   const longLines = Array.from({ length: 200 }, (_, i) => `+${"x".repeat(60)}${i}`);
-  const { sections, truncated } = buildOracleDiffSections([
+  const sections = buildOracleDiffSections([
     { path: "big.ts", additions: 200, deletions: 0, patches: [hunk(longLines)] },
     ...makeItems(30, 5),
   ]);
-  assert.ok(truncated);
-  assert.ok(sections[0]!.truncated);
-  assert.ok(sections[0]!.text.length <= 4100);
-  // 总预算 24000 字符：后续文件不可能全部进来了
-  assert.ok(sections.length < 31);
+  assert.equal(sections.length, 31);
+  assert.ok(!sections[0]!.text.includes("已截断"));
+  assert.ok(sections[0]!.text.length > 12000);
 });
 
 test("formatOraclePatch 拼 unified diff 头", () => {

@@ -213,11 +213,6 @@ export function OracleReviewBanner({
                   )}
                 />
                 <span>{intl.formatMessage({ id: "chat.oracleReview.findings" })}</span>
-                {result.diffTruncated ? (
-                  <span className="ml-1 shrink-0 rounded-sm bg-input px-1.5 py-0.5 text-ui-xs text-foreground-subtle">
-                    {intl.formatMessage({ id: "chat.oracleReview.diffTruncated" })}
-                  </span>
-                ) : null}
               </button>
             </CollapsibleTrigger>
             <CollapsibleContent>
