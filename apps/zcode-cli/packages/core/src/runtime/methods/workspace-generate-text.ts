@@ -46,6 +46,15 @@ export interface WorkspaceGenerateTextInput {
    * （旧调用方语义不变）；深思考型调用（如 Oracle 审查）应显式传 true。
    */
   stream?: boolean;
+  /**
+   * 流式输出进度回调（仅 stream 路径生效）：正文与思考增量累计字符数。
+   * bootstrap 层负责节流并转成协议通知；token 用量只在 finish 的 usage 里，中途没有。
+   */
+  onProgress?: (progress: WorkspaceGenerateTextProgress) => void;
+}
+
+export interface WorkspaceGenerateTextProgress {
+  outputChars: number;
 }
 
 export interface WorkspaceGenerateTextResult {
@@ -229,7 +238,7 @@ async function generateWorkspaceTextImpl(
     },
     () =>
       input.stream
-        ? streamModelTextResult(model, modelRequest)
+        ? streamModelTextResult(model, modelRequest, input.onProgress)
         : model.generateText(modelRequest),
   ).catch(async (error: unknown) => {
     await recordModelUsageFact(this, {
@@ -300,6 +309,7 @@ function assertWorkspaceModelInput(input: WorkspaceGenerateTextInput): void {
 export async function streamModelTextResult(
   model: Model,
   request: ModelRequest,
+  onProgress?: (progress: WorkspaceGenerateTextProgress) => void,
 ): Promise<{
   text: string;
   finishReason: string;
@@ -309,6 +319,8 @@ export async function streamModelTextResult(
   let eventCount = 0;
   let finishReason = "unknown";
   let usage: ModelUsage | undefined;
+  // 正文 + 思考 + 工具输入的累计字符数；进度指示的真实产出证据（非 token 估算）。
+  let outputChars = 0;
   const toolCalls: ModelToolCall[] = [];
   const pushedToolCallIds = new Set<string>();
   // 两种 provider 语义并存：完整 tool_call 事件，或 tool_input_start/delta/end 增量序列。
@@ -324,6 +336,11 @@ export async function streamModelTextResult(
     if (event.type === "error") throw normalizeStreamError(event.error);
     if (event.type === "text_delta") {
       text += event.text;
+      outputChars += event.text.length;
+      onProgress?.({ outputChars });
+    } else if (event.type === "reasoning_delta") {
+      outputChars += event.text.length;
+      onProgress?.({ outputChars });
     } else if (event.type === "tool_call") {
       pushToolCall(event.toolCall);
     } else if (event.type === "tool_input_start") {

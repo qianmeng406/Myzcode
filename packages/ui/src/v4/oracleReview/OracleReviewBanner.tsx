@@ -101,6 +101,7 @@ function failureDetail(state: Extract<OracleReviewState, { status: "error" }>): 
 export function OracleReviewBanner({
   state,
   pendingElapsedSeconds = 0,
+  pendingOutputChars = 0,
   onRereview,
   onDismiss,
   onFix,
@@ -108,6 +109,8 @@ export function OracleReviewBanner({
   state: OracleReviewState;
   /** pending 已等待秒数（宿主每秒更新）；驱动时长跳动与慢渠道提示。 */
   pendingElapsedSeconds?: number;
+  /** pending 期间模型已累计输出字符数（CLI 流式进度推送，宿主按 500ms 节流）；0 表示尚无产出。 */
+  pendingOutputChars?: number;
   onRereview: () => void;
   onDismiss: () => void;
   onFix: (fixPrompt: string) => void;
@@ -154,6 +157,14 @@ export function OracleReviewBanner({
                   },
                 )}
               </span>
+              {pendingOutputChars > 0 ? (
+                <span className="hidden shrink-0 tabular-nums text-ui-sm text-foreground-subtle md:inline">
+                  {intl.formatMessage(
+                    { id: "chat.oracleReview.pendingOutput" },
+                    { chars: String(pendingOutputChars) },
+                  )}
+                </span>
+              ) : null}
               {pendingElapsedSeconds >= SLOW_REVIEW_HINT_SECONDS ? (
                 <span className="hidden shrink-0 text-ui-sm text-foreground-subtle md:inline">
                   {intl.formatMessage({ id: "chat.oracleReview.pendingSlow" })}

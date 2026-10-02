@@ -45,6 +45,7 @@ import {
   ZCODE_SESSION_RUNTIME_PREFERENCES_REQUEST_TIMEOUT_MS,
   zcodeProtocolErrorCodes,
   zcodeProtocolMethods,
+  zcodeProtocolNotifications,
   zcodeSessionCancelBackgroundTaskParamsSchema,
   zcodeSessionCompactParamsSchema,
   zcodeSessionCloseParamsSchema,
@@ -67,6 +68,7 @@ import {
   zcodeTaskTokenUsageParamsSchema,
   zcodeUsageStatsParamsSchema,
   zcodeWorkspaceGenerateTextParamsSchema,
+  zcodeWorkspaceGenerateTextProgressSchema,
   getConversationMessageProjectionPolicy,
   parseRemoteWorkspaceIdentity,
   type ZCodeAutomationBotDeliveryTarget,
@@ -2740,6 +2742,37 @@ function shouldCloseSessionForExpectedPersistence(
   return expectedPersistence === undefined || currentPersistence === expectedPersistence;
 }
 
+// 流式输出进度通知的最小发送间隔：首个增量立即发（确认链路存活），其后按窗口合并，
+// 避免长输出把 stdio 通知刷成噪声。
+const WORKSPACE_GENERATE_TEXT_PROGRESS_INTERVAL_MS = 500;
+
+function createWorkspaceGenerateTextProgressNotifier(options: {
+  notify: ZCodeProtocolAgentServerContext["notify"];
+  operationId: string | undefined;
+  workspacePath: string;
+  querySource: string;
+}): (progress: { outputChars: number }) => void {
+  const startedAt = Date.now();
+  let lastEmitAt = 0;
+  return (progress) => {
+    const now = Date.now();
+    if (lastEmitAt !== 0 && now - lastEmitAt < WORKSPACE_GENERATE_TEXT_PROGRESS_INTERVAL_MS) {
+      return;
+    }
+    lastEmitAt = now;
+    options.notify({
+      method: zcodeProtocolNotifications.workspaceGenerateTextProgress,
+      params: {
+        ...(options.operationId ? { operationId: options.operationId } : {}),
+        workspacePath: options.workspacePath,
+        querySource: options.querySource,
+        outputChars: progress.outputChars,
+        elapsedMs: now - startedAt,
+      },
+    });
+  };
+}
+
 export async function generateWorkspaceText(
   context: ZCodeProtocolAgentServerContext,
   rawParams: unknown,
@@ -2765,6 +2798,16 @@ export async function generateWorkspaceText(
     querySource: params.querySource,
     ...(params.maxOutputTokens ? { maxOutputTokens: params.maxOutputTokens } : {}),
     ...(params.stream ? { stream: true } : {}),
+    ...(params.stream
+      ? {
+          onProgress: createWorkspaceGenerateTextProgressNotifier({
+            notify: (notification) => context.notify(notification),
+            operationId: params.operationId,
+            workspacePath: params.workspace.workspacePath,
+            querySource: params.querySource,
+          }),
+        }
+      : {}),
   };
   const app =
     active?.app ??

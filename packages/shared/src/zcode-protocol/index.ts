@@ -340,6 +340,7 @@ export const zcodeProtocolNotifications = {
   toolExecResource: "process/toolExecResource",
   pluginOperationProgress: "plugins/operationProgress",
   processResourceSample: "process/resourceSample",
+  workspaceGenerateTextProgress: "workspace/generateTextProgress",
 } as const;
 
 /** 启动控制面独立于 task stream；数据库身份不可携带路径/凭据。 */
@@ -2127,6 +2128,24 @@ export type ZCodeWorkspaceGenerateTextResult = z.infer<
 export const zcodeWorkspaceCancelGenerateTextParamsSchema = z
   .object({ operationId: nonEmptyString })
   .strict();
+
+/**
+ * workspace/generateTextProgress 通知负载：流式生成期间 CLI 主动推送的输出量进度。
+ * outputChars 是正文 + 思考增量的累计字符数——协议里没有中间 token 计数（token 用量
+ * 只在 finish 事件给出），它是「模型确实在产出」的真实证据，不是 token 估算值。
+ */
+export const zcodeWorkspaceGenerateTextProgressSchema = z
+  .object({
+    operationId: nonEmptyString.optional(),
+    workspacePath: nonEmptyString,
+    querySource: nonEmptyString,
+    outputChars: z.number().int().nonnegative(),
+    elapsedMs: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ZCodeWorkspaceGenerateTextProgress = z.infer<
+  typeof zcodeWorkspaceGenerateTextProgressSchema
+>;
 export const zcodeWorkspaceCancelGenerateTextResultSchema = z
   .object({ operationId: nonEmptyString, cancelled: z.boolean() })
   .strict();

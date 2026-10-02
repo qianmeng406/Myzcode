@@ -158,12 +158,15 @@ const enUS: Record<string, string> = {
   "chat.composer.oracleModelFollow": "Follow session model",
   "chat.oracleReview.reviewTurn": "Review this turn's diff",
   "chat.oracleReview.pending": "{model} is reviewing… (waiting {minutes}:{seconds})",
-  "chat.oracleReview.pendingSlow": "This channel is slow. Pick another review model (this review keeps running)",
+  "chat.oracleReview.pendingOutput": "{chars} chars generated",
+  "chat.oracleReview.pendingSlow":
+    "This channel is slow. Pick another review model (this review keeps running)",
   "chat.oracleReview.verdict.pass": "Pass",
   "chat.oracleReview.verdict.warn": "Warnings",
   "chat.oracleReview.verdict.fail": "Needs fixes",
   "chat.oracleReview.verdict.unknown": "Unparseable verdict",
-  "chat.oracleReview.verdict.unknownSummary": "The model did not follow the format. Expand for raw text",
+  "chat.oracleReview.verdict.unknownSummary":
+    "The model did not follow the format. Expand for raw text",
   "chat.oracleReview.findings": "Findings",
   "chat.oracleReview.findingsEmpty": "(no findings)",
   "chat.oracleReview.findingsToggle": "Toggle findings",
@@ -171,7 +174,8 @@ const enUS: Record<string, string> = {
   "chat.oracleReview.rereview": "Review again",
   "chat.oracleReview.error.noTurn": "No completed turn to review",
   "chat.oracleReview.error.noChanges": "The last turn changed no files; nothing to review",
-  "chat.oracleReview.error.noModel": "No review model available. Select one in model settings first",
+  "chat.oracleReview.error.noModel":
+    "No review model available. Select one in model settings first",
   "chat.oracleReview.error.emptyResponse":
     "The model returned no text (the output budget was likely consumed by reasoning). Review again; if this keeps happening, pick another review model",
   "chat.oracleReview.error.timeout":

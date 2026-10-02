@@ -642,6 +642,13 @@ export interface IZCodeAgentService {
   onDynamicPluginOperationProgress(
     operationId: string,
   ): Event<ZCodePluginOperationProgressNotification>;
+  /**
+   * workspace 流式生成（Oracle 审查等 stream 请求）的输出量进度：全局事件，
+   * 载荷带 workspacePath/querySource，由订阅方自行过滤自己发起的那次请求。
+   */
+  onDynamicWorkspaceGenerateTextProgress(): Event<
+    import("@zcode/shared").ZCodeWorkspaceGenerateTextProgress
+  >;
   getPluginsOverview(params: ZCodeAgentPluginViewParams): Promise<ZCodePluginsOverviewResult>;
   /**
    * 资源管理器：枚举本 Host 内全部本地 Agent 进程（含 plugin / mcp-status 泳道），

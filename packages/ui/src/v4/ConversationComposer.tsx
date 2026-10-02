@@ -2495,6 +2495,7 @@ function ConversationComposerImpl({
         <OracleReviewBanner
           state={oracleReview.state}
           pendingElapsedSeconds={oracleReview.pendingElapsedSeconds}
+          pendingOutputChars={oracleReview.pendingOutputChars}
           onRereview={oracleReview.manualReview}
           onDismiss={oracleReview.dismiss}
           onFix={handleOracleFixRequest}

@@ -111,6 +111,8 @@ import {
   type ZCodeMcpResourceSample,
   type ZCodeToolExecResource,
   type ZCodePluginOperationProgressNotification,
+  zcodeWorkspaceGenerateTextProgressSchema,
+  type ZCodeWorkspaceGenerateTextProgress,
   type ZCodeTaskMode,
 } from "@zcode/shared";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
@@ -1129,6 +1131,7 @@ export function createZCodeAgentService(
   const toolExecResourceEmitter = new Emitter<ZCodeToolExecResource>();
   const mcpResourceSamplesEmitter = new Emitter<ZCodeMcpResourceSample[]>();
   const mcpTelemetryEmitter = new Emitter<ZCodeMcpTelemetryEvent>();
+  const workspaceGenerateTextProgressEmitter = new Emitter<ZCodeWorkspaceGenerateTextProgress>();
   const pluginOperationProgressEmitters = new Map<
     string,
     Emitter<ZCodePluginOperationProgressNotification>
@@ -1944,6 +1947,23 @@ export function createZCodeAgentService(
               issues: parsed.error.issues.map((issue) => ({
                 code: issue.code,
                 message: issue.message,
+                path: issue.path.join("."),
+              })),
+            });
+          }
+          return;
+        }
+
+        if (message.method === zcodeProtocolNotifications.workspaceGenerateTextProgress) {
+          // 全局事件 + 载荷过滤：进度不带订阅路由，订阅方按 workspacePath/querySource
+          // 认领自己发起的那次请求（审查是单横幅单飞，误配面可忽略）。
+          const parsed = zcodeWorkspaceGenerateTextProgressSchema.safeParse(message.params);
+          if (parsed.success) {
+            workspaceGenerateTextProgressEmitter.fire(parsed.data);
+          } else {
+            logger.debug(undefined, "丢弃无效 ZCode Protocol 流式生成进度", {
+              issues: parsed.error.issues.map((issue) => ({
+                code: issue.code,
                 path: issue.path.join("."),
               })),
             });
@@ -4018,6 +4038,10 @@ export function createZCodeAgentService(
 
     onDynamicPluginOperationProgress(operationId: string) {
       return getPluginOperationProgressEmitter(operationId).event;
+    },
+
+    onDynamicWorkspaceGenerateTextProgress() {
+      return workspaceGenerateTextProgressEmitter.event;
     },
 
     async collectLocalRuntimeChildProcesses(signal?: AbortSignal) {

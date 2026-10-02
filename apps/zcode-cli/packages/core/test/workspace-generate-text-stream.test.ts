@@ -86,3 +86,21 @@ test("增量 JSON 损坏时不丢调用（降级为 _raw），缺 finish 抛错�
     },
   );
 });
+
+test("onProgress 上报正文与思考增量的累计字符数（非 token）", async () => {
+  const progress: number[] = [];
+  const result = await streamModelTextResult(
+    fakeModel([
+      { type: "reasoning_delta", text: "思考中" },
+      { type: "reasoning_delta", text: ".." },
+      { type: "text_delta", text: "VERDICT" },
+      { type: "text_delta", text: ": PASS" },
+      { type: "finish", finishReason: "stop", usage },
+    ]),
+    request,
+    (p) => progress.push(p.outputChars),
+  );
+  assert.equal(result.text, "VERDICT: PASS");
+  // 累计值：3 + 2 + 7 + 6；每个增量都触发一次回调
+  assert.deepEqual(progress, [3, 5, 12, 18]);
+});

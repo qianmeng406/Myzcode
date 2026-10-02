@@ -341,8 +341,7 @@ export function useOracleReview(params: {
     void reviewTurn("auto");
   }, [phase, reviewTurn]);
 
-  // 审查等待时长：pending 期间每秒跳一次，让用户确认「还在跑」；协议无流式通道，
-  // 跨进程 token 级进度不可得，等待时长 + 慢渠道提示是零协议改动的替代指示。
+  // 审查等待时长：pending 期间每秒跳一次，让用户确认「还在跑」。
   const [pendingElapsedSeconds, setPendingElapsedSeconds] = useState(0);
   const pendingStartedAtRef = useRef<number | null>(null);
   useEffect(() => {
@@ -365,6 +364,29 @@ export function useOracleReview(params: {
     };
   }, [state.status]);
 
+  // 流式输出进度：CLI 在 stream 路径把正文+思考的累计字符数按节流窗口推给宿主，
+  // 经 onDynamicWorkspaceGenerateTextProgress 全局事件转发到这里；按 querySource +
+  // workspacePath 认领本 hook 发起的请求（审查单飞，其余 stream 调用方会被过滤掉）。
+  const [pendingOutputChars, setPendingOutputChars] = useState(0);
+  useEffect(() => {
+    if (state.status !== "pending") {
+      setPendingOutputChars(0);
+      return;
+    }
+    const event = services?.zcodeAgentService.onDynamicWorkspaceGenerateTextProgress();
+    if (!event) {
+      return;
+    }
+    const disposable = event((progress) => {
+      if (progress.querySource !== ORACLE_TURN_REVIEW_QUERY_SOURCE) return;
+      if (progress.workspacePath !== params.workspacePath) return;
+      setPendingOutputChars(progress.outputChars);
+    });
+    return () => {
+      disposable.dispose();
+    };
+  }, [state.status, services, params.workspacePath]);
+
   const manualReview = useCallback(() => {
     void reviewTurn("manual");
   }, [reviewTurn]);
@@ -381,7 +403,15 @@ export function useOracleReview(params: {
     setOracleState({ status: "idle" });
   }, [setOracleState]);
 
-  return { state, enabled, pendingElapsedSeconds, manualReview, reviewTurnHeader, dismiss };
+  return {
+    state,
+    enabled,
+    pendingElapsedSeconds,
+    pendingOutputChars,
+    manualReview,
+    reviewTurnHeader,
+    dismiss,
+  };
 }
 
 /** SessionPane → composer / 行渲染注入的完整控制面；composer 不再自持 hook 实例。 */
@@ -390,6 +420,8 @@ export interface OracleReviewController {
   enabled: boolean;
   /** pending 已等待秒数（每秒跳动）；结果/错误态归零。 */
   pendingElapsedSeconds: number;
+  /** pending 期间模型已累计输出的字符数（正文+思考，CLI 流式进度推送）；非 pending 归零。 */
+  pendingOutputChars: number;
   manualReview: () => void;
   reviewTurnHeader: (header: TurnHeaderRow) => void;
   dismiss: () => void;
