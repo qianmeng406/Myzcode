@@ -4416,6 +4416,7 @@ export function SessionPane({
         pendingElapsedSeconds: oracleReview.pendingElapsedSeconds,
         pendingOutputChars: oracleReview.pendingOutputChars,
         manualReview: oracleReview.manualReview,
+        deepReview: oracleReview.deepReview,
         reviewTurnHeader: oracleReview.reviewTurnHeader,
         dismiss: oracleReview.dismiss,
         model: oracleModel,

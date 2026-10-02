@@ -1,0 +1,183 @@
+import type { ModelInputMessage, Model, ModelToolCall, ModelUsage, TraceContext } from "../deps.js";
+import {
+  PermissionService,
+  createDenyPermissionBroker,
+  createToolExecutor,
+  defaultPermissionConfig,
+} from "../deps.js";
+import type { AgentRuntimeInternal } from "../internal.js";
+import { runToolAgentLoop } from "../../memory/memory-agent-loop.js";
+import { isRuntimeReadOnlyBashCommand } from "../../tool/handlers/bash-semantics.js";
+import { getSessionShellSelectionFromConfig } from "./session-shell-environment.js";
+import { streamModelTextResult, type WorkspaceGenerateTextProgress } from "./workspace-generate-text.js";
+
+/**
+ * 深度审查循环：会话外的只读子代理。审查方拿到 Read/Grep/Glob 与只读 Bash
+ * （写命令在 tool-use 边界被只读分类器硬拒），多轮取证后产出与标准审查同格式
+ * 的 VERDICT/SUMMARY/FINDINGS 结论。骨架复用 runToolAgentLoop（memory agent
+ * 提取的通用循环），只读策略与模型选项在本地注入。
+ */
+
+const DEEP_REVIEW_ALLOWED_TOOLS = new Set(["Read", "Grep", "Glob", "Bash"]);
+// 多轮取证的轮数上限：一次「读若干文件 + 搜索 + 汇总」通常 <10 轮，24 留足余量；
+// 达到上限即以最后一轮正文收尾（解析不到结论会走 empty-response 错误卡片）。
+const DEEP_REVIEW_MAX_TURNS = 24;
+
+export interface DeepReviewAgentLoopResult {
+  text: string;
+  finishReason: string;
+  usage: ModelUsage;
+  turns: number;
+  toolCalls?: ModelToolCall[];
+}
+
+function sumUsage(
+  total: ModelUsage | undefined,
+  delta: ModelUsage | undefined,
+): ModelUsage | undefined {
+  if (!delta) return total;
+  if (!total) return delta;
+  const add = (a: number | undefined, b: number | undefined): number | undefined =>
+    a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
+  return {
+    inputTokens: add(total.inputTokens, delta.inputTokens),
+    outputTokens: add(total.outputTokens, delta.outputTokens),
+    totalTokens: add(total.totalTokens, delta.totalTokens),
+    cacheReadTokens: add(total.cacheReadTokens, delta.cacheReadTokens),
+    cacheWriteTokens: add(total.cacheWriteTokens, delta.cacheWriteTokens),
+    reasoningTokens: add(total.reasoningTokens, delta.reasoningTokens),
+  } as ModelUsage;
+}
+
+export async function runDeepReviewAgentLoop(
+  runtime: AgentRuntimeInternal,
+  input: {
+    abortSignal?: AbortSignal;
+    messages: ModelInputMessage[];
+    model: Model;
+    onProgress?: (progress: WorkspaceGenerateTextProgress) => void;
+    traceContext?: TraceContext;
+  },
+): Promise<DeepReviewAgentLoopResult> {
+  // 只读白名单的工具契约：从本 runtime 的注册表取定义，白名单外（写工具、
+  // Agent、MCP 等）根本不进 provider 请求的工具目录。
+  const tools = runtime.registry
+    .toContracts()
+    .filter((contract) => DEEP_REVIEW_ALLOWED_TOOLS.has(contract.name));
+  const executor = createToolExecutor({
+    artifactStore: runtime.artifactStore,
+    emitEvent: async () => {},
+    executionPort: runtime.executionPort,
+    fileSystemPort: runtime.fileSystemPort,
+    getBashShellSelection: () => getSessionShellSelectionFromConfig(runtime.config),
+    getMode: () => "yolo",
+    getWorkingDirectory: () => runtime.workingDirectory,
+    getWorkspaceRoot: () => runtime.workspaceRoot,
+    imageProcessorPort: runtime.imageProcessorPort,
+    pdfDocumentPort: runtime.pdfDocumentPort,
+    maxConcurrency: runtime.config.toolConcurrency?.maxConcurrency,
+    permissionBroker: createDenyPermissionBroker(),
+    permissionService: new PermissionService(defaultPermissionConfig),
+    // 全新 readFileState：深度审查的读上下文独立于主会话。
+    readFileState: new Map(),
+    registry: runtime.registry,
+    runtimeScope: "main",
+    sessionId: runtime.sessionId,
+    sessionStore: runtime.sessionStore,
+    skillPort: runtime.skillPort,
+    traceContext: input.traceContext,
+  });
+
+  let currentRound = 0;
+  let lastText = "";
+  let lastFinishReason = "unknown";
+  let totalUsage: ModelUsage | undefined;
+  let lastOutputChars = 0;
+
+  const loopResult = await runToolAgentLoop({
+    abortSignal: input.abortSignal,
+    executeTool: (toolCall, options) =>
+      executor.execute(toolCall, { signal: options?.abortSignal, traceContext: input.traceContext }),
+    // 逐轮流式生成（与标准审查同一防静默手段）+ 进度透传（轮次/输出字符）。
+    generate: async (model, request) => {
+      const round = currentRound;
+      const result = await streamModelTextResult(model, request, (progress) => {
+        lastOutputChars = progress.outputChars;
+        input.onProgress?.({ outputChars: progress.outputChars, round });
+      });
+      lastText = result.text;
+      lastFinishReason = result.finishReason;
+      totalUsage = sumUsage(totalUsage, result.usage);
+      return { text: result.text, toolCalls: result.toolCalls };
+    },
+    maxTurns: DEEP_REVIEW_MAX_TURNS,
+    messages: input.messages,
+    model: input.model,
+    onTurn: (event) => {
+      currentRound = event.turn;
+      if (event.phase === "tool" && event.toolName) {
+        input.onProgress?.({
+          outputChars: lastOutputChars,
+          round: event.turn,
+          toolName: event.toolName,
+        });
+      }
+    },
+    requestOptions: (model) => model.options,
+    // tool-use 边界的只读硬闸：非白名单工具与写类 Bash 一律拒绝并回填错误，
+    // 模型下一轮能看到拒绝原因。
+    evaluateToolPolicy: (toolCall) => evaluateDeepReviewToolPolicy(toolCall, runtime),
+    rootDir: runtime.workingDirectory,
+    tools,
+    workingDirectory: runtime.workingDirectory,
+    workspaceRoot: runtime.workspaceRoot,
+  });
+
+  return {
+    text: lastText,
+    finishReason: lastFinishReason,
+    // 循环至少跑一轮生成，totalUsage 理论必非空；零值兜底满足结果的非可选契约。
+    usage: totalUsage ?? {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    },
+    turns: loopResult.turns,
+  };
+}
+
+type DeepReviewToolPolicyDecision = { allowed: true } | { allowed: false; reason: string };
+
+/** 导出仅为单测；生产路径只经 runDeepReviewAgentLoop 的循环边界调用。 */
+export function evaluateDeepReviewToolPolicy(
+  toolCall: ModelToolCall,
+  runtime: AgentRuntimeInternal,
+): DeepReviewToolPolicyDecision {
+  if (toolCall.name === "Read" || toolCall.name === "Grep" || toolCall.name === "Glob") {
+    return { allowed: true };
+  }
+  if (toolCall.name === "Bash") {
+    const command =
+      toolCall.input && typeof toolCall.input === "object" && !Array.isArray(toolCall.input)
+        ? (toolCall.input as Record<string, unknown>).command
+        : undefined;
+    if (
+      typeof command === "string" &&
+      isRuntimeReadOnlyBashCommand(command, {
+        workingDirectory: runtime.workingDirectory,
+        workspaceRoot: runtime.workspaceRoot,
+      })
+    ) {
+      return { allowed: true };
+    }
+    return {
+      allowed: false,
+      reason:
+        "Deep review is read-only: only read-only shell commands are allowed (ls, find, grep, cat, git log, git diff, git show, and similar). Write/exec commands are denied.",
+    };
+  }
+  return {
+    allowed: false,
+    reason: `Deep review is read-only: tool ${toolCall.name} is not available. Only Read, Grep, Glob and read-only Bash are allowed.`,
+  };
+}

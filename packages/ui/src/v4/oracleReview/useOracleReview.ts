@@ -7,18 +7,23 @@ import { useSettings } from "@/hooks/useSettingService.js";
 import { getPathLeaf } from "@/lib/path.js";
 import { logger } from "@/logger.js";
 import {
+  ORACLE_DEEP_REVIEW_QUERY_SOURCE,
+  ORACLE_DEEP_REVIEW_TIMEOUT_MS,
   ORACLE_REVIEW_REQUEST_TIMEOUT_MS,
   ORACLE_TURN_REVIEW_QUERY_SOURCE,
   buildOracleDiffSections,
   buildOracleReviewPrompt,
   formatOracleCommitLine,
   isOracleDeadlineTimeoutError,
+  isOracleReviewQuerySource,
   parseOracleVerdict,
+  readOracleRecentCommitSubjects,
   resolveOraclePreviousReviewContext,
+  resolveOracleRequestOptions,
   type OraclePreviousReviewContext,
+  type OracleReviewDepth,
   type OracleReviewRequestMode,
   type OracleReviewState,
-  type OracleVerdict,
 } from "./oracleReviewSupport.js";
 import {
   getOracleReviewState,
@@ -29,27 +34,6 @@ import {
   subscribeOracleReviewState,
 } from "./oracleReviewStore.js";
 
-/** 审查 prompt 附带的最近提交条数：只作「此前改动可能已在早前提交中」的对照线索。 */
-const RECENT_COMMITS_FOR_REVIEW = 8;
-
-/** 最近提交摘要；非 git 工作区/查询失败返回 null，审查照常进行。 */
-async function readRecentCommitSubjects(
-  services: ReturnType<typeof useOptionalServices>,
-  workspacePath: string,
-): Promise<string[] | null> {
-  const gitService = services?.gitService;
-  if (!gitService) return null;
-  try {
-    const graph = await gitService.getCommitGraph({
-      workspacePath,
-      maxCount: RECENT_COMMITS_FOR_REVIEW,
-    });
-    return graph.commits.map((commit) => formatOracleCommitLine(commit.hash, commit.subject));
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Oracle 双模型把关的执行层：回合成功结束（且本回合改过文件）时自动用「把关模型」
  * 复审一次本回合 diff；输入框旁的手动按钮走同一管道重审最近一个已完成回合。
@@ -59,42 +43,6 @@ async function readRecentCommitSubjects(
  * 不依赖 git 工作区状态）。卡片状态在模块级 store（oracleReviewStore）按会话键控，
  * 切换会话/重挂载不丢；冷恢复（内存态无持久化）后卡片消失仍是 V1 接受的边界。
  */
-
-/**
- * 解析把关请求的执行选项：模型选择（缺推理档时补该模型最高公开档）+ 输出预算。
- *
- * maxOutputTokens 跟随模型声明的上限（optionSpecs.maxOutputTokens.max，与主回合
- * 「打满模型声明上限」同语义）：省略会被 adapters 的 validateOptions 以
- * 「outside the model option range」拒绝；设小了会被思考模型的 reasoning 吃光
- * 导致空正文（实测 2048 上限 GLM 返回空文本）。模型视图缺席该值时才省略并让
- * 错误如实上报。
- */
-function resolveOracleRequestOptions(
-  oracleModel: ModelSelection | null,
-  modelSelectionView: ModelSelectionView | null | undefined,
-): { selection: ModelSelection; maxOutputTokens?: number } | null {
-  const selection = oracleModel ?? modelSelectionView?.preferredSelection ?? null;
-  if (!selection) {
-    return null;
-  }
-  const provider = modelSelectionView?.providers.find(
-    (candidate) => candidate.providerId === selection.providerId,
-  );
-  const model = provider?.models.find((candidate) => candidate.modelId === selection.modelId);
-  const levels = model?.config.optionSpecs.reasoningLevel?.values;
-  const highestLevel = levels?.length ? levels[levels.length - 1] : undefined;
-  const resolvedSelection =
-    selection.options?.reasoningLevel || !highestLevel
-      ? selection
-      : { ...selection, options: { reasoningLevel: highestLevel } };
-  const specMax = model?.config.optionSpecs.maxOutputTokens?.max;
-  return {
-    selection: resolvedSelection,
-    ...(typeof specMax === "number" && Number.isFinite(specMax) && specMax > 0
-      ? { maxOutputTokens: specMax }
-      : {}),
-  };
-}
 
 function findLastCompletedTurnHeader(snapshot: ConversationSnapshot): TurnHeaderRow | null {
   for (let index = snapshot.rows.window.length - 1; index >= 0; index -= 1) {
@@ -155,7 +103,11 @@ export function useOracleReview(params: {
   }, [sessionId]);
 
   const reviewTurn = useCallback(
-    async (mode: OracleReviewRequestMode, headerOverride?: TurnHeaderRow) => {
+    async (
+      mode: OracleReviewRequestMode,
+      headerOverride?: TurnHeaderRow,
+      depth: OracleReviewDepth = "standard",
+    ) => {
       const snapshot = snapshotRef.current;
       const agentService = services?.zcodeAgentService;
       if (!snapshot || !agentService) {
@@ -176,7 +128,7 @@ export function useOracleReview(params: {
       }
       const header = headerOverride ?? findLastCompletedTurnHeader(snapshot);
       if (!header) {
-        setOracleReviewState(sid, { status: "error", mode, failure: { kind: "no-turn" } });
+        setOracleReviewState(sid, { status: "error", mode, failure: { kind: "no-turn" }, depth });
         return;
       }
       // 诊断留痕：逐轮按钮审历史旧轮与默认「最近回合」共用本函数，日志区分入口
@@ -195,7 +147,12 @@ export function useOracleReview(params: {
         autoReviewedTurnRowIdsRef.current.add(header.rowId);
       }
       if (!header.fileChanges || header.fileChanges.files <= 0) {
-        setOracleReviewState(sid, { status: "error", mode, failure: { kind: "no-changes" } });
+        setOracleReviewState(sid, {
+          status: "error",
+          mode,
+          failure: { kind: "no-changes" },
+          depth,
+        });
         return;
       }
       const requestOptions = resolveOracleRequestOptions(
@@ -203,12 +160,12 @@ export function useOracleReview(params: {
         params.modelSelectionView,
       );
       if (!requestOptions) {
-        setOracleReviewState(sid, { status: "error", mode, failure: { kind: "no-model" } });
+        setOracleReviewState(sid, { status: "error", mode, failure: { kind: "no-model" }, depth });
         return;
       }
       const target = header.entityId ? { rowId: header.rowId, entityId: header.entityId } : null;
       if (!target) {
-        setOracleReviewState(sid, { status: "error", mode, failure: { kind: "no-turn" } });
+        setOracleReviewState(sid, { status: "error", mode, failure: { kind: "no-turn" }, depth });
         return;
       }
       // 跨回合对照上下文：注入门槛（上次审查必须是结果态、且本次目标回合在其之后）
@@ -219,7 +176,7 @@ export function useOracleReview(params: {
         header.rowId,
       );
       const pendingModelLabel = `${requestOptions.selection.providerId}/${requestOptions.selection.modelId}`;
-      setOracleReviewState(sid, { status: "pending", mode, modelLabel: pendingModelLabel });
+      setOracleReviewState(sid, { status: "pending", mode, modelLabel: pendingModelLabel, depth });
       const requestSeq = nextOracleReviewSeq(sid);
       const applyIfCurrent = (next: OracleReviewState) => {
         if (isCurrentOracleReviewSeq(sid, requestSeq)) {
@@ -238,10 +195,13 @@ export function useOracleReview(params: {
         });
         const sections = buildOracleDiffSections(fileChanges.items);
         if (sections.length === 0) {
-          applyIfCurrent({ status: "error", mode, failure: { kind: "no-changes" } });
+          applyIfCurrent({ status: "error", mode, failure: { kind: "no-changes" }, depth });
           return;
         }
-        const recentCommits = await readRecentCommitSubjects(services, params.workspacePath);
+        const recentCommits = await readOracleRecentCommitSubjects(
+          services?.gitService,
+          params.workspacePath,
+        );
         const result = await agentService.generateWorkspaceText({
           workspacePath: params.workspacePath,
           ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
@@ -253,20 +213,25 @@ export function useOracleReview(params: {
             projectName: getPathLeaf(params.workspacePath) || params.workspacePath,
             previousReview,
             ...(recentCommits ? { recentCommits } : {}),
+            depth,
           }),
-          querySource: ORACLE_TURN_REVIEW_QUERY_SOURCE,
+          querySource:
+            depth === "deep" ? ORACLE_DEEP_REVIEW_QUERY_SOURCE : ORACLE_TURN_REVIEW_QUERY_SOURCE,
           // 流式传输（与主会话/子代理同一 streamText 管道）。日志观察（2026-10-01
           // 23:26-23:36，~/.zcode/v2/logs/）：一次性请求路径 8 次尝试均在 ~55-60s
           // 无产出后终止（客户端各超时均 ≥180s，可排除客户端超时）；推断为上游对
           // 静默连接的容忍窗口。流式的思考增量使连接持续活跃，避开该窗口。
           // 指纹头同源——审查请求本就走同一套 provider runtime headers。
           stream: true,
+          // 深度审查：只读子代理多轮取证（core 忽略单轮 stream 语义，逐轮内部流式）。
+          ...(depth === "deep" ? { agentic: true } : {}),
           // 输出预算跟随模型声明的上限（resolveOracleRequestOptions 注释详述取舍）；
           // 超时由 requestTimeoutMs 兜底，审查结论从返回内容里解析。
           ...(requestOptions.maxOutputTokens !== undefined
             ? { maxOutputTokens: requestOptions.maxOutputTokens }
             : {}),
-          requestTimeoutMs: ORACLE_REVIEW_REQUEST_TIMEOUT_MS,
+          requestTimeoutMs:
+            depth === "deep" ? ORACLE_DEEP_REVIEW_TIMEOUT_MS : ORACLE_REVIEW_REQUEST_TIMEOUT_MS,
         });
         const parsed = parseOracleVerdict(result.text);
         if (!result.text.trim()) {
@@ -282,6 +247,7 @@ export function useOracleReview(params: {
           applyIfCurrent({
             status: "error",
             mode,
+            depth,
             failure: {
               kind: "empty-response",
               ...(result.finishReason ? { finishReason: result.finishReason } : {}),
@@ -307,6 +273,7 @@ export function useOracleReview(params: {
           summary: parsed.summary,
           findings: parsed.findings,
           modelLabel: `${result.selection.providerId}/${result.selection.modelId}`,
+          depth,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -324,6 +291,7 @@ export function useOracleReview(params: {
           mode,
           failure: isTimeout ? { kind: "timeout", message } : { kind: "request", message },
           modelLabel: pendingModelLabel,
+          depth,
         });
       }
     },
@@ -378,9 +346,9 @@ export function useOracleReview(params: {
     };
   }, [state.status]);
 
-  // 流式输出进度：CLI 在 stream 路径把正文+思考的累计字符数按节流窗口推给宿主，
-  // 经 onDynamicWorkspaceGenerateTextProgress 全局事件转发到这里；按 querySource +
-  // workspacePath 认领本 hook 发起的请求（审查单飞，其余 stream 调用方会被过滤掉）。
+  // 流式输出进度：CLI 把正文+思考的累计字符数（深度审查附轮次/工具名）按节流窗口
+  // 推给宿主，经 onDynamicWorkspaceGenerateTextProgress 全局事件转发到这里；按
+  // querySource（标准+深度两个来源）+ workspacePath 认领本 hook 发起的请求。
   const [pendingOutputChars, setPendingOutputChars] = useState(0);
   useEffect(() => {
     if (state.status !== "pending") {
@@ -392,17 +360,33 @@ export function useOracleReview(params: {
       return;
     }
     const disposable = event((progress) => {
-      if (progress.querySource !== ORACLE_TURN_REVIEW_QUERY_SOURCE) return;
+      if (!isOracleReviewQuerySource(progress.querySource)) return;
       if (progress.workspacePath !== params.workspacePath) return;
       setPendingOutputChars(progress.outputChars);
+      // 深度审查的轮次/工具名写进 store 的 pending 条目（工具执行阶段带 toolName，
+      // 生成阶段不带——直接赋值让上一次的工具名随新轮次清空）。
+      if (sessionId !== null && (progress.round !== undefined || progress.toolName)) {
+        const current = getOracleReviewState(sessionId);
+        if (current.status === "pending") {
+          setOracleReviewState(sessionId, {
+            ...current,
+            ...(progress.round !== undefined ? { round: progress.round } : {}),
+            toolName: progress.toolName,
+          });
+        }
+      }
     });
     return () => {
       disposable.dispose();
     };
-  }, [state.status, services, params.workspacePath]);
+  }, [state.status, services, params.workspacePath, sessionId]);
 
   const manualReview = useCallback(() => {
     void reviewTurn("manual");
+  }, [reviewTurn]);
+
+  const deepReview = useCallback(() => {
+    void reviewTurn("manual", undefined, "deep");
   }, [reviewTurn]);
 
   // 轮尾工具栏「审查这一回合」：按钮只在有 diff 的已完成回合渲染，这里不再重复校验。
@@ -429,6 +413,7 @@ export function useOracleReview(params: {
     pendingElapsedSeconds,
     pendingOutputChars,
     manualReview,
+    deepReview,
     reviewTurnHeader,
     dismiss,
   };
@@ -443,6 +428,8 @@ export interface OracleReviewController {
   /** pending 期间模型已累计输出的字符数（正文+思考，CLI 流式进度推送）；非 pending 归零。 */
   pendingOutputChars: number;
   manualReview: () => void;
+  /** 深度审查（只读子代理多轮取证）：仅手动入口，成本数倍于标准审查。 */
+  deepReview: () => void;
   reviewTurnHeader: (header: TurnHeaderRow) => void;
   dismiss: () => void;
   /** 把关模型偏好（localStorage 全局）；下拉的受控值。 */

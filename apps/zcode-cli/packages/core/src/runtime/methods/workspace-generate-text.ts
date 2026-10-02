@@ -21,6 +21,7 @@ import { recordModelUsageFact } from "./usage-observability.js";
 import { createRuntimeModel } from "./runtime-model.js";
 import { normalizeStreamError } from "../helpers/index.js";
 import { auxiliaryModelOptions } from "../../model/auxiliary-model-options.js";
+import { runDeepReviewAgentLoop } from "./workspace-deep-review.js";
 
 const WORKSPACE_GENERATE_TEXT_TIMEOUT_MS = 60_000;
 const CONNECTIVITY_PROBE_MAX_OUTPUT_TOKENS = 1;
@@ -54,10 +55,20 @@ export interface WorkspaceGenerateTextInput {
    * bootstrap 层负责节流并转成协议通知；token 用量只在 finish 的 usage 里，中途没有。
    */
   onProgress?: (progress: WorkspaceGenerateTextProgress) => void;
+  /**
+   * 深度审查（只读子代理多轮循环）：审查方获得 Read/Grep/Glob 与只读 Bash，
+   * 多轮取证后产出结论。与 stream 同源（逐轮 streamText 防静默掐断），忽略
+   * 外层 modelRequest 的单轮语义。
+   */
+  agentic?: boolean;
 }
 
 export interface WorkspaceGenerateTextProgress {
   outputChars: number;
+  /** 深度审查（agentic）的当前轮次，从 1 起。 */
+  round?: number;
+  /** 深度审查正在执行的工具名（仅工具执行阶段携带）。 */
+  toolName?: string;
 }
 
 export interface WorkspaceGenerateTextResult {
@@ -240,9 +251,17 @@ async function generateWorkspaceTextImpl(
       }),
     },
     () =>
-      input.stream
-        ? streamModelTextResult(model, modelRequest, input.onProgress)
-        : model.generateText(modelRequest),
+      input.agentic
+        ? runDeepReviewAgentLoop(this, {
+            abortSignal,
+            messages,
+            model,
+            onProgress: input.onProgress,
+            traceContext: modelTraceContext,
+          })
+        : input.stream
+          ? streamModelTextResult(model, modelRequest, input.onProgress)
+          : model.generateText(modelRequest),
   ).catch(async (error: unknown) => {
     await recordModelUsageFact(this, {
       error,

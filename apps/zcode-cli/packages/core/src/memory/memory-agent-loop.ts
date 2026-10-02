@@ -38,12 +38,26 @@ type MemoryAgentToolPolicyDecision = { allowed: true } | { allowed: false; reaso
 
 const MEMORY_AGENT_READ_ONLY_TOOLS = new Set(["Read", "Grep", "Glob"]);
 
-export async function runMemoryAgentLoop(input: {
+/**
+ * 会话外多轮工具循环的通用骨架：模型生成 → 策略判定 → 工具执行 → 结果回填，
+ * 直到无 toolCall 或达到 maxTurns。策略、请求选项、生成函数由调用方注入——
+ * Memory agent（辅助档 + 受限 .md 可写）与深度审查（最高档 + 全只读）共用本骨架。
+ */
+export async function runToolAgentLoop(input: {
   abortSignal?: AbortSignal;
   executeTool: (
     toolCall: ExecutableToolCall,
     options: { abortSignal?: AbortSignal },
   ) => Promise<ToolExecutionResult>;
+  /** 每轮模型请求的构造选项（推理档/输出预算）；缺席用辅助档（原 Memory 行为）。 */
+  requestOptions?: (model: Model) => ModelRequest["options"];
+  /** 每轮生成函数：默认一次性 generateText；流式调用方传 streamModelTextResult 包装。 */
+  generate?: (
+    model: Model,
+    request: ModelRequest,
+  ) => Promise<{ text: string; reasoning?: readonly ModelReasoningContentBlock[]; toolCalls?: ModelToolCall[] }>;
+  /** 逐轮生成与工具执行的过程回调（深度审查的进度推送挂点）。 */
+  onTurn?: (event: { turn: number; phase: "generate" | "tool"; toolName?: string }) => void;
   maxTurns: number;
   messages: readonly ModelInputMessage[];
   model: Model;
@@ -51,6 +65,8 @@ export async function runMemoryAgentLoop(input: {
   tools: readonly ModelToolContract[];
   workingDirectory: string;
   workspaceRoot: string;
+  /** tool-use 边界策略；拒绝理由会作为错误工具消息回填进下一轮请求。 */
+  evaluateToolPolicy: (toolCall: ModelToolCall) => MemoryAgentToolPolicyDecision;
 }): Promise<MemoryAgentLoopResult> {
   const messages = input.messages.map(cloneModelMessage);
   let turns = 0;
@@ -66,11 +82,16 @@ export async function runMemoryAgentLoop(input: {
     const request: ModelRequest = {
       abortSignal: input.abortSignal,
       messages: mediaProjection.messages,
-      options: auxiliaryModelOptions(input.model),
+      options: input.requestOptions
+        ? input.requestOptions(input.model)
+        : auxiliaryModelOptions(input.model),
       // Memory agent 的 provider request 必须保留 Main 的真实工具目录；执行权限只在 tool-use 边界收窄。
       tools: input.tools as ModelToolContract[],
     };
-    const response = await input.model.generateText(request);
+    input.onTurn?.({ turn: turns + 1, phase: "generate" });
+    const response = await (input.generate
+      ? input.generate(input.model, request)
+      : input.model.generateText(request));
     input.abortSignal?.throwIfAborted();
 
     const toolCalls = response.toolCalls ?? [];
@@ -82,13 +103,8 @@ export async function runMemoryAgentLoop(input: {
 
     const toolMessages = await Promise.all(
       toolCalls.map(async (toolCall): Promise<ModelInputMessage> => {
-        const decision = evaluateMemoryAgentToolPolicy({
-          rootDir: input.rootDir,
-          toolCall,
-          tools: input.tools,
-          workingDirectory: input.workingDirectory,
-          workspaceRoot: input.workspaceRoot,
-        });
+        input.onTurn?.({ turn: turns + 1, phase: "tool", toolName: toolCall.name });
+        const decision = input.evaluateToolPolicy(toolCall);
         if (!decision.allowed) {
           return {
             content: decision.reason,
@@ -116,6 +132,33 @@ export async function runMemoryAgentLoop(input: {
   }
 
   return { messages, turns };
+}
+
+export async function runMemoryAgentLoop(input: {
+  abortSignal?: AbortSignal;
+  executeTool: (
+    toolCall: ExecutableToolCall,
+    options: { abortSignal?: AbortSignal },
+  ) => Promise<ToolExecutionResult>;
+  maxTurns: number;
+  messages: readonly ModelInputMessage[];
+  model: Model;
+  rootDir: string;
+  tools: readonly ModelToolContract[];
+  workingDirectory: string;
+  workspaceRoot: string;
+}): Promise<MemoryAgentLoopResult> {
+  return runToolAgentLoop({
+    ...input,
+    evaluateToolPolicy: (toolCall) =>
+      evaluateMemoryAgentToolPolicy({
+        rootDir: input.rootDir,
+        toolCall,
+        tools: input.tools,
+        workingDirectory: input.workingDirectory,
+        workspaceRoot: input.workspaceRoot,
+      }),
+  });
 }
 
 function evaluateMemoryAgentToolPolicy(

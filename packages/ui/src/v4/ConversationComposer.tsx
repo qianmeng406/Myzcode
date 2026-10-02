@@ -2138,6 +2138,11 @@ function ConversationComposerImpl({
   const oracleReviewButtonTitle = intl.formatMessage({ id: "chat.composer.oracleReview" });
   const oracleModelMenuTitle = intl.formatMessage({ id: "chat.composer.oracleModel" });
   const oracleModelFollowLabel = intl.formatMessage({ id: "chat.composer.oracleModelFollow" });
+  const oracleDepthMenuTitle = intl.formatMessage({ id: "chat.composer.oracleDepth" });
+  const oracleDepthStandardLabel = intl.formatMessage({
+    id: "chat.oracleReview.reviewDepth.standard",
+  });
+  const oracleDepthDeepLabel = intl.formatMessage({ id: "chat.oracleReview.reviewDepth.deep" });
   const optimizePromptTooltip =
     optimizerModel && promptOptimizer.optimizing === false
       ? `${optimizePromptTitle}（${optimizerModel.modelId}）`
@@ -2255,6 +2260,31 @@ function ConversationComposerImpl({
                   <span className="sr-only">{oracleReviewButtonTitle}</span>
                 </Button>
               </ControlHintTooltip>
+            ) : null}
+            {oracleReview ? (
+              // 深度审查入口：盾牌主点击仍是标准审查，旁边的箭头下拉二选一。
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={disabled}
+                    data-testid="v4-composer-oracle-depth"
+                    aria-label={oracleDepthMenuTitle}
+                  >
+                    <ChevronDownIcon className="size-3 text-foreground-subtle" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => oracleReview.manualReview()}>
+                    <span className="min-w-0 flex-1 truncate">{oracleDepthStandardLabel}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => oracleReview.deepReview()}>
+                    <span className="min-w-0 flex-1 truncate">{oracleDepthDeepLabel}</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : null}
             {oracleReview && optimizerModelGroups.length > 0 ? (
               <DropdownMenu>

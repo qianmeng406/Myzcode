@@ -85,6 +85,26 @@ test("审查 prompt 未提供上下文时不出现对照段落", () => {
   assert.ok(!prompt.includes("本仓库最近提交"));
 });
 
+test("深度审查 prompt 追加只读取证指引，标准审查不含", () => {
+  const deep = buildOracleReviewPrompt({
+    userRequest: "修复登录按钮",
+    diffSections: [{ path: "src/a.ts", text: "--- a/src/a.ts" }],
+    projectName: "demo",
+    depth: "deep",
+  });
+  assert.ok(deep.includes("深度审查指引"));
+  assert.ok(deep.includes("只读工具"));
+  assert.ok(deep.includes("git log"));
+  assert.ok(deep.includes("VERDICT: PASS|WARN|FAIL")); // 输出格式与标准审查一致
+
+  const standard = buildOracleReviewPrompt({
+    userRequest: "修复登录按钮",
+    diffSections: [{ path: "src/a.ts", text: "--- a/src/a.ts" }],
+    projectName: "demo",
+  });
+  assert.ok(!standard.includes("深度审查指引"));
+});
+
 test("注入门槛：只向其后回合的审查注入上次结论", () => {
   const result = {
     status: "result",

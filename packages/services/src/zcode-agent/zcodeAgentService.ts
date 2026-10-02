@@ -4432,6 +4432,7 @@ export function createZCodeAgentService(
             querySource: params.querySource,
             ...(params.maxOutputTokens ? { maxOutputTokens: params.maxOutputTokens } : {}),
             ...(params.stream ? { stream: true } : {}),
+            ...(params.agentic ? { agentic: true } : {}),
             ...(operationId ? { operationId } : {}),
           },
           zcodeWorkspaceGenerateTextResultSchema,

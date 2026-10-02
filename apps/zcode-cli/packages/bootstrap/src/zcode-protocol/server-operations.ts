@@ -2755,10 +2755,15 @@ function createWorkspaceGenerateTextProgressNotifier(options: {
   operationId: string | undefined;
   workspacePath: string;
   querySource: string;
-}): { onProgress: (progress: { outputChars: number }) => void; flush: () => void } {
+}): {
+  onProgress: (progress: { outputChars: number; round?: number; toolName?: string }) => void;
+  flush: () => void;
+} {
   let lastEmitAt = 0;
   let lastChars = 0;
   let lastEmittedChars = 0;
+  let lastRound: number | undefined;
+  let lastToolName: string | undefined;
   const emit = (force: boolean) => {
     const now = Date.now();
     if (
@@ -2779,6 +2784,8 @@ function createWorkspaceGenerateTextProgressNotifier(options: {
           workspacePath: options.workspacePath,
           querySource: options.querySource,
           outputChars: lastChars,
+          ...(lastRound !== undefined ? { round: lastRound } : {}),
+          ...(lastToolName ? { toolName: lastToolName } : {}),
         },
       });
     } catch (error) {
@@ -2794,6 +2801,8 @@ function createWorkspaceGenerateTextProgressNotifier(options: {
   return {
     onProgress: (progress) => {
       lastChars = progress.outputChars;
+      lastRound = progress.round;
+      lastToolName = progress.toolName;
       emit(false);
     },
     flush: () => emit(true),
@@ -2809,8 +2818,10 @@ export async function generateWorkspaceText(
   const active = Array.from(context.sessions.values()).find(
     (record) => record.workspace.workspaceKey === params.workspace.workspaceKey,
   );
-  const progressNotifier = params.stream
-    ? createWorkspaceGenerateTextProgressNotifier({
+  // 深度审查（agentic）也走进度通知：逐轮流式 + 轮次/工具名。
+  const progressNotifier =
+    params.stream || params.agentic
+      ? createWorkspaceGenerateTextProgressNotifier({
         notify: (notification) => context.notify(notification),
         logger: context.logger,
         operationId: params.operationId,
@@ -2834,6 +2845,7 @@ export async function generateWorkspaceText(
     querySource: params.querySource,
     ...(params.maxOutputTokens ? { maxOutputTokens: params.maxOutputTokens } : {}),
     ...(params.stream ? { stream: true } : {}),
+    ...(params.agentic ? { agentic: true } : {}),
     ...(progressNotifier ? { onProgress: progressNotifier.onProgress } : {}),
   };
   const app =

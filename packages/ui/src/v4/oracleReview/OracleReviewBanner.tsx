@@ -149,14 +149,29 @@ export function OracleReviewBanner({
               <Loader2Icon className="size-4 shrink-0 animate-spin text-foreground-subtle" />
               <span className="min-w-0 flex-1 truncate text-ui-base text-foreground">
                 {intl.formatMessage(
-                  { id: "chat.oracleReview.pending" },
+                  {
+                    id:
+                      state.depth === "deep"
+                        ? "chat.oracleReview.pendingDeep"
+                        : "chat.oracleReview.pending",
+                  },
                   {
                     model: state.modelLabel,
+                    // 深度审查附当前轮次；标准审查不插值 round。
+                    round: String(state.round ?? 1),
                     minutes: String(Math.floor(pendingElapsedSeconds / 60)),
                     seconds: String(pendingElapsedSeconds % 60).padStart(2, "0"),
                   },
                 )}
               </span>
+              {state.status === "pending" && state.toolName ? (
+                <span className="hidden shrink-0 text-ui-sm text-foreground-subtle md:inline">
+                  {intl.formatMessage(
+                    { id: "chat.oracleReview.pendingDeepTool" },
+                    { tool: state.toolName },
+                  )}
+                </span>
+              ) : null}
               {pendingOutputChars > 0 ? (
                 <span className="hidden shrink-0 tabular-nums text-ui-sm text-foreground-subtle md:inline">
                   {intl.formatMessage(
@@ -206,6 +221,11 @@ export function OracleReviewBanner({
                 {result.summary ||
                   intl.formatMessage({ id: "chat.oracleReview.verdict.unknownSummary" })}
               </span>
+              {result.depth === "deep" ? (
+                <span className="shrink-0 rounded-sm bg-input px-1.5 py-0.5 text-ui-xs text-foreground-subtle">
+                  {intl.formatMessage({ id: "chat.oracleReview.deepBadge" })}
+                </span>
+              ) : null}
               <span
                 className="hidden shrink-0 font-mono text-ui-xs text-foreground-subtle md:inline"
                 title={result.modelLabel}

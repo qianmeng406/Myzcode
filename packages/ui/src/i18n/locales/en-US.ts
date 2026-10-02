@@ -154,11 +154,18 @@ const enUS: Record<string, string> = {
   "chat.composer.optimizePromptFailed": "Failed to optimize the prompt. Try again later",
   "chat.composer.optimizePromptNoModel": "No model available. Select one in model settings first",
   "chat.composer.oracleReview": "Review last turn's diff",
+  "chat.composer.oracleDepth": "Review mode",
   "chat.composer.oracleModel": "Oracle review model",
   "chat.composer.oracleModelFollow": "Follow session model",
+  "chat.oracleReview.reviewDepth.standard": "Standard review",
+  "chat.oracleReview.reviewDepth.deep": "Deep review",
   "chat.oracleReview.reviewTurn": "Review this turn's diff",
   "chat.oracleReview.pending": "{model} is reviewing… (waiting {minutes}:{seconds})",
   "chat.oracleReview.pendingOutput": "{chars} chars generated",
+  "chat.oracleReview.pendingDeep":
+    "{model} deep review in progress… (round {round} · waiting {minutes}:{seconds})",
+  "chat.oracleReview.pendingDeepTool": "using {tool}",
+  "chat.oracleReview.deepBadge": "Deep",
   "chat.oracleReview.pendingSlow":
     "This channel is slow. Pick another review model (this review keeps running)",
   "chat.oracleReview.verdict.pass": "Pass",

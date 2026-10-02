@@ -1,4 +1,5 @@
 import type { ModelSelection } from "@zcode/shared";
+import type { ModelSelectionView } from "@zcode/provider";
 
 /**
  * Oracle 双模型把关的纯函数层：prompt 构建 / 裁决解析 / diff 预算 / 模型偏好存取。
@@ -11,6 +12,19 @@ export const ORACLE_TURN_REVIEW_QUERY_SOURCE = "oracle_turn_review";
 // 全量 diff + 最高推理档的思考可能很久；10 分钟客户端 deadline（宿主会据此派生
 // 取消 signal，跳过 CLI 侧 60s 默认超时），横幅不阻塞输入。
 export const ORACLE_REVIEW_REQUEST_TIMEOUT_MS = 600_000;
+export const ORACLE_DEEP_REVIEW_QUERY_SOURCE = "oracle_deep_review";
+// 深度审查是多轮只读子代理（读文件/搜索/只读 bash 取证），耗时数倍于标准审查。
+export const ORACLE_DEEP_REVIEW_TIMEOUT_MS = 1_200_000;
+
+export type OracleReviewDepth = "standard" | "deep";
+
+/** 深度审查的进度通知也走同一 workspace/generateTextProgress 通道，按来源认领。 */
+export function isOracleReviewQuerySource(querySource: string): boolean {
+  return (
+    querySource === ORACLE_TURN_REVIEW_QUERY_SOURCE ||
+    querySource === ORACLE_DEEP_REVIEW_QUERY_SOURCE
+  );
+}
 // maxOutputTokens 由 useOracleReview 按模型声明的上限（optionSpecs.maxOutputTokens.max）
 // 传入：省略会被 adapters 校验拒绝（outside the model option range），设小了会被
 // 思考模型的 reasoning 吃光导致空正文（实测 2048 上限 GLM 返回空文本）。
@@ -130,6 +144,8 @@ export function buildOracleReviewPrompt(params: {
   projectName: string;
   previousReview?: OraclePreviousReviewContext | null;
   recentCommits?: readonly string[] | null;
+  /** deep：追加只读取证指引（审查方配备 Read/Grep/Glob 与只读 Bash）。 */
+  depth?: OracleReviewDepth;
 }): string {
   const userRequest = params.userRequest.trim().slice(0, MAX_USER_REQUEST_CHARS);
   const diffText =
@@ -154,6 +170,16 @@ export function buildOracleReviewPrompt(params: {
       "",
     );
   }
+  const depthSections =
+    params.depth === "deep"
+      ? [
+          "## 深度审查指引",
+          "你不只有这份 diff：你可以调用只读工具对仓库取证（Read 读文件、Grep 全文搜索、Glob 按模式找文件、Bash 仅限只读命令如 git log/git diff/ls；写命令会被拒绝）。",
+          "在给结论前请：①打开 diff 涉及的文件核对改动所在的真实上下文，确认行号与引用关系；②检查改动是否破坏了调用方/被调用方；③用搜索确认声称修复的问题确实已修。下结论必须基于你亲自读到的证据，diff 里看不出来的地方就去读代码，仍无法确认的如实标注不确定。",
+          "取证要克制：围绕本次 diff 展开，不要漫无目的地浏览仓库。",
+          "",
+        ]
+      : [];
   return [
     "你是资深代码审查者（Oracle）。一位编程智能体刚完成一个回合的代码修改，请你独立把关这次修改的质量。",
     "只审查，不执行任何操作；不要提出与本次 diff 无关的重构建议；发现无法从 diff 判断的地方要如实说不确定，不要臆断。",
@@ -164,6 +190,7 @@ export function buildOracleReviewPrompt(params: {
     userRequest || "（未找到原始请求文本）",
     "",
     ...contextSections,
+    ...depthSections,
     "## 本回合改动（unified diff，全量未裁剪）",
     diffText,
     "",
@@ -284,6 +311,12 @@ export type OracleReviewState =
       mode: OracleReviewRequestMode;
       /** 本次审查实际使用的把关模型（providerId/modelId），卡片 pending 时展示。 */
       modelLabel: string;
+      /** 标准（单轮全量 diff）或深度（只读子代理多轮取证）。 */
+      depth: OracleReviewDepth;
+      /** 深度审查的当前轮次（进度通知推送；标准审查缺席）。 */
+      round?: number;
+      /** 深度审查正在执行的工具名（工具执行阶段；生成阶段清空）。 */
+      toolName?: string;
     }
   | {
       status: "result";
@@ -293,6 +326,7 @@ export type OracleReviewState =
       summary: string;
       findings: string;
       modelLabel: string;
+      depth: OracleReviewDepth;
     }
   | {
       status: "error";
@@ -300,6 +334,7 @@ export type OracleReviewState =
       failure: OracleReviewFailure;
       /** 发起请求后的把关模型（providerId/modelId）；错误卡片展示，渠道选错一眼可辨。请求前早退（无回合等）缺席。 */
       modelLabel?: string;
+      depth: OracleReviewDepth;
     };
 
 /** 一键修复：把 findings 原文注入下一轮请求，由用户亲手触发，不自动循环。 */
@@ -351,5 +386,69 @@ export function writeStoredOracleModelSelection(selection: ModelSelection | null
     }
   } catch {
     // localStorage 不可用（隐私模式等）时静默放弃持久化，选择仍在本会话内生效。
+  }
+}
+
+/**
+ * 解析把关请求的执行选项：模型选择（缺推理档时补该模型最高公开档）+ 输出预算。
+ *
+ * maxOutputTokens 跟随模型声明的上限（optionSpecs.maxOutputTokens.max，与主回合
+ * 「打满模型声明上限」同语义）：省略会被 adapters 的 validateOptions 以
+ * 「outside the model option range」拒绝；设小了会被思考模型的 reasoning 吃光
+ * 导致空正文（实测 2048 上限 GLM 返回空文本）。模型视图缺席该值时才省略并让
+ * 错误如实上报。
+ */
+export function resolveOracleRequestOptions(
+  oracleModel: ModelSelection | null,
+  modelSelectionView: ModelSelectionView | null | undefined,
+): { selection: ModelSelection; maxOutputTokens?: number } | null {
+  const selection = oracleModel ?? modelSelectionView?.preferredSelection ?? null;
+  if (!selection) {
+    return null;
+  }
+  const provider = modelSelectionView?.providers.find(
+    (candidate) => candidate.providerId === selection.providerId,
+  );
+  const model = provider?.models.find((candidate) => candidate.modelId === selection.modelId);
+  const levels = model?.config.optionSpecs.reasoningLevel?.values;
+  const highestLevel = levels?.length ? levels[levels.length - 1] : undefined;
+  const resolvedSelection =
+    selection.options?.reasoningLevel || !highestLevel
+      ? selection
+      : { ...selection, options: { reasoningLevel: highestLevel } };
+  const specMax = model?.config.optionSpecs.maxOutputTokens?.max;
+  return {
+    selection: resolvedSelection,
+    ...(typeof specMax === "number" && Number.isFinite(specMax) && specMax > 0
+      ? { maxOutputTokens: specMax }
+      : {}),
+  };
+}
+
+/** 审查 prompt 附带的最近提交条数：只作「此前改动可能已在早前提交中」的对照线索。 */
+const RECENT_COMMITS_FOR_REVIEW = 8;
+
+/** getCommitGraph 的最小结构面（避免把 services/hook 依赖带进本纯函数层）。 */
+interface OracleCommitGraphService {
+  getCommitGraph(params: {
+    workspacePath: string;
+    maxCount?: number;
+  }): Promise<{ commits: readonly { hash: string; subject: string }[] }>;
+}
+
+/** 最近提交摘要；非 git 工作区/查询失败返回 null，审查照常进行。 */
+export async function readOracleRecentCommitSubjects(
+  gitService: OracleCommitGraphService | undefined | null,
+  workspacePath: string,
+): Promise<string[] | null> {
+  if (!gitService) return null;
+  try {
+    const graph = await gitService.getCommitGraph({
+      workspacePath,
+      maxCount: RECENT_COMMITS_FOR_REVIEW,
+    });
+    return graph.commits.map((commit) => formatOracleCommitLine(commit.hash, commit.subject));
+  } catch {
+    return null;
   }
 }

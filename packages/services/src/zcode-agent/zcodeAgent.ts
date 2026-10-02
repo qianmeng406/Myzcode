@@ -313,6 +313,11 @@ export interface ZCodeAgentGenerateWorkspaceTextParams extends ZCodeAgentWorkspa
   maxOutputTokens?: number;
   /** 流式传输（与主会话同一 streamText 管道）；深思考型调用传 true 避免上游掐断静默连接。 */
   stream?: boolean;
+  /**
+   * 深度审查（只读子代理多轮循环）：审查方获得 Read/Grep/Glob 与只读 Bash，
+   * 多轮取证后产出结论。逐轮内部走 streamText，进度通知带轮次/工具名。
+   */
+  agentic?: boolean;
   signal?: AbortSignal;
   /**
    * 协议层 RPC 超时。thinking 模型的长请求会超过协议 client 默认的
