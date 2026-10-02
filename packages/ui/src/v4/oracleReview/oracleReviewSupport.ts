@@ -309,6 +309,28 @@ export type OracleReviewFailure =
   | { kind: "timeout"; message: string }
   | { kind: "request"; message: string };
 
+/** 深度审查已执行的工具调用（横幅展示：读了哪些文件、跑了什么命令）。 */
+export interface OracleReviewToolEvent {
+  round: number;
+  toolName: string;
+  /** 展示目标：文件路径 / pattern / 命令；模型未给可提取字段时缺席。 */
+  target?: string;
+}
+
+// 事件列表上限：横幅只做线索展示，长审查按最近 N 条滚动。
+export const ORACLE_REVIEW_TOOL_EVENT_LIMIT = 40;
+
+/** 追加一条工具事件并有界裁剪（保留最近 N 条）。 */
+export function appendOracleReviewToolEvent(
+  events: readonly OracleReviewToolEvent[],
+  next: OracleReviewToolEvent,
+): OracleReviewToolEvent[] {
+  const appended = [...events, next];
+  return appended.length > ORACLE_REVIEW_TOOL_EVENT_LIMIT
+    ? appended.slice(appended.length - ORACLE_REVIEW_TOOL_EVENT_LIMIT)
+    : appended;
+}
+
 export type OracleReviewState =
   | { status: "idle" }
   | {
@@ -322,6 +344,10 @@ export type OracleReviewState =
       round?: number;
       /** 深度审查正在执行的工具名（工具执行阶段；生成阶段清空）。 */
       toolName?: string;
+      /** 当前工具调用的展示目标（文件路径 / pattern / 命令）。 */
+      toolTarget?: string;
+      /** 深度审查已执行的工具调用（有界），供横幅列出已读文件/命令。 */
+      toolEvents?: readonly OracleReviewToolEvent[];
     }
   | {
       status: "result";

@@ -117,10 +117,18 @@ export function OracleReviewBanner({
 }) {
   const { intl } = useZCodeIntl();
   const [findingsOpen, setFindingsOpen] = useState(false);
+  const [toolLogOpen, setToolLogOpen] = useState(false);
   const pending = state.status === "pending";
   const result = state.status === "result" ? state : null;
   const verdictPreset = result ? VERDICT_PRESETS[result.verdict] : null;
   const findings = result?.findings ?? "";
+  // 深度审查的过程线索：已执行工具数 + 已读文件数（仅 pending 期间有值）。
+  const toolEvents = state.status === "pending" ? (state.toolEvents ?? []) : [];
+  const readFilesCount = new Set(
+    toolEvents
+      .filter((event) => event.toolName === "Read" && event.target)
+      .map((event) => event.target),
+  ).size;
   // 「无」这类占位结论不给修复按钮；只有可行动的问题清单才注入下一轮。
   const canFix =
     Boolean(result) &&
@@ -169,6 +177,19 @@ export function OracleReviewBanner({
                   {intl.formatMessage(
                     { id: "chat.oracleReview.pendingDeepTool" },
                     { tool: state.toolName },
+                  )}
+                  {state.toolTarget ? (
+                    <span className="ml-1 max-w-48 truncate font-mono align-bottom">
+                      {state.toolTarget}
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
+              {state.status === "pending" && toolEvents.length > 0 ? (
+                <span className="hidden shrink-0 tabular-nums text-ui-sm text-foreground-subtle md:inline">
+                  {intl.formatMessage(
+                    { id: "chat.oracleReview.pendingDeepTools" },
+                    { count: String(toolEvents.length), files: String(readFilesCount) },
                   )}
                 </span>
               ) : null}
@@ -274,6 +295,49 @@ export function OracleReviewBanner({
             </Button>
           </div>
         </div>
+        {state.status === "pending" && toolEvents.length > 0 ? (
+          <Collapsible open={toolLogOpen} onOpenChange={setToolLogOpen}>
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full items-center gap-1.5 border-t border-border/60 px-3 py-1.5 text-left text-ui-sm text-foreground-subtle transition-colors hover:text-foreground"
+                data-testid="v4-oracle-review-tool-log"
+              >
+                <ChevronRightIcon
+                  aria-hidden
+                  className={cn(
+                    "size-3.5 shrink-0 transition-transform",
+                    toolLogOpen ? "rotate-90" : "rotate-0",
+                  )}
+                />
+                <span>
+                  {intl.formatMessage(
+                    { id: "chat.oracleReview.pendingDeepTools" },
+                    { count: String(toolEvents.length), files: String(readFilesCount) },
+                  )}
+                </span>
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="max-h-48 overflow-y-auto border-t border-border/60 px-3 py-2 font-mono text-ui-sm text-foreground">
+                {toolEvents.map((event, index) => (
+                  <div
+                    key={`${index}-${event.toolName}-${event.target ?? ""}`}
+                    className="truncate"
+                  >
+                    {event.round > 1 ? (
+                      <span className="text-foreground-subtlest">#{event.round} </span>
+                    ) : null}
+                    {event.toolName}
+                    {event.target ? (
+                      <span className="text-foreground-subtle"> {event.target}</span>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : null}
         {result ? (
           <Collapsible open={findingsOpen} onOpenChange={setFindingsOpen}>
             <CollapsibleTrigger asChild>

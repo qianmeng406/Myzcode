@@ -155,6 +155,7 @@ const zhCN: Record<string, string> = {
   "chat.oracleReview.pendingOutput": "已输出 {chars} 字符",
   "chat.oracleReview.pendingDeep":
     "{model} 深度审查中…（第 {round} 轮 · 已等待 {minutes}:{seconds}）",
+  "chat.oracleReview.pendingDeepTools": "已执行 {count} 次工具调用 · 读取 {files} 个文件",
   "chat.oracleReview.pendingDeepTool": "正在使用 {tool}",
   "chat.oracleReview.deepBadge": "深度",
   "chat.oracleReview.pendingSlow": "该渠道响应较慢，可换把关模型（本次审查仍会继续）",

@@ -3,6 +3,7 @@ import test from "node:test";
 import type { Model, ModelStreamEvent, ModelUsage } from "../src/deps.js";
 import type { ExecutableToolCall, ToolExecutionResult } from "../src/tool/types.js";
 import {
+  describeDeepReviewToolTarget,
   evaluateDeepReviewToolPolicy,
   runDeepReviewAgentLoop,
 } from "../src/runtime/methods/workspace-deep-review.js";
@@ -308,4 +309,85 @@ test("深度审查进度字符跨轮累计：思考增量主导时也不回跳�
     progress,
     `进度应单调不减，实际 ${progress.join(",")}`,
   );
+});
+
+test("工具展示目标：Read 取路径、Grep/Glob 取 pattern、Bash 取命令、超长截断", () => {
+  assert.equal(
+    describeDeepReviewToolTarget({ id: "1", name: "Read", input: { file_path: "src/a.ts" } }),
+    "src/a.ts",
+  );
+  assert.equal(
+    describeDeepReviewToolTarget({
+      id: "2",
+      name: "Grep",
+      input: { pattern: "TODO", path: "src" },
+    }),
+    "TODO (src)",
+  );
+  assert.equal(
+    describeDeepReviewToolTarget({ id: "3", name: "Glob", input: { pattern: "**/*.ts" } }),
+    "**/*.ts",
+  );
+  assert.equal(
+    describeDeepReviewToolTarget({
+      id: "4",
+      name: "Bash",
+      input: { command: "git log --oneline" },
+    }),
+    "git log --oneline",
+  );
+  assert.equal(describeDeepReviewToolTarget({ id: "5", name: "Read", input: {} }), undefined);
+  const long = describeDeepReviewToolTarget({
+    id: "6",
+    name: "Bash",
+    input: { command: "x".repeat(300) },
+  });
+  assert.equal(long?.length, 121); // 120 + 省略号
+  assert.ok(long?.endsWith("…"));
+});
+
+test("深度审查进度携带工具目标", async () => {
+  const runtime = {
+    workingDirectory: "/repo",
+    workspaceRoot: "/repo",
+    sessionId: "s",
+    config: {},
+    registry: {
+      get: (name: string) => ({
+        metadata: { name },
+        name,
+        description: "test tool",
+        inputSchema: {},
+        handler: async () => ({ toolCallId: "", toolName: name, success: true, output: "ok" }),
+      }),
+      has: () => true,
+      list: () => ["Read"],
+      toContracts: () => [{ name: "Read", description: "read", inputSchema: {} }],
+    },
+    artifactStore: {},
+    executionPort: {},
+    fileSystemPort: {},
+    imageProcessorPort: {},
+    pdfDocumentPort: {},
+    sessionStore: {},
+    skillPort: undefined,
+  } as unknown as Parameters<typeof runDeepReviewAgentLoop>[0];
+
+  const events: Array<{ toolName?: string; toolTarget?: string }> = [];
+  await runDeepReviewAgentLoop(runtime, {
+    messages: [{ role: "user", content: "review" }],
+    model: fakeModel([
+      [
+        {
+          type: "tool_call",
+          toolCall: { id: "r1", name: "Read", input: { file_path: "src/x.ts" } },
+        },
+        finish,
+      ],
+      [{ type: "text_delta", text: "VERDICT: PASS" }, finish],
+    ]),
+    onProgress: (p) => events.push({ toolName: p.toolName, toolTarget: p.toolTarget }),
+  });
+
+  assert.ok(events.some((e) => e.toolName === "Read" && e.toolTarget === "src/x.ts"));
 });

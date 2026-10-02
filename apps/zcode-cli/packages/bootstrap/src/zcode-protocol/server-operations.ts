@@ -2756,7 +2756,12 @@ function createWorkspaceGenerateTextProgressNotifier(options: {
   workspacePath: string;
   querySource: string;
 }): {
-  onProgress: (progress: { outputChars: number; round?: number; toolName?: string }) => void;
+  onProgress: (progress: {
+    outputChars: number;
+    round?: number;
+    toolName?: string;
+    toolTarget?: string;
+  }) => void;
   flush: () => void;
 } {
   let lastEmitAt = 0;
@@ -2764,6 +2769,7 @@ function createWorkspaceGenerateTextProgressNotifier(options: {
   let lastEmittedChars = 0;
   let lastRound: number | undefined;
   let lastToolName: string | undefined;
+  let lastToolTarget: string | undefined;
   const emit = (force: boolean) => {
     const now = Date.now();
     if (
@@ -2786,6 +2792,7 @@ function createWorkspaceGenerateTextProgressNotifier(options: {
           outputChars: lastChars,
           ...(lastRound !== undefined ? { round: lastRound } : {}),
           ...(lastToolName ? { toolName: lastToolName } : {}),
+          ...(lastToolTarget ? { toolTarget: lastToolTarget } : {}),
         },
       });
     } catch (error) {
@@ -2803,6 +2810,7 @@ function createWorkspaceGenerateTextProgressNotifier(options: {
       lastChars = progress.outputChars;
       lastRound = progress.round;
       lastToolName = progress.toolName;
+      lastToolTarget = progress.toolTarget;
       emit(false);
     },
     flush: () => emit(true),

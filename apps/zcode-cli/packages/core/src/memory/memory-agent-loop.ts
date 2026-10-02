@@ -55,9 +55,19 @@ export async function runToolAgentLoop(input: {
   generate?: (
     model: Model,
     request: ModelRequest,
-  ) => Promise<{ text: string; reasoning?: readonly ModelReasoningContentBlock[]; toolCalls?: ModelToolCall[] }>;
+  ) => Promise<{
+    text: string;
+    reasoning?: readonly ModelReasoningContentBlock[];
+    toolCalls?: ModelToolCall[];
+  }>;
   /** 逐轮生成与工具执行的过程回调（深度审查的进度推送挂点）。 */
-  onTurn?: (event: { turn: number; phase: "generate" | "tool"; toolName?: string }) => void;
+  onTurn?: (event: {
+    turn: number;
+    phase: "generate" | "tool";
+    toolName?: string;
+    /** 工具阶段携带原始调用（含 input），供调用方提取展示目标（路径/命令）。 */
+    toolCall?: ModelToolCall;
+  }) => void;
   maxTurns: number;
   messages: readonly ModelInputMessage[];
   model: Model;
@@ -103,7 +113,7 @@ export async function runToolAgentLoop(input: {
 
     const toolMessages = await Promise.all(
       toolCalls.map(async (toolCall): Promise<ModelInputMessage> => {
-        input.onTurn?.({ turn: turns + 1, phase: "tool", toolName: toolCall.name });
+        input.onTurn?.({ turn: turns + 1, phase: "tool", toolName: toolCall.name, toolCall });
         const decision = input.evaluateToolPolicy(toolCall);
         if (!decision.allowed) {
           return {

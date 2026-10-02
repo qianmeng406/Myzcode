@@ -164,6 +164,7 @@ const enUS: Record<string, string> = {
   "chat.oracleReview.pendingOutput": "{chars} chars generated",
   "chat.oracleReview.pendingDeep":
     "{model} deep review in progress… (round {round} · waiting {minutes}:{seconds})",
+  "chat.oracleReview.pendingDeepTools": "{count} tool calls · {files} files read",
   "chat.oracleReview.pendingDeepTool": "using {tool}",
   "chat.oracleReview.deepBadge": "Deep",
   "chat.oracleReview.pendingSlow":

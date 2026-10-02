@@ -12,6 +12,8 @@ import {
   resolveOraclePreviousReviewContext,
   writeStoredOracleModelSelection,
   type OracleReviewDiffHunk,
+  ORACLE_REVIEW_TOOL_EVENT_LIMIT,
+  appendOracleReviewToolEvent,
 } from "../src/v4/oracleReview/oracleReviewSupport.js";
 import { findOracleUserRequestBeforeTurn } from "../src/v4/oracleReview/oracleReviewContextFetch.js";
 import {
@@ -402,4 +404,23 @@ test("请求文本缺失时 prompt 如实说明并禁止臆断任务", () => {
   });
   assert.ok(prompt.includes("无法从会话历史恢复本回合的原始请求文本"));
   assert.ok(prompt.includes("不要臆断本回合的任务"));
+});
+
+test("深度审查工具事件：有界累积保留最近 N 条", () => {
+  let events = appendOracleReviewToolEvent([], { round: 1, toolName: "Read", target: "a.ts" });
+  assert.deepEqual(events, [{ round: 1, toolName: "Read", target: "a.ts" }]);
+  for (let index = 0; index < ORACLE_REVIEW_TOOL_EVENT_LIMIT + 5; index += 1) {
+    events = appendOracleReviewToolEvent(events, {
+      round: 2,
+      toolName: "Grep",
+      target: `p${index}`,
+    });
+  }
+  assert.equal(events.length, ORACLE_REVIEW_TOOL_EVENT_LIMIT);
+  assert.deepEqual(events[events.length - 1], {
+    round: 2,
+    toolName: "Grep",
+    target: `p${ORACLE_REVIEW_TOOL_EVENT_LIMIT + 4}`,
+  });
+  assert.ok(!events.some((event) => event.target === "a.ts"));
 });

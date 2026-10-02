@@ -11,6 +11,7 @@ import {
   ORACLE_DEEP_REVIEW_TIMEOUT_MS,
   ORACLE_REVIEW_REQUEST_TIMEOUT_MS,
   ORACLE_TURN_REVIEW_QUERY_SOURCE,
+  appendOracleReviewToolEvent,
   buildOracleDiffSections,
   buildOracleReviewPrompt,
   formatOracleCommitLine,
@@ -377,15 +378,26 @@ export function useOracleReview(params: {
       if (!isOracleReviewQuerySource(progress.querySource)) return;
       if (progress.workspacePath !== params.workspacePath) return;
       setPendingOutputChars(progress.outputChars);
-      // 深度审查的轮次/工具名写进 store 的 pending 条目（工具执行阶段带 toolName，
-      // 生成阶段不带——直接赋值让上一次的工具名随新轮次清空）。
-      if (sessionId !== null && (progress.round !== undefined || progress.toolName)) {
+      // 深度审查的轮次/工具名/工具事件写进 store 的 pending 条目（工具执行阶段带
+      // toolName，生成阶段不带——直接赋值让上一次的工具名随新轮次清空）。
+      const hasToolEvent = Boolean(progress.toolName);
+      if (sessionId !== null && (progress.round !== undefined || hasToolEvent)) {
         const current = getOracleReviewState(sessionId);
         if (current.status === "pending") {
+          const toolEvents =
+            hasToolEvent && progress.toolName
+              ? appendOracleReviewToolEvent(current.toolEvents ?? [], {
+                  round: progress.round ?? current.round ?? 1,
+                  toolName: progress.toolName,
+                  ...(progress.toolTarget ? { target: progress.toolTarget } : {}),
+                })
+              : current.toolEvents;
           setOracleReviewState(sessionId, {
             ...current,
             ...(progress.round !== undefined ? { round: progress.round } : {}),
             toolName: progress.toolName,
+            toolTarget: progress.toolTarget,
+            ...(toolEvents ? { toolEvents } : {}),
           });
         }
       }

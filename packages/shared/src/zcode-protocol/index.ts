@@ -2149,6 +2149,8 @@ export const zcodeWorkspaceGenerateTextProgressSchema = z
     round: z.number().int().positive().optional(),
     /** 深度审查正在执行的工具名（仅工具执行阶段携带）。 */
     toolName: nonEmptyString.optional(),
+    /** 工具调用的展示目标（文件路径 / pattern / 命令）。 */
+    toolTarget: nonEmptyString.optional(),
   })
   .strict();
 export type ZCodeWorkspaceGenerateTextProgress = z.infer<

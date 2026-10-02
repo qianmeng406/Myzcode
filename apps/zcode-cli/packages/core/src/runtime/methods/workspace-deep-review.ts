@@ -148,6 +148,7 @@ export async function runDeepReviewAgentLoop(
           outputChars: lastOutputChars,
           round: event.turn,
           toolName: event.toolName,
+          ...(event.toolCall ? { toolTarget: describeDeepReviewToolTarget(event.toolCall) } : {}),
         });
       }
     },
@@ -174,6 +175,43 @@ export async function runDeepReviewAgentLoop(
     },
     turns: loopResult.turns,
   };
+}
+
+// 展示用目标长度上限：路径/命令可能极长，横幅只做线索展示。
+const DEEP_REVIEW_TOOL_TARGET_MAX_CHARS = 120;
+
+function stringField(input: unknown, ...keys: string[]): string | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const record = input as Record<string, unknown>;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+/**
+ * 把工具调用压成一行展示目标：Read→文件路径，Grep/Glob→pattern（+目录），
+ * Bash→命令原文。导出仅为单测。
+ */
+export function describeDeepReviewToolTarget(toolCall: ModelToolCall): string | undefined {
+  const input = toolCall.input;
+  let target: string | undefined;
+  if (toolCall.name === "Read") {
+    target = stringField(input, "file_path", "filePath", "path");
+  } else if (toolCall.name === "Grep") {
+    const pattern = stringField(input, "pattern");
+    const path = stringField(input, "path", "glob");
+    target = pattern ? (path ? `${pattern} (${path})` : pattern) : path;
+  } else if (toolCall.name === "Glob") {
+    target = stringField(input, "pattern", "path");
+  } else if (toolCall.name === "Bash") {
+    target = stringField(input, "command");
+  }
+  if (!target) return undefined;
+  return target.length > DEEP_REVIEW_TOOL_TARGET_MAX_CHARS
+    ? `${target.slice(0, DEEP_REVIEW_TOOL_TARGET_MAX_CHARS)}…`
+    : target;
 }
 
 type DeepReviewToolPolicyDecision = { allowed: true } | { allowed: false; reason: string };
