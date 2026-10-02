@@ -323,8 +323,8 @@ export async function streamModelTextResult(
   let eventCount = 0;
   let finishReason = "unknown";
   let usage: ModelUsage | undefined;
-  // 正文与思考增量的累计字符数；进度指示的真实产出证据（非 token 估算）。
-  // 工具输入增量不计入——审查请求不带工具，主流量就是这两类增量。
+  // outputChars 只累计正文与思考增量的字符数（工具输入增量不计入）——它是给用户的
+  // 「模型可见产出」进度，混入内部工具调用的 JSON 片段会虚高且口径不稳；非 token 估算。
   let outputChars = 0;
   const toolCalls: ModelToolCall[] = [];
   const pushedToolCallIds = new Set<string>();

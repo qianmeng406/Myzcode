@@ -2770,15 +2770,20 @@ function createWorkspaceGenerateTextProgressNotifier(options: {
     }
     lastEmitAt = now;
     lastEmittedChars = lastChars;
-    options.notify({
-      method: zcodeProtocolNotifications.workspaceGenerateTextProgress,
-      params: {
-        ...(options.operationId ? { operationId: options.operationId } : {}),
-        workspacePath: options.workspacePath,
-        querySource: options.querySource,
-        outputChars: lastChars,
-      },
-    });
+    try {
+      options.notify({
+        method: zcodeProtocolNotifications.workspaceGenerateTextProgress,
+        params: {
+          ...(options.operationId ? { operationId: options.operationId } : {}),
+          workspacePath: options.workspacePath,
+          querySource: options.querySource,
+          outputChars: lastChars,
+        },
+      });
+    } catch {
+      // 进度通知是旁路信号：client 已断开等故障不得向外抛——既不能打断流中的
+      // 模型请求（onProgress 调用方），也不能在 finally 里覆盖原始返回值/异常。
+    }
   };
   return {
     onProgress: (progress) => {
