@@ -17,7 +17,6 @@ import {
   isOracleDeadlineTimeoutError,
   isOracleReviewQuerySource,
   parseOracleVerdict,
-  readOracleRecentCommitSubjects,
   resolveOraclePreviousReviewContext,
   resolveOracleRequestOptions,
   type OraclePreviousReviewContext,
@@ -25,6 +24,10 @@ import {
   type OracleReviewRequestMode,
   type OracleReviewState,
 } from "./oracleReviewSupport.js";
+import {
+  findOracleUserRequestBeforeTurn,
+  readOracleRecentCommitSubjects,
+} from "./oracleReviewContextFetch.js";
 import {
   getOracleReviewState,
   invalidateOracleReviewSeq,
@@ -52,16 +55,6 @@ function findLastCompletedTurnHeader(snapshot: ConversationSnapshot): TurnHeader
     }
   }
   return null;
-}
-
-function findUserRequestBeforeTurn(snapshot: ConversationSnapshot, turnRowId: number): string {
-  for (let index = snapshot.rows.window.length - 1; index >= 0; index -= 1) {
-    const row = snapshot.rows.window[index];
-    if (row?.rowId !== undefined && row.rowId < turnRowId && row.kind === "userInput") {
-      return row.text;
-    }
-  }
-  return "";
 }
 
 export function useOracleReview(params: {
@@ -171,10 +164,10 @@ export function useOracleReview(params: {
       // 跨回合对照上下文：注入门槛（上次审查必须是结果态、且本次目标回合在其之后）
       // 收敛在 resolveOraclePreviousReviewContext 纯函数里；必须在置 pending 前读取
       // （pending 写入会覆盖该会话的 result 条目）。
-      const previousReview: OraclePreviousReviewContext | null = resolveOraclePreviousReviewContext(
-        getOracleReviewState(sid),
-        header.rowId,
-      );
+      // 对照候选先取（必须在置 pending 前读 store）；是否真的注入等请求文本取数
+      // 结果出来后再定——请求文本缺失时对照段会成为唯一"任务线索"，必须抑制。
+      const previousReviewCandidate: OraclePreviousReviewContext | null =
+        resolveOraclePreviousReviewContext(getOracleReviewState(sid), header.rowId);
       const pendingModelLabel = `${requestOptions.selection.providerId}/${requestOptions.selection.modelId}`;
       setOracleReviewState(sid, { status: "pending", mode, modelLabel: pendingModelLabel, depth });
       const requestSeq = nextOracleReviewSeq(sid);
@@ -202,13 +195,34 @@ export function useOracleReview(params: {
           services?.gitService,
           params.workspacePath,
         );
+        // 请求文本：快照尾部窗口优先，未命中则经 rows/range 游标翻页补历史
+        // （大回合会把请求行挤出窗口——曾导致审查者拿对照上下文臆断任务）。
+        const userRequest = await findOracleUserRequestBeforeTurn({
+          windowRows: snapshot.rows.window,
+          turnRowId: header.rowId,
+          fetchRowsBefore: (beforeRowId, limit) =>
+            agentService.conversationRowsRangeV4({
+              workspacePath: params.workspacePath,
+              ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
+              ...(params.remoteSessionId ? { remoteSessionId: params.remoteSessionId } : {}),
+              sessionId: snapshot.sessionId,
+              beforeRowId,
+              limit,
+            }),
+        });
+        logger.info("[OracleReview] 回合请求文本取数", {
+          turnRowId: header.rowId,
+          source: userRequest.source,
+        });
+        const previousReview = userRequest.source === "missing" ? null : previousReviewCandidate;
         const result = await agentService.generateWorkspaceText({
           workspacePath: params.workspacePath,
           ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
           ...(params.remoteSessionId ? { remoteSessionId: params.remoteSessionId } : {}),
           selection: requestOptions.selection,
           prompt: buildOracleReviewPrompt({
-            userRequest: findUserRequestBeforeTurn(snapshot, header.rowId),
+            userRequest: userRequest.text,
+            ...(userRequest.source === "missing" ? { userRequestUnavailable: true } : {}),
             diffSections: sections,
             projectName: getPathLeaf(params.workspacePath) || params.workspacePath,
             previousReview,

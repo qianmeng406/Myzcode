@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Model, ModelRequest, ModelStreamEvent, ModelUsage } from "../src/deps.js";
+import type { Model, ModelStreamEvent, ModelUsage } from "../src/deps.js";
 import type { ExecutableToolCall, ToolExecutionResult } from "../src/tool/types.js";
 import {
   evaluateDeepReviewToolPolicy,
@@ -43,7 +43,10 @@ test("深度审查策略：读类工具放行，写工具与非只读 Bash 一�
   assert.equal(bashWrite.allowed, false);
   if (!bashWrite.allowed) assert.match(bashWrite.reason, /read-only/i);
 
-  const write = evaluateDeepReviewToolPolicy(toolCall("Write", { file_path: "/repo/a.ts" }), fakeRuntime);
+  const write = evaluateDeepReviewToolPolicy(
+    toolCall("Write", { file_path: "/repo/a.ts" }),
+    fakeRuntime,
+  );
   assert.equal(write.allowed, false);
 
   const agent = evaluateDeepReviewToolPolicy(toolCall("Agent", {}), fakeRuntime);
@@ -94,14 +97,14 @@ test("runToolAgentLoop（深度审查共用骨架）：策略拒绝回填错误�
       return { text: r.text, toolCalls: r.toolCalls };
     },
     model: fakeModel([
-      [
-        { type: "tool_call", toolCall: { id: "call-Write", name: "Write", input: {} } },
-        finish,
-      ],
+      [{ type: "tool_call", toolCall: { id: "call-Write", name: "Write", input: {} } }, finish],
       [{ type: "text_delta", text: "VERDICT: PASS" }, finish],
     ]),
     rootDir: "/repo",
-    tools: [{ name: "Write", inputSchema: {} }, { name: "Read", inputSchema: {} }] as never,
+    tools: [
+      { name: "Write", inputSchema: {} },
+      { name: "Read", inputSchema: {} },
+    ] as never,
     workingDirectory: "/repo",
     workspaceRoot: "/repo",
     onTurn: (event) => events.push(event),
@@ -119,7 +122,6 @@ test("runToolAgentLoop（深度审查共用骨架）：策略拒绝回填错误�
 });
 
 test("runToolAgentLoop：maxTurns 到顶即收，不再发起下一轮生成", async () => {
-  let generateCalls = 0;
   const alwaysTool: ModelStreamEvent[] = [
     { type: "tool_call", toolCall: { id: "c1", name: "Read", input: {} } },
     finish,
@@ -146,7 +148,6 @@ test("runToolAgentLoop：maxTurns 到顶即收，不再发起下一轮生成", a
   });
   // maxTurns=3 → 恰好 3 轮（每轮都要求工具），第 4 轮不发生
   assert.equal(result.turns, 3);
-  void generateCalls;
 });
 
 test("runDeepReviewAgentLoop：端到端聚合 usage/正文，进度携带轮次与工具名", async () => {
@@ -202,4 +203,57 @@ test("runDeepReviewAgentLoop：端到端聚合 usage/正文，进度携带轮次
   // 进度事件：轮 1 工具执行带 round+toolName；轮 2 生成带 round 与产出字符
   assert.ok(progress.some((p) => p.round === 1 && p.toolName === "Read"));
   assert.ok(progress.some((p) => p.round === 2 && p.outputChars > 0));
+});
+
+test("深度审查进度字符跨轮累计：第二轮进度从第一轮末尾继续，不回跳", async () => {
+  const runtime = {
+    workingDirectory: "/repo",
+    workspaceRoot: "/repo",
+    sessionId: "s",
+    config: {},
+    registry: {
+      get: (name: string) => ({
+        metadata: { name },
+        name,
+        description: "test tool",
+        inputSchema: {},
+        handler: async () => ({ toolCallId: "", toolName: name, success: true, output: "ok" }),
+      }),
+      has: () => true,
+      list: () => ["Read"],
+      toContracts: () => [{ name: "Read", description: "read", inputSchema: {} }],
+    },
+    artifactStore: {},
+    executionPort: {},
+    fileSystemPort: {},
+    imageProcessorPort: {},
+    pdfDocumentPort: {},
+    sessionStore: {},
+    skillPort: undefined,
+  } as unknown as Parameters<typeof runDeepReviewAgentLoop>[0];
+
+  const progress: number[] = [];
+  await runDeepReviewAgentLoop(runtime, {
+    messages: [{ role: "user", content: "review" }],
+    model: fakeModel([
+      // 第一轮：先吐 4 字符正文，再要一个工具
+      [
+        { type: "text_delta", text: "看代码" },
+        { type: "tool_call", toolCall: { id: "r1", name: "Read", input: {} } },
+        finish,
+      ],
+      // 第二轮：再吐正文收尾
+      [{ type: "text_delta", text: "VERDICT: PASS" }, finish],
+    ]),
+    onProgress: (p) => progress.push(p.outputChars),
+  });
+
+  // 第一轮进度：3（"看代码"）；第二轮从 3 起继续累计，全程单调不减
+  assert.ok(progress.includes("看代码".length));
+  const max = Math.max(...progress);
+  assert.equal(max, "看代码".length + "VERDICT: PASS".length);
+  assert.deepEqual(
+    [...progress].sort((a, b) => a - b),
+    progress,
+  );
 });

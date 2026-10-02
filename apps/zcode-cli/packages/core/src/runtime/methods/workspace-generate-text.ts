@@ -257,6 +257,9 @@ async function generateWorkspaceTextImpl(
             messages,
             model,
             onProgress: input.onProgress,
+            // 外层已解析的输出预算（UI 按模型声明上限传入）必须进循环，
+            // 否则深度审查会退回默认选项、被 adapter 校验或 reasoning 吃空。
+            requestOptions: modelRequest.options,
             traceContext: modelTraceContext,
           })
         : input.stream

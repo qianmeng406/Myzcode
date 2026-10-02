@@ -13,6 +13,7 @@ import {
   writeStoredOracleModelSelection,
   type OracleReviewDiffHunk,
 } from "../src/v4/oracleReview/oracleReviewSupport.js";
+import { findOracleUserRequestBeforeTurn } from "../src/v4/oracleReview/oracleReviewContextFetch.js";
 import {
   getOracleReviewState,
   invalidateOracleReviewSeq,
@@ -335,4 +336,70 @@ test("Oracle 模型偏好：存取对称、非法形状拒收、null 即清除",
       value: original,
     });
   }
+});
+
+function userRow(rowId: number, text: string, origin?: string) {
+  return { kind: "userInput", rowId, text, ...(origin ? { origin } : {}) } as never;
+}
+function turnRow(rowId: number) {
+  return { kind: "turnHeader", rowId, state: "completedSuccess" } as never;
+}
+
+test("请求文本取数：窗口命中即用窗口，不触发翻页", async () => {
+  let fetchCalls = 0;
+  const lookup = await findOracleUserRequestBeforeTurn({
+    windowRows: [userRow(1, "真实请求"), turnRow(2)],
+    turnRowId: 2,
+    fetchRowsBefore: async () => {
+      fetchCalls += 1;
+      return { rows: [], hasMore: false };
+    },
+  });
+  assert.deepEqual(lookup, { text: "真实请求", source: "window" });
+  assert.equal(fetchCalls, 0);
+});
+
+test("请求文本取数：窗口被裁剪时翻页补历史，忽略非真实用户行", async () => {
+  // 窗口里只有回合行（请求行已被尾部窗口裁掉）
+  const pages = [
+    { rows: [turnRow(9), userRow(8, "后台结果", "backgroundResult")], hasMore: true },
+    { rows: [userRow(3, "被裁剪的真实请求"), turnRow(4)], hasMore: false },
+  ];
+  let page = 0;
+  const lookup = await findOracleUserRequestBeforeTurn({
+    windowRows: [turnRow(9)],
+    turnRowId: 9,
+    fetchRowsBefore: async () => pages[page++]!,
+  });
+  assert.deepEqual(lookup, { text: "被裁剪的真实请求", source: "history" });
+  assert.equal(page, 2);
+});
+
+test("请求文本取数：翻页到顶仍无命中 / 查询失败 → missing（不阻塞审查）", async () => {
+  const exhausted = await findOracleUserRequestBeforeTurn({
+    windowRows: [turnRow(5)],
+    turnRowId: 5,
+    fetchRowsBefore: async () => ({ rows: [turnRow(1)], hasMore: false }),
+  });
+  assert.deepEqual(exhausted, { text: "", source: "missing" });
+
+  const failed = await findOracleUserRequestBeforeTurn({
+    windowRows: [turnRow(5)],
+    turnRowId: 5,
+    fetchRowsBefore: async () => {
+      throw new Error("rpc down");
+    },
+  });
+  assert.deepEqual(failed, { text: "", source: "missing" });
+});
+
+test("请求文本缺失时 prompt 如实说明并禁止臆断任务", () => {
+  const prompt = buildOracleReviewPrompt({
+    userRequest: "",
+    userRequestUnavailable: true,
+    diffSections: [{ path: "src/a.ts", text: "--- a/src/a.ts" }],
+    projectName: "demo",
+  });
+  assert.ok(prompt.includes("无法从会话历史恢复本回合的原始请求文本"));
+  assert.ok(prompt.includes("不要臆断本回合的任务"));
 });

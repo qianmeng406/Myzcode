@@ -1,4 +1,11 @@
-import type { ModelInputMessage, Model, ModelToolCall, ModelUsage, TraceContext } from "../deps.js";
+import type {
+  ModelInputMessage,
+  ModelRequest,
+  Model,
+  ModelToolCall,
+  ModelUsage,
+  TraceContext,
+} from "../deps.js";
 import {
   PermissionService,
   createDenyPermissionBroker,
@@ -56,6 +63,12 @@ export async function runDeepReviewAgentLoop(
     messages: ModelInputMessage[];
     model: Model;
     onProgress?: (progress: WorkspaceGenerateTextProgress) => void;
+    /**
+     * 外层（generateWorkspaceText）已解析的单轮选项：UI 按模型声明上限传入的
+     * maxOutputTokens 在此。丢了它会退回只用绑定模型的默认选项——预算不足时
+     * adapter 校验或 reasoning 吃光正文，深度审查直接失败。
+     */
+    requestOptions?: ModelRequest["options"];
     traceContext?: TraceContext;
   },
 ): Promise<DeepReviewAgentLoopResult> {
@@ -92,6 +105,9 @@ export async function runDeepReviewAgentLoop(
   let lastText = "";
   let lastFinishReason = "unknown";
   let totalUsage: ModelUsage | undefined;
+  // 已完成轮次的字符总量：逐轮 progress 是本轮累计，直接上报会让 UI 数字每轮回跳。
+  let completedRoundsChars = 0;
+  let roundStartChars = 0;
   let lastOutputChars = 0;
 
   const loopResult = await runToolAgentLoop({
@@ -101,13 +117,15 @@ export async function runDeepReviewAgentLoop(
     // 逐轮流式生成（与标准审查同一防静默手段）+ 进度透传（轮次/输出字符）。
     generate: async (model, request) => {
       const round = currentRound;
+      roundStartChars = completedRoundsChars;
       const result = await streamModelTextResult(model, request, (progress) => {
-        lastOutputChars = progress.outputChars;
-        input.onProgress?.({ outputChars: progress.outputChars, round });
+        lastOutputChars = roundStartChars + progress.outputChars;
+        input.onProgress?.({ outputChars: lastOutputChars, round });
       });
       lastText = result.text;
       lastFinishReason = result.finishReason;
       totalUsage = sumUsage(totalUsage, result.usage);
+      completedRoundsChars = roundStartChars + result.text.length;
       return { text: result.text, toolCalls: result.toolCalls };
     },
     maxTurns: DEEP_REVIEW_MAX_TURNS,
@@ -123,7 +141,9 @@ export async function runDeepReviewAgentLoop(
         });
       }
     },
-    requestOptions: (model) => model.options,
+    // 合并顺序与外层单轮语义一致：绑定模型的自带选项（推理档）为底，
+    // 外层显式解析出的预算（maxOutputTokens）覆盖在上面。
+    requestOptions: (model) => ({ ...model.options, ...input.requestOptions }),
     // tool-use 边界的只读硬闸：非白名单工具与写类 Bash 一律拒绝并回填错误，
     // 模型下一轮能看到拒绝原因。
     evaluateToolPolicy: (toolCall) => evaluateDeepReviewToolPolicy(toolCall, runtime),

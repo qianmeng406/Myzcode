@@ -146,6 +146,8 @@ export function buildOracleReviewPrompt(params: {
   recentCommits?: readonly string[] | null;
   /** deep：追加只读取证指引（审查方配备 Read/Grep/Glob 与只读 Bash）。 */
   depth?: OracleReviewDepth;
+  /** 请求文本取不到（窗口裁剪 + 历史翻页失败）：如实告知并禁止臆断任务。 */
+  userRequestUnavailable?: boolean;
 }): string {
   const userRequest = params.userRequest.trim().slice(0, MAX_USER_REQUEST_CHARS);
   const diffText =
@@ -187,7 +189,10 @@ export function buildOracleReviewPrompt(params: {
     `项目目录：${params.projectName}`,
     "",
     "## 用户这回合的要求",
-    userRequest || "（未找到原始请求文本）",
+    userRequest ||
+      (params.userRequestUnavailable
+        ? "（无法从会话历史恢复本回合的原始请求文本。请仅依据下方 diff、最近提交与对照上下文推断改动意图，并在无法确认意图时如实标注不确定——不要臆断本回合的任务。）"
+        : "（未找到原始请求文本）"),
     "",
     ...contextSections,
     ...depthSections,
@@ -423,32 +428,4 @@ export function resolveOracleRequestOptions(
       ? { maxOutputTokens: specMax }
       : {}),
   };
-}
-
-/** 审查 prompt 附带的最近提交条数：只作「此前改动可能已在早前提交中」的对照线索。 */
-const RECENT_COMMITS_FOR_REVIEW = 8;
-
-/** getCommitGraph 的最小结构面（避免把 services/hook 依赖带进本纯函数层）。 */
-interface OracleCommitGraphService {
-  getCommitGraph(params: {
-    workspacePath: string;
-    maxCount?: number;
-  }): Promise<{ commits: readonly { hash: string; subject: string }[] }>;
-}
-
-/** 最近提交摘要；非 git 工作区/查询失败返回 null，审查照常进行。 */
-export async function readOracleRecentCommitSubjects(
-  gitService: OracleCommitGraphService | undefined | null,
-  workspacePath: string,
-): Promise<string[] | null> {
-  if (!gitService) return null;
-  try {
-    const graph = await gitService.getCommitGraph({
-      workspacePath,
-      maxCount: RECENT_COMMITS_FOR_REVIEW,
-    });
-    return graph.commits.map((commit) => formatOracleCommitLine(commit.hash, commit.subject));
-  } catch {
-    return null;
-  }
 }
