@@ -136,6 +136,34 @@ export interface OracleWorkspaceDiffResult {
   fileCount: number;
   /** 超出文件数或字节上限被裁剪。 */
   truncated: boolean;
+  /** 被判定为不可审查（目录/依赖/内部目录）而跳过的条目数。 */
+  excluded: number;
+}
+
+// 工作区兜底只看「可审查的文本改动」：目录条目（含嵌套仓库，git 会整体列为一条
+// 未跟踪目录）、依赖与构建产物、工具内部目录都会污染审查输入——实测曾把工作区根
+// 的未跟踪杂物（含一次性垃圾文件与嵌套仓库）整包喂给审查者。
+const ORACLE_WORKSPACE_DIFF_EXCLUDED_SEGMENTS = new Set([
+  "node_modules",
+  ".git",
+  ".zcode",
+  ".cache",
+  ".turbo",
+  ".next",
+  "dist",
+  "build",
+  "out",
+  "coverage",
+]);
+
+function isUnreviewableWorkspaceChange(path: string): boolean {
+  const normalized = path.replace(/\\/g, "/");
+  // 目录条目没有文本 diff 可审，且往往把整个依赖树算作一条改动。
+  if (normalized.endsWith("/")) return true;
+  return normalized
+    .split("/")
+    .filter(Boolean)
+    .some((segment) => ORACLE_WORKSPACE_DIFF_EXCLUDED_SEGMENTS.has(segment));
 }
 
 export async function readOracleWorkspaceDiff(
@@ -143,7 +171,7 @@ export async function readOracleWorkspaceDiff(
   workspacePath: string,
   options?: { maxFiles?: number; maxBytes?: number },
 ): Promise<OracleWorkspaceDiffResult> {
-  if (!port) return { sections: [], fileCount: 0, truncated: false };
+  if (!port) return { sections: [], fileCount: 0, truncated: false, excluded: 0 };
   const maxFiles = options?.maxFiles ?? ORACLE_WORKSPACE_DIFF_MAX_FILES;
   const maxBytes = options?.maxBytes ?? ORACLE_WORKSPACE_DIFF_MAX_BYTES;
 
@@ -151,12 +179,16 @@ export async function readOracleWorkspaceDiff(
   try {
     changes = await port.getChanges({ workspacePath });
   } catch {
-    return { sections: [], fileCount: 0, truncated: false };
+    return { sections: [], fileCount: 0, truncated: false, excluded: 0 };
   }
-  if (changes.length === 0) return { sections: [], fileCount: 0, truncated: false };
+  if (changes.length === 0) return { sections: [], fileCount: 0, truncated: false, excluded: 0 };
 
-  const selected = changes.slice(0, maxFiles);
-  let truncated = changes.length > selected.length;
+  const reviewable = changes.filter(
+    (change) => !isUnreviewableWorkspaceChange(change.workspaceRelativePath ?? change.path),
+  );
+  const excluded = changes.length - reviewable.length;
+  const selected = reviewable.slice(0, maxFiles);
+  let truncated = reviewable.length > selected.length;
   const sections: OracleDiffSection[] = [];
   let bytes = 0;
   for (const change of selected) {
@@ -185,5 +217,5 @@ export async function readOracleWorkspaceDiff(
     }
     sections.push({ path: change.workspaceRelativePath ?? change.path, text });
   }
-  return { sections, fileCount: changes.length, truncated };
+  return { sections, fileCount: reviewable.length, truncated, excluded };
 }

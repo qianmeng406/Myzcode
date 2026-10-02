@@ -459,6 +459,7 @@ test("工作区 diff 兜底：无 patch 的文件以占位行保留，脚本回�
   // 新增/二进制文件没有 patch 时不能被静默丢弃
   assert.ok(result.sections[1]?.text.includes("无可用 unified diff"));
   assert.equal(result.truncated, false);
+  assert.equal(result.excluded, 0);
 });
 
 test("工作区 diff 兜底：文件数上限与字节上限触发裁剪标记", async () => {
@@ -483,6 +484,7 @@ test("工作区 diff 兜底：git 不可用/查询失败时静默空结果，不
     sections: [],
     fileCount: 0,
     truncated: false,
+    excluded: 0,
   });
   const failing = {
     getChanges: async () => {
@@ -494,6 +496,7 @@ test("工作区 diff 兜底：git 不可用/查询失败时静默空结果，不
     sections: [],
     fileCount: 0,
     truncated: false,
+    excluded: 0,
   });
 });
 
@@ -526,4 +529,32 @@ test("审查 prompt 明确禁工具：避免模型以工具调用收尾导致无
   });
   assert.ok(prompt.includes("你没有可用工具"));
   assert.ok(prompt.includes("不要输出任何工具调用"));
+});
+
+test("工作区 diff 兜底：目录条目、依赖与内部目录被过滤，不喂给审查者", async () => {
+  const result = await readOracleWorkspaceDiff(
+    workspacePort(
+      [
+        { path: "src/a.ts" },
+        // git 会把嵌套仓库整体列为一条未跟踪目录；依赖与工具内部目录同理
+        { path: "ZCode/", kind: "added", section: "untracked" },
+        {
+          path: "ZCode/node_modules/playwright-core/package.json",
+          kind: "added",
+          section: "untracked",
+        },
+        { path: ".zcode/plans/plan-x.md", kind: "added", section: "untracked" },
+        { path: "dist/bundle.js", kind: "added", section: "untracked" },
+        { path: "src/b.ts" },
+      ],
+      { "src/a.ts": "--- a/src/a.ts", "src/b.ts": "--- a/src/b.ts" },
+    ),
+    "/repo",
+  );
+  assert.deepEqual(
+    result.sections.map((section) => section.path),
+    ["src/a.ts", "src/b.ts"],
+  );
+  assert.equal(result.fileCount, 2);
+  assert.equal(result.excluded, 4);
 });

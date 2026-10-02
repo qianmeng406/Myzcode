@@ -201,6 +201,7 @@ export function useOracleReview(params: {
             depth,
             workspaceFiles: workspaceDiff.fileCount,
             truncated: workspaceDiff.truncated,
+            excluded: workspaceDiff.excluded,
             adopted: diffSource === "workspace",
           });
         }
