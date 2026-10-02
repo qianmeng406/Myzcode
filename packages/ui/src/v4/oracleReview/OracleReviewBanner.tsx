@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/collapsible.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { ORACLE_REVIEW_REQUEST_TIMEOUT_MS, buildOracleFixPrompt } from "./oracleReviewSupport.js";
-import type { OracleReviewFailure, OracleReviewState } from "./useOracleReview.js";
+import type { OracleReviewFailure, OracleReviewState } from "./oracleReviewSupport.js";
 
 /** 等待超过该秒数后在 pending 卡片上提示「渠道响应慢，可换把关模型」。 */
 const SLOW_REVIEW_HINT_SECONDS = 120;

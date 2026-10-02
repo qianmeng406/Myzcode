@@ -265,6 +265,43 @@ export function parseOracleVerdict(raw: string): OracleVerdictParse {
   return { verdict, summary, findings: rest };
 }
 
+export type OracleReviewRequestMode = "auto" | "manual";
+
+export type OracleReviewFailure =
+  | { kind: "no-turn" }
+  | { kind: "no-changes" }
+  | { kind: "no-model" }
+  /** 模型返回空正文：多为输出预算被 reasoning 耗尽（finishReason 可佐证）。 */
+  | { kind: "empty-response"; finishReason?: string }
+  /** 客户端 deadline 到点：多为渠道限流或深思考无首 token 的重试循环；message 供卡片展示底层错误。 */
+  | { kind: "timeout"; message: string }
+  | { kind: "request"; message: string };
+
+export type OracleReviewState =
+  | { status: "idle" }
+  | {
+      status: "pending";
+      mode: OracleReviewRequestMode;
+      /** 本次审查实际使用的把关模型（providerId/modelId），卡片 pending 时展示。 */
+      modelLabel: string;
+    }
+  | {
+      status: "result";
+      mode: OracleReviewRequestMode;
+      turnRowId: number;
+      verdict: OracleVerdict;
+      summary: string;
+      findings: string;
+      modelLabel: string;
+    }
+  | {
+      status: "error";
+      mode: OracleReviewRequestMode;
+      failure: OracleReviewFailure;
+      /** 发起请求后的把关模型（providerId/modelId）；错误卡片展示，渠道选错一眼可辨。请求前早退（无回合等）缺席。 */
+      modelLabel?: string;
+    };
+
 /** 一键修复：把 findings 原文注入下一轮请求，由用户亲手触发，不自动循环。 */
 export function buildOracleFixPrompt(findings: string): string {
   return [

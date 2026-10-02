@@ -16,8 +16,17 @@ import {
   parseOracleVerdict,
   resolveOraclePreviousReviewContext,
   type OraclePreviousReviewContext,
+  type OracleReviewRequestMode,
+  type OracleReviewState,
   type OracleVerdict,
 } from "./oracleReviewSupport.js";
+import {
+  getOracleReviewState,
+  isCurrentOracleReviewSeq,
+  nextOracleReviewSeq,
+  setOracleReviewState,
+  subscribeOracleReviewState,
+} from "./oracleReviewStore.js";
 
 /** 审查 prompt 附带的最近提交条数：只作「此前改动可能已在早前提交中」的对照线索。 */
 const RECENT_COMMITS_FOR_REVIEW = 8;
@@ -46,45 +55,9 @@ async function readRecentCommitSubjects(
  *
  * 全程复用 prompt_optimizer 同款会话外请求（generateWorkspaceText，不产生消息、
  * 不进历史）；diff 来自 v4 的 conversationFileChangesV4（checkpoint artifact 聚合，
- * 不依赖 git 工作区状态）。不写入 v4 协议，冷恢复后卡片消失是 V1 接受的边界。
+ * 不依赖 git 工作区状态）。卡片状态在模块级 store（oracleReviewStore）按会话键控，
+ * 切换会话/重挂载不丢；冷恢复（内存态无持久化）后卡片消失仍是 V1 接受的边界。
  */
-
-export type OracleReviewRequestMode = "auto" | "manual";
-
-export type OracleReviewFailure =
-  | { kind: "no-turn" }
-  | { kind: "no-changes" }
-  | { kind: "no-model" }
-  /** 模型返回空正文：多为输出预算被 reasoning 耗尽（finishReason 可佐证）。 */
-  | { kind: "empty-response"; finishReason?: string }
-  /** 客户端 deadline 到点：多为渠道限流或深思考无首 token 的重试循环；message 供卡片展示底层错误。 */
-  | { kind: "timeout"; message: string }
-  | { kind: "request"; message: string };
-
-export type OracleReviewState =
-  | { status: "idle" }
-  | {
-      status: "pending";
-      mode: OracleReviewRequestMode;
-      /** 本次审查实际使用的把关模型（providerId/modelId），卡片 pending 时展示。 */
-      modelLabel: string;
-    }
-  | {
-      status: "result";
-      mode: OracleReviewRequestMode;
-      turnRowId: number;
-      verdict: OracleVerdict;
-      summary: string;
-      findings: string;
-      modelLabel: string;
-    }
-  | {
-      status: "error";
-      mode: OracleReviewRequestMode;
-      failure: OracleReviewFailure;
-      /** 发起请求后的把关模型（providerId/modelId）；错误卡片展示，渠道选错一眼可辨。请求前早退（无回合等）缺席。 */
-      modelLabel?: string;
-    };
 
 /**
  * 解析把关请求的执行选项：模型选择（缺推理档时补该模型最高公开档）+ 输出预算。
@@ -153,9 +126,10 @@ export function useOracleReview(params: {
   const { settings } = useSettings();
   const enabled = settings?.oracleReviewEnabled ?? false;
   const services = useOptionalServices();
-  const [state, setState] = useState<OracleReviewState>({ status: "idle" });
-  const stateRef = useRef(state);
-  const requestSeqRef = useRef(0);
+  const sessionId = params.snapshot?.sessionId ?? null;
+  // 卡片状态在模块级 store（按 sessionId 键控）：切走再切回、组件重挂载都不丢；
+  // 进行中的审查由请求闭包继续推进并写入 store，与本实例是否挂载无关。
+  const [state, setState] = useState<OracleReviewState>(() => getOracleReviewState(sessionId));
   // 边沿检测：上一帧 phase；null 表示尚无基线（首帧/会话切换后不触发）。
   const prevPhaseRef = useRef<string | null>(null);
   const autoReviewedTurnRowIdsRef = useRef(new Set<number>());
@@ -163,18 +137,16 @@ export function useOracleReview(params: {
   const snapshotRef = useRef(params.snapshot);
   snapshotRef.current = params.snapshot;
 
-  const setOracleState = useCallback((next: OracleReviewState) => {
-    stateRef.current = next;
-    setState(next);
-  }, []);
-
-  const sessionId = params.snapshot?.sessionId ?? null;
-  // 会话切换：清空结果与边沿基线，避免上一会话的终态误触发新会话的自动审查。
+  // 会话切换：视图同步为该会话的存量卡片（无则 idle），并订阅其后续变化。
   useEffect(() => {
-    setOracleState({ status: "idle" });
+    setState(getOracleReviewState(sessionId));
+    return subscribeOracleReviewState(sessionId, setState);
+  }, [sessionId]);
+  // 边沿基线与自动审查去重随会话切换重置（状态本身不清空——store 持有各会话卡片）。
+  useEffect(() => {
     prevPhaseRef.current = null;
     autoReviewedTurnRowIdsRef.current = new Set();
-  }, [sessionId, setOracleState]);
+  }, [sessionId]);
 
   const reviewTurn = useCallback(
     async (mode: OracleReviewRequestMode, headerOverride?: TurnHeaderRow) => {
@@ -183,18 +155,22 @@ export function useOracleReview(params: {
       if (!snapshot || !agentService) {
         return;
       }
-      if (stateRef.current.status === "pending") {
+      // 闭包捕获发起时的会话 id：写回永远落在发起会话的 store 条目上，
+      // 即使用户已切到别的会话，切回时卡片仍能显示结果。
+      const sid = snapshot.sessionId;
+      if (getOracleReviewState(sid).status === "pending") {
         // 单横幅设计：审查进行中（最长 ~10 分钟）的重复点击只能静默忽略——
         // 横幅此时显示「审查中」。留痕日志，避免「点了没反应」无从排查。
         logger.info("[OracleReview] 已有审查在进行中，忽略本次请求", {
           mode,
+          sessionKey: sid,
           overrideTurnRowId: headerOverride?.rowId ?? null,
         });
         return;
       }
       const header = headerOverride ?? findLastCompletedTurnHeader(snapshot);
       if (!header) {
-        setOracleState({ status: "error", mode, failure: { kind: "no-turn" } });
+        setOracleReviewState(sid, { status: "error", mode, failure: { kind: "no-turn" } });
         return;
       }
       // 诊断留痕：逐轮按钮审历史旧轮与默认「最近回合」共用本函数，日志区分入口
@@ -213,7 +189,7 @@ export function useOracleReview(params: {
         autoReviewedTurnRowIdsRef.current.add(header.rowId);
       }
       if (!header.fileChanges || header.fileChanges.files <= 0) {
-        setOracleState({ status: "error", mode, failure: { kind: "no-changes" } });
+        setOracleReviewState(sid, { status: "error", mode, failure: { kind: "no-changes" } });
         return;
       }
       const requestOptions = resolveOracleRequestOptions(
@@ -221,28 +197,27 @@ export function useOracleReview(params: {
         params.modelSelectionView,
       );
       if (!requestOptions) {
-        setOracleState({ status: "error", mode, failure: { kind: "no-model" } });
+        setOracleReviewState(sid, { status: "error", mode, failure: { kind: "no-model" } });
         return;
       }
       const target = header.entityId ? { rowId: header.rowId, entityId: header.entityId } : null;
       if (!target) {
-        setOracleState({ status: "error", mode, failure: { kind: "no-turn" } });
+        setOracleReviewState(sid, { status: "error", mode, failure: { kind: "no-turn" } });
         return;
       }
       // 跨回合对照上下文：注入门槛（上次审查必须是结果态、且本次目标回合在其之后）
       // 收敛在 resolveOraclePreviousReviewContext 纯函数里；必须在置 pending 前读取
-      // （setOracleState 同步改 ref，晚一行读到的就是 pending 态）。
+      // （pending 写入会覆盖该会话的 result 条目）。
       const previousReview: OraclePreviousReviewContext | null = resolveOraclePreviousReviewContext(
-        stateRef.current,
+        getOracleReviewState(sid),
         header.rowId,
       );
       const pendingModelLabel = `${requestOptions.selection.providerId}/${requestOptions.selection.modelId}`;
-      setOracleState({ status: "pending", mode, modelLabel: pendingModelLabel });
-      const requestSeq = requestSeqRef.current + 1;
-      requestSeqRef.current = requestSeq;
+      setOracleReviewState(sid, { status: "pending", mode, modelLabel: pendingModelLabel });
+      const requestSeq = nextOracleReviewSeq(sid);
       const applyIfCurrent = (next: OracleReviewState) => {
-        if (requestSeqRef.current === requestSeq) {
-          setOracleState(next);
+        if (isCurrentOracleReviewSeq(sid, requestSeq)) {
+          setOracleReviewState(sid, next);
         }
       };
       try {
@@ -355,7 +330,6 @@ export function useOracleReview(params: {
       params.workspaceIdentity,
       params.workspacePath,
       services,
-      setOracleState,
     ],
   );
 
@@ -434,8 +408,11 @@ export function useOracleReview(params: {
   );
 
   const dismiss = useCallback(() => {
-    setOracleState({ status: "idle" });
-  }, [setOracleState]);
+    // 只清当前查看会话的卡片；其他会话的存量卡片（含进行中的审查）不受影响。
+    if (sessionId !== null) {
+      setOracleReviewState(sessionId, { status: "idle" });
+    }
+  }, [sessionId]);
 
   return {
     state,

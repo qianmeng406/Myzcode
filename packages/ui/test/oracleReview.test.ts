@@ -13,6 +13,13 @@ import {
   writeStoredOracleModelSelection,
   type OracleReviewDiffHunk,
 } from "../src/v4/oracleReview/oracleReviewSupport.js";
+import {
+  getOracleReviewState,
+  isCurrentOracleReviewSeq,
+  nextOracleReviewSeq,
+  setOracleReviewState,
+  subscribeOracleReviewState,
+} from "../src/v4/oracleReview/oracleReviewStore.js";
 
 function hunk(lines: string[], newStart = 1): OracleReviewDiffHunk {
   return { oldStart: newStart, oldLines: lines.length, newStart, newLines: lines.length, lines };
@@ -125,6 +132,51 @@ test("提交行格式：hash 截 7 位，超长 subject 截断", () => {
   const longLine = formatOracleCommitLine("abc1234", "x".repeat(200));
   assert.equal(longLine.length, 121); // 120 + 省略号
   assert.ok(longLine.endsWith("…"));
+});
+
+test("审查卡片 store：按会话键控、跨切换存活、通知订阅者", () => {
+  const seen: string[] = [];
+  const unsubscribe = subscribeOracleReviewState("sess-a", (state) => seen.push(state.status));
+  // 未写入前是 idle 缺省；null 会话恒 idle
+  assert.deepEqual(getOracleReviewState("sess-a"), { status: "idle" });
+  assert.deepEqual(getOracleReviewState(null), { status: "idle" });
+
+  setOracleReviewState("sess-a", { status: "pending", mode: "manual", modelLabel: "m/x" });
+  assert.deepEqual(getOracleReviewState("sess-a").status, "pending");
+  assert.deepEqual(seen, ["pending"]);
+
+  // 另一会话互不可见；null 会话不落存储
+  assert.deepEqual(getOracleReviewState("sess-b"), { status: "idle" });
+
+  // 退订后不再收到通知，但状态仍在（跨切换存活）
+  unsubscribe();
+  unsubscribe(); // 重复退订安全
+  setOracleReviewState("sess-a", {
+    status: "result",
+    mode: "manual",
+    turnRowId: 3,
+    verdict: "pass",
+    summary: "ok",
+    findings: "无",
+    modelLabel: "m/x",
+  });
+  assert.deepEqual(seen, ["pending"]);
+  assert.equal(getOracleReviewState("sess-a").status, "result");
+
+  // 回到 idle 删除条目（内存收敛），读取回到缺省 idle
+  setOracleReviewState("sess-a", { status: "idle" });
+  assert.deepEqual(getOracleReviewState("sess-a"), { status: "idle" });
+});
+
+test("审查卡片 store：请求代次守卫跨重挂载有效", () => {
+  const first = nextOracleReviewSeq("sess-g");
+  assert.equal(isCurrentOracleReviewSeq("sess-g", first), true);
+  // 后发请求使先发请求的写回失效（模拟用户再次触发审查）
+  const second = nextOracleReviewSeq("sess-g");
+  assert.equal(isCurrentOracleReviewSeq("sess-g", first), false);
+  assert.equal(isCurrentOracleReviewSeq("sess-g", second), true);
+  // 代次按会话隔离
+  assert.equal(isCurrentOracleReviewSeq("sess-h", second), false);
 });
 
 test("parseOracleVerdict 解析标准输出", () => {
