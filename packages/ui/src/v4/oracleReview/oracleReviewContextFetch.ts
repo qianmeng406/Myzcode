@@ -1,5 +1,5 @@
 import type { ConversationRow } from "@zcode/shared/zcode-protocol-v4";
-import { formatOracleCommitLine } from "./oracleReviewSupport.js";
+import { formatOracleCommitLine, type OracleDiffSection } from "./oracleReviewSupport.js";
 
 /**
  * 审查的上下文取数层：从会话历史取本回合的请求文本、从 git 取最近提交摘要。
@@ -99,4 +99,91 @@ export async function readOracleRecentCommitSubjects(
   } catch {
     return null;
   }
+}
+
+/**
+ * 工作区改动兜底：回合内的改动若由脚本/命令完成，checkpoint 不会记录工具级
+ * 文件变更（fileChanges 为空），标准审查会直接拒绝、深度审查也看不到 diff。
+ * 这里回退到 git 的「未提交改动」，让脚本回合也能被审查。
+ *
+ * 口径如实：这是工作区相对 HEAD 的当前改动，可能包含同期其他未提交改动，
+ * prompt 会标注来源并要求审查者无法确认归属时如实说明。
+ */
+const ORACLE_WORKSPACE_DIFF_MAX_FILES = 40;
+const ORACLE_WORKSPACE_DIFF_MAX_BYTES = 800_000;
+
+/** git 取数的最小结构面（避免把 services 依赖带进纯函数层）。 */
+export interface OracleWorkspaceDiffPort {
+  getChanges(params: { workspacePath: string }): Promise<
+    readonly {
+      path: string;
+      workspaceRelativePath?: string;
+      kind: string;
+      section: string;
+      isStaged: boolean;
+    }[]
+  >;
+  getDiff(params: {
+    workspacePath: string;
+    path: string;
+    staged?: boolean;
+    sourceId?: string;
+  }): Promise<{ patch: string | null }>;
+}
+
+export interface OracleWorkspaceDiffResult {
+  sections: OracleDiffSection[];
+  fileCount: number;
+  /** 超出文件数或字节上限被裁剪。 */
+  truncated: boolean;
+}
+
+export async function readOracleWorkspaceDiff(
+  port: OracleWorkspaceDiffPort | undefined | null,
+  workspacePath: string,
+  options?: { maxFiles?: number; maxBytes?: number },
+): Promise<OracleWorkspaceDiffResult> {
+  if (!port) return { sections: [], fileCount: 0, truncated: false };
+  const maxFiles = options?.maxFiles ?? ORACLE_WORKSPACE_DIFF_MAX_FILES;
+  const maxBytes = options?.maxBytes ?? ORACLE_WORKSPACE_DIFF_MAX_BYTES;
+
+  let changes: Awaited<ReturnType<OracleWorkspaceDiffPort["getChanges"]>>;
+  try {
+    changes = await port.getChanges({ workspacePath });
+  } catch {
+    return { sections: [], fileCount: 0, truncated: false };
+  }
+  if (changes.length === 0) return { sections: [], fileCount: 0, truncated: false };
+
+  const selected = changes.slice(0, maxFiles);
+  let truncated = changes.length > selected.length;
+  const sections: OracleDiffSection[] = [];
+  let bytes = 0;
+  for (const change of selected) {
+    let patch: string | null = null;
+    try {
+      const diff = await port.getDiff({
+        workspacePath,
+        path: change.path,
+        ...(change.isStaged ? { staged: true } : {}),
+        ...(change.section === "staged" || change.section === "unstaged"
+          ? { sourceId: change.section }
+          : {}),
+      });
+      patch = diff.patch;
+    } catch {
+      patch = null;
+    }
+    const text =
+      patch && patch.trim()
+        ? patch
+        : `（无可用 unified diff：kind=${change.kind}${change.isStaged ? " staged" : ""}，可能是新增/二进制文件）`;
+    bytes += text.length;
+    if (bytes > maxBytes) {
+      truncated = true;
+      break;
+    }
+    sections.push({ path: change.workspaceRelativePath ?? change.path, text });
+  }
+  return { sections, fileCount: changes.length, truncated };
 }

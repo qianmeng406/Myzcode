@@ -15,7 +15,10 @@ import {
   ORACLE_REVIEW_TOOL_EVENT_LIMIT,
   appendOracleReviewToolEvent,
 } from "../src/v4/oracleReview/oracleReviewSupport.js";
-import { findOracleUserRequestBeforeTurn } from "../src/v4/oracleReview/oracleReviewContextFetch.js";
+import {
+  findOracleUserRequestBeforeTurn,
+  readOracleWorkspaceDiff,
+} from "../src/v4/oracleReview/oracleReviewContextFetch.js";
 import {
   getOracleReviewState,
   invalidateOracleReviewSeq,
@@ -423,4 +426,94 @@ test("深度审查工具事件：有界累积保留最近 N 条", () => {
     target: `p${ORACLE_REVIEW_TOOL_EVENT_LIMIT + 4}`,
   });
   assert.ok(!events.some((event) => event.target === "a.ts"));
+});
+
+function workspacePort(
+  changes: Array<{ path: string; kind?: string; staged?: boolean; section?: string }>,
+  patches: Record<string, string | null>,
+) {
+  return {
+    getChanges: async () =>
+      changes.map((change) => ({
+        path: change.path,
+        workspaceRelativePath: change.path,
+        kind: change.kind ?? "modified",
+        section: change.section ?? "unstaged",
+        isStaged: change.staged ?? false,
+      })),
+    getDiff: async ({ path }: { path: string }) => ({ patch: patches[path] ?? null }),
+  };
+}
+
+test("工作区 diff 兜底：无 patch 的文件以占位行保留，脚本回合不为空", async () => {
+  const result = await readOracleWorkspaceDiff(
+    workspacePort(
+      [{ path: "src/a.ts" }, { path: "src/new.ts", kind: "added", section: "untracked" }],
+      { "src/a.ts": "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-x\n+y" },
+    ),
+    "/repo",
+  );
+  assert.equal(result.fileCount, 2);
+  assert.equal(result.sections.length, 2);
+  assert.ok(result.sections[0]?.text.includes("+y"));
+  // 新增/二进制文件没有 patch 时不能被静默丢弃
+  assert.ok(result.sections[1]?.text.includes("无可用 unified diff"));
+  assert.equal(result.truncated, false);
+});
+
+test("工作区 diff 兜底：文件数上限与字节上限触发裁剪标记", async () => {
+  const many = Array.from({ length: 5 }, (_, index) => ({ path: `f${index}.ts` }));
+  const patches = Object.fromEntries(many.map((c) => [c.path, "x".repeat(50)]));
+  const byFiles = await readOracleWorkspaceDiff(workspacePort(many, patches), "/repo", {
+    maxFiles: 2,
+  });
+  assert.equal(byFiles.sections.length, 2);
+  assert.equal(byFiles.fileCount, 5);
+  assert.equal(byFiles.truncated, true);
+
+  const byBytes = await readOracleWorkspaceDiff(workspacePort(many, patches), "/repo", {
+    maxBytes: 120,
+  });
+  assert.ok(byBytes.sections.length <= 3);
+  assert.equal(byBytes.truncated, true);
+});
+
+test("工作区 diff 兜底：git 不可用/查询失败时静默空结果，不阻塞审查", async () => {
+  assert.deepEqual(await readOracleWorkspaceDiff(undefined, "/repo"), {
+    sections: [],
+    fileCount: 0,
+    truncated: false,
+  });
+  const failing = {
+    getChanges: async () => {
+      throw new Error("not a repository");
+    },
+    getDiff: async () => ({ patch: null }),
+  };
+  assert.deepEqual(await readOracleWorkspaceDiff(failing, "/repo"), {
+    sections: [],
+    fileCount: 0,
+    truncated: false,
+  });
+});
+
+test("工作区来源的 prompt 如实标注口径（可能含同期其他改动）", () => {
+  const prompt = buildOracleReviewPrompt({
+    userRequest: "用脚本改文件",
+    diffSections: [{ path: "src/a.ts", text: "--- a/src/a.ts" }],
+    projectName: "demo",
+    diffSource: "workspace",
+  });
+  assert.ok(prompt.includes("工作区改动（相对 HEAD 的未提交改动"));
+  assert.ok(prompt.includes("本回合没有工具级改动记录"));
+  assert.ok(prompt.includes("可能包含同期其他未提交改动"));
+  // 回合来源时不应出现工作区口径
+  const turnPrompt = buildOracleReviewPrompt({
+    userRequest: "改文件",
+    diffSections: [{ path: "src/a.ts", text: "--- a/src/a.ts" }],
+    projectName: "demo",
+    diffSource: "turn",
+  });
+  assert.ok(turnPrompt.includes("本回合改动（unified diff，全量未裁剪）"));
+  assert.ok(!turnPrompt.includes("工作区改动"));
 });

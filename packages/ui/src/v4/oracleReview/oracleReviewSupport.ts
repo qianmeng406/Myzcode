@@ -148,6 +148,11 @@ export function buildOracleReviewPrompt(params: {
   depth?: OracleReviewDepth;
   /** 请求文本取不到（窗口裁剪 + 历史翻页失败）：如实告知并禁止臆断任务。 */
   userRequestUnavailable?: boolean;
+  /**
+   * diff 来源：turn=该回合的工具级改动记录（Edit/Write 产物）；
+   * workspace=回合内无工具级记录（改动由脚本/命令完成）时回退的工作区未提交改动。
+   */
+  diffSource?: "turn" | "workspace";
 }): string {
   const userRequest = params.userRequest.trim().slice(0, MAX_USER_REQUEST_CHARS);
   const diffText =
@@ -196,7 +201,13 @@ export function buildOracleReviewPrompt(params: {
     "",
     ...contextSections,
     ...depthSections,
-    "## 本回合改动（unified diff，全量未裁剪）",
+    ...(params.diffSource === "workspace"
+      ? [
+          "## 工作区改动（相对 HEAD 的未提交改动，unified diff）",
+          "注意：本回合没有工具级改动记录——改动可能是经脚本/命令完成的。以下是工作区当前相对 HEAD 的实际改动，可能包含同期其他未提交改动：请结合最近提交判断归属，无法确认归属时如实说明，不要臆断。",
+          "",
+        ]
+      : ["## 本回合改动（unified diff，全量未裁剪）"]),
     diffText,
     "",
     "## 输出格式（严格遵守）",

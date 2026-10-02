@@ -1197,6 +1197,9 @@ function ConversationTurnGroupImpl({
     () => (unit.isRunning ? [] : resolveOffPeakTurnCards(unit.assistantWorkRows)),
     [unit.assistantWorkRows, unit.isRunning],
   );
+  // 本轮是否有工具调用：脚本/命令改文件的回合据此保留审查入口
+  // （checkpoint 不记录脚本改动，fileChanges 为空）。
+  const hasTurnToolActivity = unit.assistantWorkRows.some((row) => row.kind === "toolCall");
   const canRenderAssistantActions =
     !unit.timelineOnly &&
     latestAssistantTextRow?.state === "complete" &&
@@ -1424,13 +1427,15 @@ function ConversationTurnGroupImpl({
               onFork={canForkLatestAssistant ? onFork : undefined}
               onRetry={canRetryLatestAssistant ? onRetry : undefined}
               onFeedbackChange={onFeedbackChange}
-              // 审查这一回合：只给「成功结束 + 有文件改动 + 未撤销」的回合提供入口；
+              // 审查这一回合：成功结束且未撤销的回合都提供入口。除「有文件改动」外，
+              // 还包含「本轮有工具活动」的回合——改动可能由脚本/命令完成，checkpoint
+              // 不记录工具级改动（fileChanges 为空），漏掉它们会让脚本回合无法审查。
               // 结果统一显示在 composer 上方的 Oracle 横幅，一次只保留最近一次审查。
               onReviewTurn={
                 context.reviewTurn &&
                 unit.header?.entityId &&
                 unit.header.state === "completedSuccess" &&
-                (unit.header.fileChanges?.files ?? 0) > 0 &&
+                ((unit.header.fileChanges?.files ?? 0) > 0 || hasTurnToolActivity) &&
                 unit.header.fileChanges?.state !== "reverted"
                   ? () => {
                       if (unit.header) context.reviewTurn?.(unit.header);

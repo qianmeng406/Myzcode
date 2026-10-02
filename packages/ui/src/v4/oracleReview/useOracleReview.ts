@@ -28,6 +28,7 @@ import {
 import {
   findOracleUserRequestBeforeTurn,
   readOracleRecentCommitSubjects,
+  readOracleWorkspaceDiff,
 } from "./oracleReviewContextFetch.js";
 import {
   getOracleReviewState,
@@ -140,15 +141,9 @@ export function useOracleReview(params: {
         }
         autoReviewedTurnRowIdsRef.current.add(header.rowId);
       }
-      if (!header.fileChanges || header.fileChanges.files <= 0) {
-        setOracleReviewState(sid, {
-          status: "error",
-          mode,
-          failure: { kind: "no-changes" },
-          depth,
-        });
-        return;
-      }
+      // 这里不再按 header.fileChanges 提前拒绝：脚本/命令完成的改动不会被 checkpoint
+      // 记录为工具级改动（fileChanges 为空），提前拒绝会让这类回合完全无法审查。
+      // 有无可审查内容由取 diff（含工作区兜底）之后统一判定。
       const requestOptions = resolveOracleRequestOptions(
         params.oracleModel,
         params.modelSelectionView,
@@ -187,8 +182,37 @@ export function useOracleReview(params: {
           baseRevision: snapshot.revision,
           baseLogEpoch: snapshot.logEpoch,
         });
-        const sections = buildOracleDiffSections(fileChanges.items);
+        // diff 来源：优先该回合的工具级改动记录（Edit/Write 产物）；为空的常见原因是
+        // 改动由脚本/命令（Bash）完成——此时回退到工作区相对 HEAD 的未提交改动，
+        // 否则脚本回合完全无法审查（标准审查直接拒绝、深度审查同样被挡）。
+        let sections = buildOracleDiffSections(fileChanges.items);
+        let diffSource: "turn" | "workspace" = "turn";
         if (sections.length === 0) {
+          const workspaceDiff = await readOracleWorkspaceDiff(
+            services?.gitService,
+            params.workspacePath,
+          );
+          if (workspaceDiff.sections.length > 0) {
+            sections = workspaceDiff.sections;
+            diffSource = "workspace";
+          }
+          logger.info("[OracleReview] 回合无工具级改动记录，回退工作区改动", {
+            turnRowId: header.rowId,
+            depth,
+            workspaceFiles: workspaceDiff.fileCount,
+            truncated: workspaceDiff.truncated,
+            adopted: diffSource === "workspace",
+          });
+        }
+        if (sections.length === 0) {
+          // 自动把关的纯对话回合：静默跳过（不留错误卡片），避免每轮都弹「无改动」。
+          if (mode === "auto") {
+            logger.info("[OracleReview] 自动把关跳过：无任何可审查改动", {
+              turnRowId: header.rowId,
+            });
+            setOracleReviewState(sid, { status: "idle" });
+            return;
+          }
           applyIfCurrent({ status: "error", mode, failure: { kind: "no-changes" }, depth });
           return;
         }
@@ -229,6 +253,7 @@ export function useOracleReview(params: {
             previousReview,
             ...(recentCommits ? { recentCommits } : {}),
             depth,
+            diffSource,
           }),
           querySource:
             depth === "deep" ? ORACLE_DEEP_REVIEW_QUERY_SOURCE : ORACLE_TURN_REVIEW_QUERY_SOURCE,
