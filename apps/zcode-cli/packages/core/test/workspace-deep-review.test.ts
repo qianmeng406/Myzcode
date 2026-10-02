@@ -257,3 +257,55 @@ test("深度审查进度字符跨轮累计：第二轮进度从第一轮末尾�
     progress,
   );
 });
+
+test("深度审查进度字符跨轮累计：思考增量主导时也不回跳（原按正文长度设偏移会回跳）", async () => {
+  const runtime = {
+    workingDirectory: "/repo",
+    workspaceRoot: "/repo",
+    sessionId: "s",
+    config: {},
+    registry: {
+      get: (name: string) => ({
+        metadata: { name },
+        name,
+        description: "test tool",
+        inputSchema: {},
+        handler: async () => ({ toolCallId: "", toolName: name, success: true, output: "ok" }),
+      }),
+      has: () => true,
+      list: () => ["Read"],
+      toContracts: () => [{ name: "Read", description: "read", inputSchema: {} }],
+    },
+    artifactStore: {},
+    executionPort: {},
+    fileSystemPort: {},
+    imageProcessorPort: {},
+    pdfDocumentPort: {},
+    sessionStore: {},
+    skillPort: undefined,
+  } as unknown as Parameters<typeof runDeepReviewAgentLoop>[0];
+
+  const progress: number[] = [];
+  await runDeepReviewAgentLoop(runtime, {
+    messages: [{ role: "user", content: "review" }],
+    model: fakeModel([
+      // 第一轮：大量思考增量 + 极短正文 + 一个工具调用
+      [
+        { type: "reasoning_delta", text: "深".repeat(100) },
+        { type: "text_delta", text: "略" },
+        { type: "tool_call", toolCall: { id: "r1", name: "Read", input: {} } },
+        finish,
+      ],
+      [{ type: "text_delta", text: "VERDICT: PASS" }, finish],
+    ]),
+    onProgress: (p) => progress.push(p.outputChars),
+  });
+
+  // 第二轮从第一轮最后上报的值（101）继续，而不是从正文长度（1）重算
+  assert.ok(progress.some((value) => value >= 101));
+  assert.deepEqual(
+    [...progress].sort((a, b) => a - b),
+    progress,
+    `进度应单调不减，实际 ${progress.join(",")}`,
+  );
+});

@@ -16,7 +16,10 @@ import type { AgentRuntimeInternal } from "../internal.js";
 import { runToolAgentLoop } from "../../memory/memory-agent-loop.js";
 import { isRuntimeReadOnlyBashCommand } from "../../tool/handlers/bash-semantics.js";
 import { getSessionShellSelectionFromConfig } from "./session-shell-environment.js";
-import { streamModelTextResult, type WorkspaceGenerateTextProgress } from "./workspace-generate-text.js";
+import {
+  streamModelTextResult,
+  type WorkspaceGenerateTextProgress,
+} from "./workspace-generate-text.js";
 
 /**
  * 深度审查循环：会话外的只读子代理。审查方拿到 Read/Grep/Glob 与只读 Bash
@@ -113,7 +116,10 @@ export async function runDeepReviewAgentLoop(
   const loopResult = await runToolAgentLoop({
     abortSignal: input.abortSignal,
     executeTool: (toolCall, options) =>
-      executor.execute(toolCall, { signal: options?.abortSignal, traceContext: input.traceContext }),
+      executor.execute(toolCall, {
+        signal: options?.abortSignal,
+        traceContext: input.traceContext,
+      }),
     // 逐轮流式生成（与标准审查同一防静默手段）+ 进度透传（轮次/输出字符）。
     generate: async (model, request) => {
       const round = currentRound;
@@ -125,7 +131,11 @@ export async function runDeepReviewAgentLoop(
       lastText = result.text;
       lastFinishReason = result.finishReason;
       totalUsage = sumUsage(totalUsage, result.usage);
-      completedRoundsChars = roundStartChars + result.text.length;
+      // 偏移取本轮**最后上报的累计值**（含思考增量），不能用 result.text.length：
+      // 思考型模型一轮的 reasoning 字符远多于可见正文，按正文长度设偏移会让
+      // 下一轮首个进度值低于上一轮末尾，UI 数字回跳（本修复原想消除的问题）。
+      // 本轮无任何增量时 lastOutputChars 仍等于 roundStartChars，偏移不变。
+      completedRoundsChars = lastOutputChars;
       return { text: result.text, toolCalls: result.toolCalls };
     },
     maxTurns: DEEP_REVIEW_MAX_TURNS,
