@@ -470,20 +470,4 @@ export function useOracleReview(params: {
   };
 }
 
-/** SessionPane → composer / 行渲染注入的完整控制面；composer 不再自持 hook 实例。 */
-export interface OracleReviewController {
-  state: OracleReviewState;
-  enabled: boolean;
-  /** pending 已等待秒数（每秒跳动）；结果/错误态归零。 */
-  pendingElapsedSeconds: number;
-  /** pending 期间模型已累计输出的字符数（正文+思考，CLI 流式进度推送）；非 pending 归零。 */
-  pendingOutputChars: number;
-  manualReview: () => void;
-  /** 深度审查（只读子代理多轮取证）：仅手动入口，成本数倍于标准审查。 */
-  deepReview: () => void;
-  reviewTurnHeader: (header: TurnHeaderRow) => void;
-  dismiss: () => void;
-  /** 把关模型偏好（localStorage 全局）；下拉的受控值。 */
-  model: ModelSelection | null;
-  onSelectModel: (selection: ModelSelection | null) => void;
-}
+export type { OracleReviewController } from "./oracleReviewSupport.js";
