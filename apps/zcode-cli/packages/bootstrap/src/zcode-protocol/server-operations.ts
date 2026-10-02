@@ -2748,8 +2748,11 @@ const WORKSPACE_GENERATE_TEXT_PROGRESS_INTERVAL_MS = 500;
 /**
  * 流式输出进度通知器：窗口内合并增量；flush 供请求收尾补发尾包——没有它，
  * 最后一个窗口内的增量不会上报，UI 字符数会停在旧值直到结果卡片替换横幅。
+ * 工具事件（深度审查）走独立模式：连续工具调用不受 500ms 窗口与字符去重折叠，
+ * 否则 UI 的「已执行 N 次工具调用」会漏记中间那些调用。
+ * 导出仅为单测。
  */
-function createWorkspaceGenerateTextProgressNotifier(options: {
+export function createWorkspaceGenerateTextProgressNotifier(options: {
   notify: ZCodeProtocolAgentServerContext["notify"];
   logger?: ZCodeProtocolAgentServerContext["logger"];
   operationId: string | undefined;
@@ -2770,14 +2773,18 @@ function createWorkspaceGenerateTextProgressNotifier(options: {
   let lastRound: number | undefined;
   let lastToolName: string | undefined;
   let lastToolTarget: string | undefined;
-  const emit = (force: boolean) => {
+  // throttled=字符流（窗口合并 + 值未变不发）；tool=工具事件（只要求有变化，不受窗口约束）；
+  // flush=收尾补发（不受窗口约束，但仅在有新字符时发）。
+  const emit = (mode: "throttled" | "tool" | "flush") => {
     const now = Date.now();
-    if (
-      (!force &&
-        lastEmitAt !== 0 &&
-        now - lastEmitAt < WORKSPACE_GENERATE_TEXT_PROGRESS_INTERVAL_MS) ||
-      lastChars === lastEmittedChars
-    ) {
+    if (mode === "throttled") {
+      if (
+        (lastEmitAt !== 0 && now - lastEmitAt < WORKSPACE_GENERATE_TEXT_PROGRESS_INTERVAL_MS) ||
+        lastChars === lastEmittedChars
+      ) {
+        return;
+      }
+    } else if (mode === "flush" && lastChars === lastEmittedChars) {
       return;
     }
     lastEmitAt = now;
@@ -2807,13 +2814,19 @@ function createWorkspaceGenerateTextProgressNotifier(options: {
   };
   return {
     onProgress: (progress) => {
+      const previousToolName = lastToolName;
+      const previousToolTarget = lastToolTarget;
       lastChars = progress.outputChars;
       lastRound = progress.round;
       lastToolName = progress.toolName;
       lastToolTarget = progress.toolTarget;
-      emit(false);
+      // 新工具调用（名称或目标变化）强制发送；同一工具的后续进度仍走节流。
+      const isNewToolEvent =
+        Boolean(progress.toolName) &&
+        (progress.toolName !== previousToolName || progress.toolTarget !== previousToolTarget);
+      emit(isNewToolEvent ? "tool" : "throttled");
     },
-    flush: () => emit(true),
+    flush: () => emit("flush"),
   };
 }
 
@@ -2830,13 +2843,13 @@ export async function generateWorkspaceText(
   const progressNotifier =
     params.stream || params.agentic
       ? createWorkspaceGenerateTextProgressNotifier({
-        notify: (notification) => context.notify(notification),
-        logger: context.logger,
-        operationId: params.operationId,
-        workspacePath: params.workspace.workspacePath,
-        querySource: params.querySource,
-      })
-    : null;
+          notify: (notification) => context.notify(notification),
+          logger: context.logger,
+          operationId: params.operationId,
+          workspacePath: params.workspace.workspacePath,
+          querySource: params.querySource,
+        })
+      : null;
   const input = {
     selection: params.selection,
     ...(params.prompt ? { prompt: params.prompt } : {}),

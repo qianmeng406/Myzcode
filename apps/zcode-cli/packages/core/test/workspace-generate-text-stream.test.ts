@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Model, ModelRequest, ModelStreamEvent, ModelUsage } from "../src/deps.js";
-import { streamModelTextResult } from "../src/runtime/methods/workspace-generate-text.js";
+import {
+  streamModelTextResult,
+  streamWithStallWatchdog,
+} from "../src/runtime/methods/workspace-generate-text.js";
 
 /**
  * streamModelTextResult 的事件聚合单测。Model 只需提供 streamText：
@@ -75,10 +78,7 @@ test("增量 JSON 损坏时不丢调用（降级为 _raw），缺 finish 抛错�
   assert.ok("_raw" in (broken.toolCalls?.[0]?.input as Record<string, unknown>));
 
   await assert.rejects(
-    streamModelTextResult(
-      fakeModel([{ type: "text_delta", text: "partial" }]),
-      request,
-    ),
+    streamModelTextResult(fakeModel([{ type: "text_delta", text: "partial" }]), request),
     (error: Error) => {
       assert.match(error.message, /finish 事件前结束/);
       assert.match(error.message, /textLength=7/);
@@ -103,4 +103,44 @@ test("onProgress 上报正文与思考增量的累计字符数（非 token）", 
   assert.equal(result.text, "VERDICT: PASS");
   // 累计值：3 + 2 + 7 + 6；每个增量都触发一次回调
   assert.deepEqual(progress, [3, 5, 12, 18]);
+});
+
+test("静默看门狗：超过阈值无事件即中止（避免烧满审查超时预算）", async () => {
+  const stuck: AsyncIterable<ModelStreamEvent> = {
+    [Symbol.asyncIterator]() {
+      return {
+        // 永不产出、永不结束：模拟上游重试循环里的静默连接。
+        next: () => new Promise<IteratorResult<ModelStreamEvent>>(() => {}),
+      };
+    },
+  };
+  const started = Date.now();
+  await assert.rejects(
+    (async () => {
+      for await (const _event of streamWithStallWatchdog(stuck, 30)) {
+        // 不应有任何事件
+      }
+    })(),
+    (error: Error) => {
+      assert.equal(error.name, "ZCodeModelStreamStallError");
+      assert.match(error.message, /没有任何事件/);
+      return true;
+    },
+  );
+  // 阈值 30ms，实际应在远小于 1 秒内中止
+  assert.ok(Date.now() - started < 1_000);
+});
+
+test("静默看门狗：事件间隔小于阈值时不误杀，正常收尾", async () => {
+  async function* slowButAlive(): AsyncGenerator<ModelStreamEvent> {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    yield { type: "text_delta", text: "a" };
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    yield { type: "finish", finishReason: "stop", usage };
+  }
+  const seen: string[] = [];
+  for await (const event of streamWithStallWatchdog(slowButAlive(), 200)) {
+    seen.push(event.type);
+  }
+  assert.deepEqual(seen, ["text_delta", "finish"]);
 });

@@ -9,6 +9,7 @@ import type {
   ModelInputMessage,
   ModelSelection,
   ModelRequest,
+  ModelStreamEvent,
   ModelToolCall,
   ModelToolContract,
   ModelUsage,
@@ -24,6 +25,10 @@ import { auxiliaryModelOptions } from "../../model/auxiliary-model-options.js";
 import { runDeepReviewAgentLoop } from "./workspace-deep-review.js";
 
 const WORKSPACE_GENERATE_TEXT_TIMEOUT_MS = 60_000;
+// 流事件静默看门狗：上游对无产出连接按「每次尝试约 60s 被掐 + 退避重试」处理
+// （实测日志：单条审查请求烧满 600s 客户端 deadline 才失败）。阈值取 2 倍静默窗口，
+// 连续两分钟没有任何事件即判为无产出循环，提前中止，把 10 分钟的浪费压到 2 分钟。
+const MODEL_STREAM_STALL_TIMEOUT_MS = 120_000;
 const CONNECTIVITY_PROBE_MAX_OUTPUT_TOKENS = 1;
 // 探测请求使用固定最小 prompt，避免多余推理开销；不可改写角色、文本或混入会话历史。
 const CONNECTIVITY_PROBE_SYSTEM = "You are ZCode connectivity probe.";
@@ -327,6 +332,44 @@ function assertWorkspaceModelInput(input: WorkspaceGenerateTextInput): void {
 }
 
 /**
+ * 逐事件静默看门狗：两次流事件之间的间隔超过阈值即中止。正常的思考型响应会持续
+ * 产生 reasoning/text 增量，静默两分钟意味着上游在重试循环里空转。
+ * 导出仅为单测。
+ */
+export async function* streamWithStallWatchdog(
+  source: AsyncIterable<ModelStreamEvent>,
+  timeoutMs: number,
+): AsyncGenerator<ModelStreamEvent> {
+  const iterator = source[Symbol.asyncIterator]();
+  try {
+    for (;;) {
+      let timer: NodeJS.Timeout | undefined;
+      const stall = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error(
+            `模型流连续 ${Math.round(timeoutMs / 1000)} 秒没有任何事件（上游重试循环或无产出），已中止以避免耗尽超时预算`,
+          );
+          error.name = "ZCodeModelStreamStallError";
+          reject(error);
+        }, timeoutMs);
+      });
+      let next: IteratorResult<ModelStreamEvent>;
+      try {
+        next = await Promise.race([iterator.next(), stall]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+      if (next.done) return;
+      yield next.value;
+    }
+  } finally {
+    // 不 await：卡死的上游迭代器 return 可能永不 settle，等它会阻塞错误传播；
+    // 底层请求的清理由 provider 流自身的 finalize 与调用方 abortSignal 兜底。
+    void iterator.return?.()?.catch?.(() => {});
+  }
+}
+
+/**
  * 流式聚合：与主会话同一 streamText 管道，把增量事件折叠成与 generateText 同形的
  * ModelTextResult。思考增量持续产生 provider 事件，连接不静默——上游不会像对一次性
  * 请求那样在无产出时掐断长思考（日志实测：一次性路径每次尝试 ~55-60s 无产出被断，
@@ -337,6 +380,7 @@ export async function streamModelTextResult(
   model: Model,
   request: ModelRequest,
   onProgress?: (progress: WorkspaceGenerateTextProgress) => void,
+  options?: { stallTimeoutMs?: number },
 ): Promise<{
   text: string;
   finishReason: string;
@@ -360,7 +404,8 @@ export async function streamModelTextResult(
     pushedToolCallIds.add(toolCall.id);
     toolCalls.push(toolCall);
   };
-  for await (const event of model.streamText(request)) {
+  const stallTimeoutMs = options?.stallTimeoutMs ?? MODEL_STREAM_STALL_TIMEOUT_MS;
+  for await (const event of streamWithStallWatchdog(model.streamText(request), stallTimeoutMs)) {
     eventCount += 1;
     if (event.type === "error") throw normalizeStreamError(event.error);
     if (event.type === "text_delta") {
