@@ -73,7 +73,12 @@ function failureDetail(state: Extract<OracleReviewState, { status: "error" }>): 
       return { titleKey: "chat.oracleReview.error.noModel" };
     case "empty-response":
       return {
-        titleKey: "chat.oracleReview.error.emptyResponse",
+        // 以工具调用收尾而无正文：与「思考吃掉预算」是两种成因，文案分开，
+        // 否则用户会按提示去换模型，而真正要做的是拿到一段文本结论。
+        titleKey:
+          failure.finishReason === "tool-calls"
+            ? "chat.oracleReview.error.toolCallNoText"
+            : "chat.oracleReview.error.emptyResponse",
         detail: failure.finishReason,
       };
     case "timeout":

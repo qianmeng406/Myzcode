@@ -391,3 +391,95 @@ test("深度审查进度携带工具目标", async () => {
 
   assert.ok(events.some((e) => e.toolName === "Read" && e.toolTarget === "src/x.ts"));
 });
+
+test("深度审查收尾：轮次用尽且末轮只有工具调用时，追加禁工具收尾轮强制给出结论", async () => {
+  const runtime = {
+    workingDirectory: "/repo",
+    workspaceRoot: "/repo",
+    sessionId: "s",
+    config: {},
+    registry: {
+      get: (name: string) => ({
+        metadata: { name },
+        name,
+        description: "test tool",
+        inputSchema: {},
+        handler: async () => ({ toolCallId: "", toolName: name, success: true, output: "ok" }),
+      }),
+      has: () => true,
+      list: () => ["Read"],
+      toContracts: () => [{ name: "Read", description: "read", inputSchema: {} }],
+    },
+    artifactStore: {},
+    executionPort: {},
+    fileSystemPort: {},
+    imageProcessorPort: {},
+    pdfDocumentPort: {},
+    sessionStore: {},
+    skillPort: undefined,
+  } as unknown as Parameters<typeof runDeepReviewAgentLoop>[0];
+
+  // 动态假模型：前 toolRounds 次调用只调工具、无正文；之后才给结论。
+  // 取 24（= DEEP_REVIEW_MAX_TURNS）以耗尽轮次，触发收尾轮（第 25 次调用）。
+  function toolOnlyUntil(toolRounds: number): Model {
+    let call = 0;
+    return {
+      properties: { inputFormat: "text" },
+      optionSpecs: {
+        reasoningLevel: { values: ["low"] },
+        maxOutputTokens: { min: 1, max: 8192 },
+      },
+      streamText: async function* () {
+        call += 1;
+        if (call <= toolRounds) {
+          yield { type: "tool_call", toolCall: { id: `r${call}`, name: "Read", input: {} } };
+        } else {
+          yield { type: "text_delta", text: "VERDICT: PASS" };
+        }
+        yield finish;
+      },
+    } as unknown as Model;
+  }
+
+  const result = await runDeepReviewAgentLoop(runtime, {
+    messages: [{ role: "user", content: "review" }],
+    model: toolOnlyUntil(24),
+  });
+
+  assert.equal(result.text, "VERDICT: PASS");
+  assert.equal(result.finishReason, "stop");
+  // 收尾轮也计入 usage（25 轮 × 3 output tokens）
+  assert.equal(result.usage.outputTokens, 75);
+});
+
+test("深度审查收尾：已有结论时不再追加收尾轮（省一次请求）", async () => {
+  const runtime = {
+    workingDirectory: "/repo",
+    workspaceRoot: "/repo",
+    sessionId: "s",
+    config: {},
+    registry: {
+      get: () => undefined,
+      has: () => false,
+      list: () => [],
+      toContracts: () => [],
+    },
+    artifactStore: {},
+    executionPort: {},
+    fileSystemPort: {},
+    imageProcessorPort: {},
+    pdfDocumentPort: {},
+    sessionStore: {},
+    skillPort: undefined,
+  } as unknown as Parameters<typeof runDeepReviewAgentLoop>[0];
+
+  const result = await runDeepReviewAgentLoop(runtime, {
+    messages: [{ role: "user", content: "review" }],
+    model: fakeModel([
+      [{ type: "text_delta", text: "VERDICT: WARN" }, { type: "text_delta", text: " ok" }, finish],
+    ]),
+  });
+  assert.equal(result.text, "VERDICT: WARN ok");
+  // 只有一轮：usage 为 3（若追加收尾轮会是 6）
+  assert.equal(result.usage.outputTokens, 3);
+});

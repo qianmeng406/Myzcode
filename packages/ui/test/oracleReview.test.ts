@@ -517,3 +517,13 @@ test("工作区来源的 prompt 如实标注口径（可能含同期其他改动
   assert.ok(turnPrompt.includes("本回合改动（unified diff，全量未裁剪）"));
   assert.ok(!turnPrompt.includes("工作区改动"));
 });
+
+test("审查 prompt 明确禁工具：避免模型以工具调用收尾导致无可解析结论", () => {
+  const prompt = buildOracleReviewPrompt({
+    userRequest: "改文件",
+    diffSections: [{ path: "src/a.ts", text: "--- a/src/a.ts" }],
+    projectName: "demo",
+  });
+  assert.ok(prompt.includes("你没有可用工具"));
+  assert.ok(prompt.includes("不要输出任何工具调用"));
+});

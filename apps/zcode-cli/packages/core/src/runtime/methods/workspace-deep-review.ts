@@ -32,6 +32,12 @@ const DEEP_REVIEW_ALLOWED_TOOLS = new Set(["Read", "Grep", "Glob", "Bash"]);
 // 多轮取证的轮数上限：一次「读若干文件 + 搜索 + 汇总」通常 <10 轮，24 留足余量；
 // 达到上限即以最后一轮正文收尾（解析不到结论会走 empty-response 错误卡片）。
 const DEEP_REVIEW_MAX_TURNS = 24;
+// 收尾轮：轮次用尽时最后一轮常是「工具调用收尾、没有正文」，直接返回会让 UI 报
+// 空正文错误并丢掉整轮调查。此时追加一次禁用工具的收尾生成，强制模型给出结论。
+const DEEP_REVIEW_WRAP_UP_INSTRUCTION =
+  "轮次预算已用尽。请基于以上已完成的调查直接给出最终结论，不要再调用任何工具——你没有可用工具，只输出最终结论正文（按任务要求的规定格式）。";
+// 判定「已给出结论」的宽松特征：命中任一即认为有可解析输出，无需收尾。
+const DEEP_REVIEW_VERDICT_PATTERN = /VERDICT|结论|判定/i;
 
 export interface DeepReviewAgentLoopResult {
   text: string;
@@ -163,6 +169,50 @@ export async function runDeepReviewAgentLoop(
     workingDirectory: runtime.workingDirectory,
     workspaceRoot: runtime.workspaceRoot,
   });
+
+  // 轮次用尽/结束时没有结论特征（典型：最后一轮只调工具没有正文）→ 收尾强制结论。
+  if (!DEEP_REVIEW_VERDICT_PATTERN.test(lastText)) {
+    const wrapUpMessages: ModelInputMessage[] = [
+      ...loopResult.messages,
+      { role: "user", content: DEEP_REVIEW_WRAP_UP_INSTRUCTION },
+    ];
+    currentRound += 1;
+    input.onProgress?.({ outputChars: lastOutputChars, round: currentRound });
+    await runToolAgentLoop({
+      abortSignal: input.abortSignal,
+      executeTool: (toolCall, options) =>
+        executor.execute(toolCall, {
+          signal: options?.abortSignal,
+          traceContext: input.traceContext,
+        }),
+      generate: async (model, request) => {
+        const round = currentRound;
+        roundStartChars = completedRoundsChars;
+        const result = await streamModelTextResult(model, request, (progress) => {
+          lastOutputChars = roundStartChars + progress.outputChars;
+          input.onProgress?.({ outputChars: lastOutputChars, round });
+        });
+        lastText = result.text;
+        lastFinishReason = result.finishReason;
+        totalUsage = sumUsage(totalUsage, result.usage);
+        completedRoundsChars = lastOutputChars;
+        return { text: result.text, toolCalls: result.toolCalls };
+      },
+      // 收尾轮不给工具：模型只能产出正文结论。
+      maxTurns: 1,
+      messages: wrapUpMessages,
+      model: input.model,
+      requestOptions: (model) => ({ ...model.options, ...input.requestOptions }),
+      evaluateToolPolicy: () => ({
+        allowed: false,
+        reason: "Deep review wrap-up: no tools available, output the conclusion directly.",
+      }),
+      rootDir: runtime.workingDirectory,
+      tools: [],
+      workingDirectory: runtime.workingDirectory,
+      workspaceRoot: runtime.workspaceRoot,
+    });
+  }
 
   return {
     text: lastText,
