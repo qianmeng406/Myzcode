@@ -2751,6 +2751,7 @@ const WORKSPACE_GENERATE_TEXT_PROGRESS_INTERVAL_MS = 500;
  */
 function createWorkspaceGenerateTextProgressNotifier(options: {
   notify: ZCodeProtocolAgentServerContext["notify"];
+  logger?: ZCodeProtocolAgentServerContext["logger"];
   operationId: string | undefined;
   workspacePath: string;
   querySource: string;
@@ -2780,9 +2781,14 @@ function createWorkspaceGenerateTextProgressNotifier(options: {
           outputChars: lastChars,
         },
       });
-    } catch {
-      // 进度通知是旁路信号：client 已断开等故障不得向外抛——既不能打断流中的
+    } catch (error) {
+      // 进度通知是旁路信号：client 断开等故障不得向外抛——既不能打断流中的
       // 模型请求（onProgress 调用方），也不能在 finally 里覆盖原始返回值/异常。
+      // notify/messageSink 是同步 void 签名，同步 catch 全覆盖；留 debug 日志定位。
+      options.logger?.debug("ZCode Protocol 流式生成进度通知发送失败", {
+        error: error instanceof Error ? error.message : String(error),
+        querySource: options.querySource,
+      });
     }
   };
   return {
@@ -2806,6 +2812,7 @@ export async function generateWorkspaceText(
   const progressNotifier = params.stream
     ? createWorkspaceGenerateTextProgressNotifier({
         notify: (notification) => context.notify(notification),
+        logger: context.logger,
         operationId: params.operationId,
         workspacePath: params.workspace.workspacePath,
         querySource: params.querySource,
