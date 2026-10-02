@@ -15,6 +15,7 @@ import {
 } from "../src/v4/oracleReview/oracleReviewSupport.js";
 import {
   getOracleReviewState,
+  invalidateOracleReviewSeq,
   isCurrentOracleReviewSeq,
   nextOracleReviewSeq,
   setOracleReviewState,
@@ -177,6 +178,9 @@ test("审查卡片 store：请求代次守卫跨重挂载有效", () => {
   assert.equal(isCurrentOracleReviewSeq("sess-g", second), true);
   // 代次按会话隔离
   assert.equal(isCurrentOracleReviewSeq("sess-h", second), false);
+  // dismiss 作废：invalidate 只推代号次，在飞请求的写回失效，也不开启新请求
+  invalidateOracleReviewSeq("sess-g");
+  assert.equal(isCurrentOracleReviewSeq("sess-g", second), false);
 });
 
 test("parseOracleVerdict 解析标准输出", () => {

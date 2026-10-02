@@ -10,8 +10,12 @@ import type { OracleReviewState } from "./oracleReviewSupport.js";
  * 请求代次守卫也一并搬进来，跨重挂载仍能作废过期请求的写回。
  *
  * 纯内存（Map 随会话数增长，条目极小），冷恢复后卡片消失仍是 V1 接受的边界；
- * 状态回到 idle 时删除条目以收敛内存。
+ * 状态回到 idle 时删除状态条目以收敛内存。代次条目（seqs）**有意**不随 idle
+ * 清理：守卫要求每会话代次严格单调——若 idle 时删除，新请求会从 1 重新计数，
+ * 与仍在飞行的旧请求（代次同为 1）碰撞，过期写回反而重新生效。
  */
+
+const ORACLE_REVIEW_IDLE: OracleReviewState = { status: "idle" };
 
 type OracleReviewListener = (state: OracleReviewState) => void;
 
@@ -20,7 +24,9 @@ const listeners = new Map<string, Set<OracleReviewListener>>();
 const seqs = new Map<string, number>();
 
 export function getOracleReviewState(sessionId: string | null): OracleReviewState {
-  return (sessionId !== null && states.get(sessionId)) || { status: "idle" };
+  // 缺省值用模块级常量：useSyncExternalStore 要求 getSnapshot 引用稳定，
+  // 每次新建对象会触发无限重渲染。
+  return (sessionId !== null && states.get(sessionId)) || ORACLE_REVIEW_IDLE;
 }
 
 export function setOracleReviewState(sessionId: string, next: OracleReviewState): void {
@@ -67,6 +73,11 @@ export function nextOracleReviewSeq(sessionId: string): number {
   const seq = (seqs.get(sessionId) ?? 0) + 1;
   seqs.set(sessionId, seq);
   return seq;
+}
+
+/** 作废该会话当前在飞请求的写回（dismiss 用）：只推代号次，不开启新请求。 */
+export function invalidateOracleReviewSeq(sessionId: string): void {
+  seqs.set(sessionId, (seqs.get(sessionId) ?? 0) + 1);
 }
 
 export function isCurrentOracleReviewSeq(sessionId: string, seq: number): boolean {

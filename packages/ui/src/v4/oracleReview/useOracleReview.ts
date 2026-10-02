@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ModelSelection } from "@zcode/shared";
 import type { ConversationSnapshot, TurnHeaderRow } from "@zcode/shared/zcode-protocol-v4";
 import type { ModelSelectionView } from "@zcode/provider";
@@ -22,6 +22,7 @@ import {
 } from "./oracleReviewSupport.js";
 import {
   getOracleReviewState,
+  invalidateOracleReviewSeq,
   isCurrentOracleReviewSeq,
   nextOracleReviewSeq,
   setOracleReviewState,
@@ -129,7 +130,17 @@ export function useOracleReview(params: {
   const sessionId = params.snapshot?.sessionId ?? null;
   // 卡片状态在模块级 store（按 sessionId 键控）：切走再切回、组件重挂载都不丢；
   // 进行中的审查由请求闭包继续推进并写入 store，与本实例是否挂载无关。
-  const [state, setState] = useState<OracleReviewState>(() => getOracleReviewState(sessionId));
+  // useSyncExternalStore 是外部 store 的规范接法：无并发撕裂窗口，
+  // getSnapshot 返回 store 内的稳定引用（idle 为模块级常量）。
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => subscribeOracleReviewState(sessionId, onStoreChange),
+    [sessionId],
+  );
+  const state = useSyncExternalStore(
+    subscribe,
+    () => getOracleReviewState(sessionId),
+    () => getOracleReviewState(null),
+  );
   // 边沿检测：上一帧 phase；null 表示尚无基线（首帧/会话切换后不触发）。
   const prevPhaseRef = useRef<string | null>(null);
   const autoReviewedTurnRowIdsRef = useRef(new Set<number>());
@@ -137,11 +148,6 @@ export function useOracleReview(params: {
   const snapshotRef = useRef(params.snapshot);
   snapshotRef.current = params.snapshot;
 
-  // 会话切换：视图同步为该会话的存量卡片（无则 idle），并订阅其后续变化。
-  useEffect(() => {
-    setState(getOracleReviewState(sessionId));
-    return subscribeOracleReviewState(sessionId, setState);
-  }, [sessionId]);
   // 边沿基线与自动审查去重随会话切换重置（状态本身不清空——store 持有各会话卡片）。
   useEffect(() => {
     prevPhaseRef.current = null;
@@ -410,6 +416,9 @@ export function useOracleReview(params: {
   const dismiss = useCallback(() => {
     // 只清当前查看会话的卡片；其他会话的存量卡片（含进行中的审查）不受影响。
     if (sessionId !== null) {
+      // 作废该会话在飞请求的写回：dismiss 即用户明确不想要这张卡片，
+      // 进行中的审查完成后不再把卡片顶回来（代次被推高，applyIfCurrent 失效）。
+      invalidateOracleReviewSeq(sessionId);
       setOracleReviewState(sessionId, { status: "idle" });
     }
   }, [sessionId]);
