@@ -31,7 +31,10 @@ const GIT_COMMIT_MESSAGE_QUERY_SOURCE = "git_commit_message";
 // 提示词优化与 Git 提交消息同为「快进快出」的辅助调用：最低推理档 + 辅助预算，
 // 不吃调用方自带的 maxOutputTokens，避免思考模型把小预算烧在推理上输出为空。
 const PROMPT_OPTIMIZER_QUERY_SOURCE = "prompt_optimizer";
-const AUXILIARY_QUERY_SOURCES = new Set([GIT_COMMIT_MESSAGE_QUERY_SOURCE, PROMPT_OPTIMIZER_QUERY_SOURCE]);
+const AUXILIARY_QUERY_SOURCES = new Set([
+  GIT_COMMIT_MESSAGE_QUERY_SOURCE,
+  PROMPT_OPTIMIZER_QUERY_SOURCE,
+]);
 
 export interface WorkspaceGenerateTextInput {
   selection: ModelSelection;
@@ -315,11 +318,13 @@ export async function streamModelTextResult(
   finishReason: string;
   usage: ModelUsage;
   toolCalls?: ModelToolCall[];
-}> {  let text = "";
+}> {
+  let text = "";
   let eventCount = 0;
   let finishReason = "unknown";
   let usage: ModelUsage | undefined;
-  // 正文 + 思考 + 工具输入的累计字符数；进度指示的真实产出证据（非 token 估算）。
+  // 正文与思考增量的累计字符数；进度指示的真实产出证据（非 token 估算）。
+  // 工具输入增量不计入——审查请求不带工具，主流量就是这两类增量。
   let outputChars = 0;
   const toolCalls: ModelToolCall[] = [];
   const pushedToolCallIds = new Set<string>();

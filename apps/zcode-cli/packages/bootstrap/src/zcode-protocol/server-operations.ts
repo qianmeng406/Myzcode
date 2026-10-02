@@ -68,7 +68,6 @@ import {
   zcodeTaskTokenUsageParamsSchema,
   zcodeUsageStatsParamsSchema,
   zcodeWorkspaceGenerateTextParamsSchema,
-  zcodeWorkspaceGenerateTextProgressSchema,
   getConversationMessageProjectionPolicy,
   parseRemoteWorkspaceIdentity,
   type ZCodeAutomationBotDeliveryTarget,
@@ -2746,30 +2745,47 @@ function shouldCloseSessionForExpectedPersistence(
 // 避免长输出把 stdio 通知刷成噪声。
 const WORKSPACE_GENERATE_TEXT_PROGRESS_INTERVAL_MS = 500;
 
+/**
+ * 流式输出进度通知器：窗口内合并增量；flush 供请求收尾补发尾包——没有它，
+ * 最后一个窗口内的增量不会上报，UI 字符数会停在旧值直到结果卡片替换横幅。
+ */
 function createWorkspaceGenerateTextProgressNotifier(options: {
   notify: ZCodeProtocolAgentServerContext["notify"];
   operationId: string | undefined;
   workspacePath: string;
   querySource: string;
-}): (progress: { outputChars: number }) => void {
-  const startedAt = Date.now();
+}): { onProgress: (progress: { outputChars: number }) => void; flush: () => void } {
   let lastEmitAt = 0;
-  return (progress) => {
+  let lastChars = 0;
+  let lastEmittedChars = 0;
+  const emit = (force: boolean) => {
     const now = Date.now();
-    if (lastEmitAt !== 0 && now - lastEmitAt < WORKSPACE_GENERATE_TEXT_PROGRESS_INTERVAL_MS) {
+    if (
+      (!force &&
+        lastEmitAt !== 0 &&
+        now - lastEmitAt < WORKSPACE_GENERATE_TEXT_PROGRESS_INTERVAL_MS) ||
+      lastChars === lastEmittedChars
+    ) {
       return;
     }
     lastEmitAt = now;
+    lastEmittedChars = lastChars;
     options.notify({
       method: zcodeProtocolNotifications.workspaceGenerateTextProgress,
       params: {
         ...(options.operationId ? { operationId: options.operationId } : {}),
         workspacePath: options.workspacePath,
         querySource: options.querySource,
-        outputChars: progress.outputChars,
-        elapsedMs: now - startedAt,
+        outputChars: lastChars,
       },
     });
+  };
+  return {
+    onProgress: (progress) => {
+      lastChars = progress.outputChars;
+      emit(false);
+    },
+    flush: () => emit(true),
   };
 }
 
@@ -2782,6 +2798,14 @@ export async function generateWorkspaceText(
   const active = Array.from(context.sessions.values()).find(
     (record) => record.workspace.workspaceKey === params.workspace.workspaceKey,
   );
+  const progressNotifier = params.stream
+    ? createWorkspaceGenerateTextProgressNotifier({
+        notify: (notification) => context.notify(notification),
+        operationId: params.operationId,
+        workspacePath: params.workspace.workspacePath,
+        querySource: params.querySource,
+      })
+    : null;
   const input = {
     selection: params.selection,
     ...(params.prompt ? { prompt: params.prompt } : {}),
@@ -2798,16 +2822,7 @@ export async function generateWorkspaceText(
     querySource: params.querySource,
     ...(params.maxOutputTokens ? { maxOutputTokens: params.maxOutputTokens } : {}),
     ...(params.stream ? { stream: true } : {}),
-    ...(params.stream
-      ? {
-          onProgress: createWorkspaceGenerateTextProgressNotifier({
-            notify: (notification) => context.notify(notification),
-            operationId: params.operationId,
-            workspacePath: params.workspace.workspacePath,
-            querySource: params.querySource,
-          }),
-        }
-      : {}),
+    ...(progressNotifier ? { onProgress: progressNotifier.onProgress } : {}),
   };
   const app =
     active?.app ??
@@ -2831,6 +2846,8 @@ export async function generateWorkspaceText(
       ...(result.toolCalls ? { toolCalls: result.toolCalls } : {}),
     };
   } finally {
+    // 尾包补发：流结束/出错时把最后一个窗口内未上报的增量发出去。
+    progressNotifier?.flush();
     if (!active) {
       await app.close?.();
     }

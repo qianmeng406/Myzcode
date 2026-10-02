@@ -2140,7 +2140,6 @@ export const zcodeWorkspaceGenerateTextProgressSchema = z
     workspacePath: nonEmptyString,
     querySource: nonEmptyString,
     outputChars: z.number().int().nonnegative(),
-    elapsedMs: z.number().int().nonnegative(),
   })
   .strict();
 export type ZCodeWorkspaceGenerateTextProgress = z.infer<
