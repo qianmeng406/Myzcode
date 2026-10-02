@@ -11,16 +11,18 @@ import {
   ORACLE_TURN_REVIEW_QUERY_SOURCE,
   buildOracleDiffSections,
   buildOracleReviewPrompt,
+  formatOracleCommitLine,
   isOracleDeadlineTimeoutError,
   parseOracleVerdict,
+  resolveOraclePreviousReviewContext,
   type OraclePreviousReviewContext,
   type OracleVerdict,
 } from "./oracleReviewSupport.js";
 
-/** 审查 prompt 附带的最近提交条数：只作「修复可能在早前提交」的对照线索。 */
+/** 审查 prompt 附带的最近提交条数：只作「此前改动可能已在早前提交中」的对照线索。 */
 const RECENT_COMMITS_FOR_REVIEW = 8;
 
-/** 最近提交摘要（hash 前 7 位 + subject）；非 git 工作区/查询失败返回 null，审查照常进行。 */
+/** 最近提交摘要；非 git 工作区/查询失败返回 null，审查照常进行。 */
 async function readRecentCommitSubjects(
   services: ReturnType<typeof useOptionalServices>,
   workspacePath: string,
@@ -32,7 +34,7 @@ async function readRecentCommitSubjects(
       workspacePath,
       maxCount: RECENT_COMMITS_FOR_REVIEW,
     });
-    return graph.commits.map((commit) => `${commit.hash.slice(0, 7)} ${commit.subject}`);
+    return graph.commits.map((commit) => formatOracleCommitLine(commit.hash, commit.subject));
   } catch {
     return null;
   }
@@ -227,16 +229,13 @@ export function useOracleReview(params: {
         setOracleState({ status: "error", mode, failure: { kind: "no-turn" } });
         return;
       }
-      // 跨回合修复核对上下文：上次审查结论只在不同回合的审查时注入（同回合重审注入
-      // 自己的旧结论会锚定审查者）；必须在置 pending 前读取（setOracleState 同步改 ref）。
-      const previousReview: OraclePreviousReviewContext | null =
-        stateRef.current.status === "result" && stateRef.current.turnRowId !== header.rowId
-          ? {
-              verdict: stateRef.current.verdict,
-              summary: stateRef.current.summary,
-              findings: stateRef.current.findings,
-            }
-          : null;
+      // 跨回合对照上下文：注入门槛（上次审查必须是结果态、且本次目标回合在其之后）
+      // 收敛在 resolveOraclePreviousReviewContext 纯函数里；必须在置 pending 前读取
+      // （setOracleState 同步改 ref，晚一行读到的就是 pending 态）。
+      const previousReview: OraclePreviousReviewContext | null = resolveOraclePreviousReviewContext(
+        stateRef.current,
+        header.rowId,
+      );
       const pendingModelLabel = `${requestOptions.selection.providerId}/${requestOptions.selection.modelId}`;
       setOracleState({ status: "pending", mode, modelLabel: pendingModelLabel });
       const requestSeq = requestSeqRef.current + 1;

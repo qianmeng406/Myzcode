@@ -16,6 +16,14 @@ export const ORACLE_REVIEW_REQUEST_TIMEOUT_MS = 600_000;
 // 思考模型的 reasoning 吃光导致空正文（实测 2048 上限 GLM 返回空文本）。
 
 const MAX_USER_REQUEST_CHARS = 4_000;
+// 注入上下文的长度上限：上次结论/提交行不设限会无上限撑大审查 prompt。
+const MAX_PREVIOUS_SUMMARY_CHARS = 200;
+const MAX_PREVIOUS_FINDINGS_CHARS = 2_000;
+const MAX_COMMIT_LINE_CHARS = 120;
+
+function truncateWithEllipsis(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
 
 export interface OracleReviewDiffHunk {
   oldStart: number;
@@ -66,11 +74,48 @@ export function buildOracleDiffSections(
   return sections;
 }
 
-/** 上次审查的结论卡片内容；跨回合修复核对用（同回合重审不注入，防锚定）。 */
+/** 上次审查的结论卡片内容；跨回合修复核对用。 */
 export interface OraclePreviousReviewContext {
   verdict: OracleVerdict;
   summary: string;
   findings: string;
+}
+
+/** 注入判定所需的最小状态形状（OracleReviewState 的结构子集）。 */
+export interface OracleReviewResultLike {
+  status: string;
+  turnRowId?: number;
+  verdict?: OracleVerdict;
+  summary?: string;
+  findings?: string;
+}
+
+/**
+ * 跨回合对照上下文的注入门槛：只在上次审查确有结果、且本次审查的是**其后**的回合
+ * 时注入。同回合重审注入自己的旧结论会锚定审查者；回审更早的回合注入"未来"的结论
+ * 语义颠倒。与目标回合隔了多少个未审查回合不做判断——文案是中性对照（见
+ * buildOracleReviewPrompt），语境错配只损失相关性，不构成捏造主张。
+ */
+export function resolveOraclePreviousReviewContext(
+  previous: OracleReviewResultLike | null | undefined,
+  targetTurnRowId: number,
+): OraclePreviousReviewContext | null {
+  if (!previous || previous.status !== "result" || previous.turnRowId === undefined) {
+    return null;
+  }
+  if (targetTurnRowId <= previous.turnRowId) {
+    return null;
+  }
+  return {
+    verdict: previous.verdict ?? "unknown",
+    summary: truncateWithEllipsis(previous.summary ?? "", MAX_PREVIOUS_SUMMARY_CHARS),
+    findings: truncateWithEllipsis(previous.findings ?? "", MAX_PREVIOUS_FINDINGS_CHARS),
+  };
+}
+
+/** 提交行：hash 前 7 位 + subject（截断到单行上限，防超长 subject 撑大 prompt）。 */
+export function formatOracleCommitLine(hash: string, subject: string): string {
+  return truncateWithEllipsis(`${hash.slice(0, 7)} ${subject}`, MAX_COMMIT_LINE_CHARS);
 }
 
 /**
@@ -94,14 +139,14 @@ export function buildOracleReviewPrompt(params: {
   const contextSections: string[] = [];
   if (params.recentCommits && params.recentCommits.length > 0) {
     contextSections.push(
-      "## 本仓库最近提交（工作区已落盘的历史；相关修复可能在这些提交里而非本次 diff 中，勿仅凭本 diff 判定问题未修）",
+      "## 本仓库最近提交（历史已落盘改动；若疑似问题在本 diff 中未见相关改动，先对照这些提交确认是否已在早前处理，仍无法确认的如实标注不确定）",
       params.recentCommits.join("\n"),
       "",
     );
   }
   if (params.previousReview) {
     contextSections.push(
-      "## 上一次审查的结论（针对更早的改动，仅供对照；用户称已逐条修复，请结合上面 diff 与最近提交核对，不要当作本次结论）",
+      "## 上一次审查的结论（针对更早的改动，仅供对照，不是对本次 diff 的既定结论；若本回合改动声称处理了其中的问题，请对照下方 diff 与最近提交核验是否属实）",
       `裁决：${params.previousReview.verdict}`,
       `总评：${params.previousReview.summary || "（无）"}`,
       `问题清单：`,

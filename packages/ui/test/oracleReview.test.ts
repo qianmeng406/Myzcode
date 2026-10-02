@@ -4,10 +4,12 @@ import {
   buildOracleDiffSections,
   buildOracleFixPrompt,
   buildOracleReviewPrompt,
+  formatOracleCommitLine,
   formatOraclePatch,
   isOracleDeadlineTimeoutError,
   parseOracleVerdict,
   readStoredOracleModelSelection,
+  resolveOraclePreviousReviewContext,
   writeStoredOracleModelSelection,
   type OracleReviewDiffHunk,
 } from "../src/v4/oracleReview/oracleReviewSupport.js";
@@ -56,9 +58,13 @@ test("审查 prompt 注入上次结论与最近提交供跨回合对照", () => 
   assert.ok(prompt.includes("裁决：fail"));
   assert.ok(prompt.includes("- [高] src/a.ts:12 — 空指针"));
   assert.ok(prompt.includes("abc1234 fix(oracle): 空指针"));
-  // 上下文必须标注为对照信息，防止审查者把它当成本次 diff 的既定结论
+  // 上下文必须中性且标注为对照信息：不得捏造用户主张（如「用户称已修复」），
+  // 也不得让审查者把它当成对本次 diff 的既定结论
   assert.ok(prompt.includes("仅供对照"));
-  assert.ok(prompt.includes("勿仅凭本 diff 判定问题未修"));
+  assert.ok(!prompt.includes("用户称"));
+  // diff 段落在上下文段之后：方位词必须说「下方」
+  assert.ok(prompt.includes("对照下方 diff"));
+  assert.ok(prompt.indexOf("上一次审查的结论") < prompt.indexOf("## 本回合改动"));
 });
 
 test("审查 prompt 未提供上下文时不出现对照段落", () => {
@@ -69,6 +75,56 @@ test("审查 prompt 未提供上下文时不出现对照段落", () => {
   });
   assert.ok(!prompt.includes("上一次审查的结论"));
   assert.ok(!prompt.includes("本仓库最近提交"));
+});
+
+test("注入门槛：只向其后回合的审查注入上次结论", () => {
+  const result = {
+    status: "result",
+    turnRowId: 5,
+    verdict: "warn" as const,
+    summary: "s",
+    findings: "f",
+  };
+  // 目标回合在上次审查之后 → 注入
+  assert.deepEqual(resolveOraclePreviousReviewContext(result, 9), {
+    verdict: "warn",
+    summary: "s",
+    findings: "f",
+  });
+  // 同回合重审（防锚定）与回审更早回合（时序颠倒）→ 不注入
+  assert.equal(resolveOraclePreviousReviewContext(result, 5), null);
+  assert.equal(resolveOraclePreviousReviewContext(result, 3), null);
+  // 上次审查非结果态（pending/error/idle）→ 不注入
+  assert.equal(resolveOraclePreviousReviewContext({ status: "pending" }, 9), null);
+  assert.equal(resolveOraclePreviousReviewContext({ status: "error" }, 9), null);
+  assert.equal(resolveOraclePreviousReviewContext(null, 9), null);
+  // 结果态但缺 turnRowId（不应出现，防御）→ 不注入
+  assert.equal(resolveOraclePreviousReviewContext({ status: "result" }, 9), null);
+});
+
+test("注入内容截断：上次结论超长时按上限截断", () => {
+  const context = resolveOraclePreviousReviewContext(
+    {
+      status: "result",
+      turnRowId: 1,
+      verdict: "warn" as const,
+      summary: "长".repeat(300),
+      findings: "问".repeat(3000),
+    },
+    2,
+  );
+  assert.ok(context);
+  assert.equal(context.summary.length, 201); // 200 + 省略号
+  assert.equal(context.findings.length, 2001);
+  assert.ok(context.summary.endsWith("…"));
+  assert.ok(context.findings.endsWith("…"));
+});
+
+test("提交行格式：hash 截 7 位，超长 subject 截断", () => {
+  assert.equal(formatOracleCommitLine("abc1234567890", "修复空指针"), "abc1234 修复空指针");
+  const longLine = formatOracleCommitLine("abc1234", "x".repeat(200));
+  assert.equal(longLine.length, 121); // 120 + 省略号
+  assert.ok(longLine.endsWith("…"));
 });
 
 test("parseOracleVerdict 解析标准输出", () => {
