@@ -40,6 +40,37 @@ test("审查 prompt 在空请求与空 diff 时给出明示", () => {
   assert.ok(prompt.includes("没有可审查的文本差异"));
 });
 
+test("审查 prompt 注入上次结论与最近提交供跨回合对照", () => {
+  const prompt = buildOracleReviewPrompt({
+    userRequest: "逐条修复",
+    diffSections: [{ path: "src/fix.ts", text: "--- a/src/fix.ts\n+++ b/src/fix.ts" }],
+    projectName: "demo",
+    previousReview: {
+      verdict: "fail",
+      summary: "有两处问题",
+      findings: "- [高] src/a.ts:12 — 空指针",
+    },
+    recentCommits: ["abc1234 fix(oracle): 空指针", "def5678 fix(oracle): 命名"],
+  });
+  assert.ok(prompt.includes("上一次审查的结论"));
+  assert.ok(prompt.includes("裁决：fail"));
+  assert.ok(prompt.includes("- [高] src/a.ts:12 — 空指针"));
+  assert.ok(prompt.includes("abc1234 fix(oracle): 空指针"));
+  // 上下文必须标注为对照信息，防止审查者把它当成本次 diff 的既定结论
+  assert.ok(prompt.includes("仅供对照"));
+  assert.ok(prompt.includes("勿仅凭本 diff 判定问题未修"));
+});
+
+test("审查 prompt 未提供上下文时不出现对照段落", () => {
+  const prompt = buildOracleReviewPrompt({
+    userRequest: "新功能",
+    diffSections: [{ path: "src/a.ts", text: "--- a/src/a.ts" }],
+    projectName: "demo",
+  });
+  assert.ok(!prompt.includes("上一次审查的结论"));
+  assert.ok(!prompt.includes("本仓库最近提交"));
+});
+
 test("parseOracleVerdict 解析标准输出", () => {
   const parsed = parseOracleVerdict(
     "VERDICT: FAIL\nSUMMARY: 有一个明显错误\nFINDINGS:\n- [高] src/a.ts:12 — 空指针\n- [低] src/b.ts:3 — 命名",

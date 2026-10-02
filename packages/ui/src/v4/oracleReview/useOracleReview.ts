@@ -13,8 +13,30 @@ import {
   buildOracleReviewPrompt,
   isOracleDeadlineTimeoutError,
   parseOracleVerdict,
+  type OraclePreviousReviewContext,
   type OracleVerdict,
 } from "./oracleReviewSupport.js";
+
+/** 审查 prompt 附带的最近提交条数：只作「修复可能在早前提交」的对照线索。 */
+const RECENT_COMMITS_FOR_REVIEW = 8;
+
+/** 最近提交摘要（hash 前 7 位 + subject）；非 git 工作区/查询失败返回 null，审查照常进行。 */
+async function readRecentCommitSubjects(
+  services: ReturnType<typeof useOptionalServices>,
+  workspacePath: string,
+): Promise<string[] | null> {
+  const gitService = services?.gitService;
+  if (!gitService) return null;
+  try {
+    const graph = await gitService.getCommitGraph({
+      workspacePath,
+      maxCount: RECENT_COMMITS_FOR_REVIEW,
+    });
+    return graph.commits.map((commit) => `${commit.hash.slice(0, 7)} ${commit.subject}`);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Oracle 双模型把关的执行层：回合成功结束（且本回合改过文件）时自动用「把关模型」
@@ -205,6 +227,16 @@ export function useOracleReview(params: {
         setOracleState({ status: "error", mode, failure: { kind: "no-turn" } });
         return;
       }
+      // 跨回合修复核对上下文：上次审查结论只在不同回合的审查时注入（同回合重审注入
+      // 自己的旧结论会锚定审查者）；必须在置 pending 前读取（setOracleState 同步改 ref）。
+      const previousReview: OraclePreviousReviewContext | null =
+        stateRef.current.status === "result" && stateRef.current.turnRowId !== header.rowId
+          ? {
+              verdict: stateRef.current.verdict,
+              summary: stateRef.current.summary,
+              findings: stateRef.current.findings,
+            }
+          : null;
       const pendingModelLabel = `${requestOptions.selection.providerId}/${requestOptions.selection.modelId}`;
       setOracleState({ status: "pending", mode, modelLabel: pendingModelLabel });
       const requestSeq = requestSeqRef.current + 1;
@@ -229,6 +261,7 @@ export function useOracleReview(params: {
           applyIfCurrent({ status: "error", mode, failure: { kind: "no-changes" } });
           return;
         }
+        const recentCommits = await readRecentCommitSubjects(services, params.workspacePath);
         const result = await agentService.generateWorkspaceText({
           workspacePath: params.workspacePath,
           ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
@@ -238,6 +271,8 @@ export function useOracleReview(params: {
             userRequest: findUserRequestBeforeTurn(snapshot, header.rowId),
             diffSections: sections,
             projectName: getPathLeaf(params.workspacePath) || params.workspacePath,
+            previousReview,
+            ...(recentCommits ? { recentCommits } : {}),
           }),
           querySource: ORACLE_TURN_REVIEW_QUERY_SOURCE,
           // 流式传输（与主会话/子代理同一 streamText 管道）。日志观察（2026-10-01

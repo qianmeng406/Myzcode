@@ -66,16 +66,49 @@ export function buildOracleDiffSections(
   return sections;
 }
 
+/** 上次审查的结论卡片内容；跨回合修复核对用（同回合重审不注入，防锚定）。 */
+export interface OraclePreviousReviewContext {
+  verdict: OracleVerdict;
+  summary: string;
+  findings: string;
+}
+
+/**
+ * 上下文注入（仅供对照核验，不是本次 diff 的既定结论）：
+ * - previousReview：上次审查的裁决/摘要/问题清单——修复跨回合时，审查者凭它可以核对
+ *   「声称已修/不成立」是否与 diff 对得上，而不是按「diff 里没有=没修」臆断；
+ * - recentCommits：本仓库最近提交摘要——修复往往落在上一回合的提交里，不在此回合 diff 中。
+ */
 export function buildOracleReviewPrompt(params: {
   userRequest: string;
   diffSections: readonly OracleDiffSection[];
   projectName: string;
+  previousReview?: OraclePreviousReviewContext | null;
+  recentCommits?: readonly string[] | null;
 }): string {
   const userRequest = params.userRequest.trim().slice(0, MAX_USER_REQUEST_CHARS);
   const diffText =
     params.diffSections.length > 0
       ? params.diffSections.map((section) => `### ${section.path}\n${section.text}`).join("\n\n")
       : "（没有可审查的文本差异）";
+  const contextSections: string[] = [];
+  if (params.recentCommits && params.recentCommits.length > 0) {
+    contextSections.push(
+      "## 本仓库最近提交（工作区已落盘的历史；相关修复可能在这些提交里而非本次 diff 中，勿仅凭本 diff 判定问题未修）",
+      params.recentCommits.join("\n"),
+      "",
+    );
+  }
+  if (params.previousReview) {
+    contextSections.push(
+      "## 上一次审查的结论（针对更早的改动，仅供对照；用户称已逐条修复，请结合上面 diff 与最近提交核对，不要当作本次结论）",
+      `裁决：${params.previousReview.verdict}`,
+      `总评：${params.previousReview.summary || "（无）"}`,
+      `问题清单：`,
+      params.previousReview.findings || "（无）",
+      "",
+    );
+  }
   return [
     "你是资深代码审查者（Oracle）。一位编程智能体刚完成一个回合的代码修改，请你独立把关这次修改的质量。",
     "只审查，不执行任何操作；不要提出与本次 diff 无关的重构建议；发现无法从 diff 判断的地方要如实说不确定，不要臆断。",
@@ -85,6 +118,7 @@ export function buildOracleReviewPrompt(params: {
     "## 用户这回合的要求",
     userRequest || "（未找到原始请求文本）",
     "",
+    ...contextSections,
     "## 本回合改动（unified diff，全量未裁剪）",
     diffText,
     "",
