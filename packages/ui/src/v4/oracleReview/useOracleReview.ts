@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { ModelSelection } from "@zcode/shared";
 import type { ConversationSnapshot, TurnHeaderRow } from "@zcode/shared/zcode-protocol-v4";
 import type { ModelSelectionView } from "@zcode/provider";
@@ -11,12 +11,9 @@ import {
   ORACLE_DEEP_REVIEW_TIMEOUT_MS,
   ORACLE_REVIEW_REQUEST_TIMEOUT_MS,
   ORACLE_TURN_REVIEW_QUERY_SOURCE,
-  appendOracleReviewToolEvent,
   buildOracleDiffSections,
   buildOracleReviewPrompt,
-  formatOracleCommitLine,
   isOracleDeadlineTimeoutError,
-  isOracleReviewQuerySource,
   parseOracleVerdict,
   resolveOraclePreviousReviewContext,
   resolveOracleRequestOptions,
@@ -31,6 +28,10 @@ import {
   readOracleWorkspaceDiff,
 } from "./oracleReviewContextFetch.js";
 import {
+  findLastCompletedTurnHeader,
+  useOracleReviewPendingProgress,
+} from "./oracleReviewPendingProgress.js";
+import {
   getOracleReviewState,
   invalidateOracleReviewSeq,
   isCurrentOracleReviewSeq,
@@ -41,23 +42,11 @@ import {
 
 /**
  * Oracle 双模型把关的执行层：回合成功结束（且本回合改过文件）时自动用「把关模型」
- * 复审一次本回合 diff；输入框旁的手动按钮走同一管道重审最近一个已完成回合。
- *
- * 全程复用 prompt_optimizer 同款会话外请求（generateWorkspaceText，不产生消息、
- * 不进历史）；diff 来自 v4 的 conversationFileChangesV4（checkpoint artifact 聚合，
- * 不依赖 git 工作区状态）。卡片状态在模块级 store（oracleReviewStore）按会话键控，
- * 切换会话/重挂载不丢；冷恢复（内存态无持久化）后卡片消失仍是 V1 接受的边界。
+ * 复审本回合 diff；输入框旁按钮与轮尾按钮走同一管道。复用 prompt_optimizer 同款
+ * 会话外请求（generateWorkspaceText，不产生消息）；diff 优先 v4 checkpoint 聚合，
+ * 回合无工具级改动时回退工作区未提交改动（脚本回合）。卡片状态在模块级 store
+ * （oracleReviewStore）按会话键控，切换会话/重挂载不丢；冷恢复后卡片消失是 V1 边界。
  */
-
-function findLastCompletedTurnHeader(snapshot: ConversationSnapshot): TurnHeaderRow | null {
-  for (let index = snapshot.rows.window.length - 1; index >= 0; index -= 1) {
-    const row = snapshot.rows.window[index];
-    if (row?.kind === "turnHeader" && row.state === "completedSuccess") {
-      return row;
-    }
-  }
-  return null;
-}
 
 export function useOracleReview(params: {
   snapshot: ConversationSnapshot | null;
@@ -112,8 +101,8 @@ export function useOracleReview(params: {
       // 即使用户已切到别的会话，切回时卡片仍能显示结果。
       const sid = snapshot.sessionId;
       if (getOracleReviewState(sid).status === "pending") {
-        // 单横幅设计：审查进行中（最长 ~10 分钟）的重复点击只能静默忽略——
-        // 横幅此时显示「审查中」。留痕日志，避免「点了没反应」无从排查。
+        // 单横幅设计：审查进行中重复点击只能静默忽略（横幅显示「审查中」）；
+        // 留痕日志避免「点了没反应」无从排查。
         logger.info("[OracleReview] 已有审查在进行中，忽略本次请求", {
           mode,
           sessionKey: sid,
@@ -126,8 +115,7 @@ export function useOracleReview(params: {
         setOracleReviewState(sid, { status: "error", mode, failure: { kind: "no-turn" }, depth });
         return;
       }
-      // 诊断留痕：逐轮按钮审历史旧轮与默认「最近回合」共用本函数，日志区分入口
-      // 与目标轮，便于把失败归因到具体路径。
+      // 诊断留痕：区分入口（手动/自动/逐轮）与目标轮，便于失败归因。
       logger.info("[OracleReview] 发起回合审查", {
         mode,
         turnRowId: header.rowId,
@@ -141,9 +129,8 @@ export function useOracleReview(params: {
         }
         autoReviewedTurnRowIdsRef.current.add(header.rowId);
       }
-      // 这里不再按 header.fileChanges 提前拒绝：脚本/命令完成的改动不会被 checkpoint
-      // 记录为工具级改动（fileChanges 为空），提前拒绝会让这类回合完全无法审查。
-      // 有无可审查内容由取 diff（含工作区兜底）之后统一判定。
+      // 这里不按 header.fileChanges 提前拒绝：脚本/命令完成的改动不会被 checkpoint
+      // 记录为工具级改动，有无可审查内容由取 diff（含工作区兜底）之后统一判定。
       const requestOptions = resolveOracleRequestOptions(
         params.oracleModel,
         params.modelSelectionView,
@@ -157,11 +144,9 @@ export function useOracleReview(params: {
         setOracleReviewState(sid, { status: "error", mode, failure: { kind: "no-turn" }, depth });
         return;
       }
-      // 跨回合对照上下文：注入门槛（上次审查必须是结果态、且本次目标回合在其之后）
-      // 收敛在 resolveOraclePreviousReviewContext 纯函数里；必须在置 pending 前读取
-      // （pending 写入会覆盖该会话的 result 条目）。
-      // 对照候选先取（必须在置 pending 前读 store）；是否真的注入等请求文本取数
-      // 结果出来后再定——请求文本缺失时对照段会成为唯一"任务线索"，必须抑制。
+      // 跨回合对照上下文：注入门槛收敛在 resolveOraclePreviousReviewContext；对照
+      // 候选必须在置 pending 前读（pending 会覆盖 result 条目），是否注入等请求文本
+      // 取数结果出来再定——请求文本缺失时对照段是唯一"任务线索"，必须抑制。
       const previousReviewCandidate: OraclePreviousReviewContext | null =
         resolveOraclePreviousReviewContext(getOracleReviewState(sid), header.rowId);
       const pendingModelLabel = `${requestOptions.selection.providerId}/${requestOptions.selection.modelId}`;
@@ -182,9 +167,9 @@ export function useOracleReview(params: {
           baseRevision: snapshot.revision,
           baseLogEpoch: snapshot.logEpoch,
         });
-        // diff 来源：优先该回合的工具级改动记录（Edit/Write 产物）；为空的常见原因是
-        // 改动由脚本/命令（Bash）完成——此时回退到工作区相对 HEAD 的未提交改动，
-        // 否则脚本回合完全无法审查（标准审查直接拒绝、深度审查同样被挡）。
+        // diff 来源：优先该回合的工具级改动记录（Edit/Write 产物）；为空的常见原因
+        // 是脚本/命令（Bash）完成改动——回退工作区相对 HEAD 的未提交改动，否则脚本
+        // 回合完全无法审查（标准审查直接拒绝、深度审查同样被挡）。
         let sections = buildOracleDiffSections(fileChanges.items);
         let diffSource: "turn" | "workspace" = "turn";
         if (sections.length === 0) {
@@ -258,11 +243,8 @@ export function useOracleReview(params: {
           }),
           querySource:
             depth === "deep" ? ORACLE_DEEP_REVIEW_QUERY_SOURCE : ORACLE_TURN_REVIEW_QUERY_SOURCE,
-          // 流式传输（与主会话/子代理同一 streamText 管道）。日志观察（2026-10-01
-          // 23:26-23:36，~/.zcode/v2/logs/）：一次性请求路径 8 次尝试均在 ~55-60s
-          // 无产出后终止（客户端各超时均 ≥180s，可排除客户端超时）；推断为上游对
-          // 静默连接的容忍窗口。流式的思考增量使连接持续活跃，避开该窗口。
-          // 指纹头同源——审查请求本就走同一套 provider runtime headers。
+          // 流式传输：一次性请求路径实测 8 次尝试均在 ~55-60s 无产出后被上游掐断
+          // （客户端各超时均 ≥180s 可排除）；流式的思考增量让连接持续活跃避开该窗口。
           stream: true,
           // 深度审查：只读子代理多轮取证（core 忽略单轮 stream 语义，逐轮内部流式）。
           ...(depth === "deep" ? { agentic: true } : {}),
@@ -322,10 +304,9 @@ export function useOracleReview(params: {
           workspacePath: params.workspacePath,
           error: message,
         });
-        // 客户端 deadline 到点（协议 client 的专属错误类型，RPC 层保留 name）：
-        // 日志实测此时模型侧多为「每次尝试约 60s 无首 token 被掐 + 指数退避重试」
-        // 循环（渠道限流或深思考无产出），干等不会好转，给专门文案指引换把关模型。
-        // AbortError / ETIMEDOUT / 服务端自带 timeout 字样的错误不进此分支，走通用失败语。
+        // 客户端 deadline 到点（协议 client 专属错误类型）：日志实测模型侧多为
+        // 「~60s 无首 token 被掐 + 指数退避重试」循环（限流/深思考无产出），干等
+        // 无好转，给专门文案指引换把关模型。AbortError/ETIMEDOUT/服务端 timeout 走通用失败语。
         const isTimeout = isOracleDeadlineTimeoutError(error);
         applyIfCurrent({
           status: "error",
@@ -364,74 +345,13 @@ export function useOracleReview(params: {
     void reviewTurn("auto");
   }, [phase, reviewTurn]);
 
-  // 审查等待时长：pending 期间每秒跳一次，让用户确认「还在跑」。
-  const [pendingElapsedSeconds, setPendingElapsedSeconds] = useState(0);
-  const pendingStartedAtRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (state.status !== "pending") {
-      pendingStartedAtRef.current = null;
-      setPendingElapsedSeconds(0);
-      return;
-    }
-    if (pendingStartedAtRef.current === null) {
-      pendingStartedAtRef.current = Date.now();
-    }
-    const startedAt = pendingStartedAtRef.current;
-    const tick = () => {
-      setPendingElapsedSeconds(Math.max(0, Math.round((Date.now() - startedAt) / 1000)));
-    };
-    tick();
-    const timer = window.setInterval(tick, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [state.status]);
-
-  // 流式输出进度：CLI 把正文+思考的累计字符数（深度审查附轮次/工具名）按节流窗口
-  // 推给宿主，经 onDynamicWorkspaceGenerateTextProgress 全局事件转发到这里；按
-  // querySource（标准+深度两个来源）+ workspacePath 认领本 hook 发起的请求。
-  const [pendingOutputChars, setPendingOutputChars] = useState(0);
-  useEffect(() => {
-    if (state.status !== "pending") {
-      setPendingOutputChars(0);
-      return;
-    }
-    const event = services?.zcodeAgentService.onDynamicWorkspaceGenerateTextProgress();
-    if (!event) {
-      return;
-    }
-    const disposable = event((progress) => {
-      if (!isOracleReviewQuerySource(progress.querySource)) return;
-      if (progress.workspacePath !== params.workspacePath) return;
-      setPendingOutputChars(progress.outputChars);
-      // 深度审查的轮次/工具名/工具事件写进 store 的 pending 条目（工具执行阶段带
-      // toolName，生成阶段不带——直接赋值让上一次的工具名随新轮次清空）。
-      const hasToolEvent = Boolean(progress.toolName);
-      if (sessionId !== null && (progress.round !== undefined || hasToolEvent)) {
-        const current = getOracleReviewState(sessionId);
-        if (current.status === "pending") {
-          const toolEvents =
-            hasToolEvent && progress.toolName
-              ? appendOracleReviewToolEvent(current.toolEvents ?? [], {
-                  round: progress.round ?? current.round ?? 1,
-                  toolName: progress.toolName,
-                  ...(progress.toolTarget ? { target: progress.toolTarget } : {}),
-                })
-              : current.toolEvents;
-          setOracleReviewState(sessionId, {
-            ...current,
-            ...(progress.round !== undefined ? { round: progress.round } : {}),
-            toolName: progress.toolName,
-            toolTarget: progress.toolTarget,
-            ...(toolEvents ? { toolEvents } : {}),
-          });
-        }
-      }
-    });
-    return () => {
-      disposable.dispose();
-    };
-  }, [state.status, services, params.workspacePath, sessionId]);
+  // pending 期间的等待计时与流式进度订阅（从主 hook 拆出控制行数）。
+  const { pendingElapsedSeconds, pendingOutputChars } = useOracleReviewPendingProgress({
+    state,
+    services,
+    workspacePath: params.workspacePath,
+    sessionId,
+  });
 
   const manualReview = useCallback(() => {
     void reviewTurn("manual");
@@ -445,6 +365,13 @@ export function useOracleReview(params: {
   const reviewTurnHeader = useCallback(
     (header: TurnHeaderRow) => {
       void reviewTurn("manual", header);
+    },
+    [reviewTurn],
+  );
+
+  const reviewTurnHeaderDeep = useCallback(
+    (header: TurnHeaderRow) => {
+      void reviewTurn("manual", header, "deep");
     },
     [reviewTurn],
   );
@@ -467,6 +394,7 @@ export function useOracleReview(params: {
     manualReview,
     deepReview,
     reviewTurnHeader,
+    reviewTurnHeaderDeep,
     dismiss,
   };
 }

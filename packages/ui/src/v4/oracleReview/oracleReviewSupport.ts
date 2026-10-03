@@ -481,6 +481,8 @@ export interface OracleReviewController {
   /** 深度审查（只读子代理多轮取证）：仅手动入口，成本数倍于标准审查。 */
   deepReview: () => void;
   reviewTurnHeader: (header: TurnHeaderRow) => void;
+  /** 轮尾工具栏的深度审查入口：与 reviewTurnHeader 同一准入条件。 */
+  reviewTurnHeaderDeep: (header: TurnHeaderRow) => void;
   dismiss: () => void;
   /** 把关模型偏好（localStorage 全局）；下拉的受控值。 */
   model: ModelSelection | null;

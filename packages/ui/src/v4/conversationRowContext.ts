@@ -175,6 +175,8 @@ export interface ConversationRowRenderContext {
   ) => Promise<V4ConversationFileChangesResult>;
   /** 轮尾工具栏「审查这一回合」：SessionPane 绑定 Oracle hook；缺席即不渲染按钮。 */
   reviewTurn?: (header: TurnHeaderRow) => void;
+  /** 轮尾工具栏「深度审查这一回合」：与 reviewTurn 同准入条件，走只读子代理多轮取证。 */
+  reviewTurnDeep?: (header: TurnHeaderRow) => void;
   previewFileRewind?: (
     target: ConversationRowTarget,
   ) => Promise<V4ConversationFileRewindPreviewResult>;

@@ -1442,6 +1442,17 @@ function ConversationTurnGroupImpl({
                     }
                   : undefined
               }
+              onReviewTurnDeep={
+                context.reviewTurnDeep &&
+                unit.header?.entityId &&
+                unit.header.state === "completedSuccess" &&
+                ((unit.header.fileChanges?.files ?? 0) > 0 || hasTurnToolActivity) &&
+                unit.header.fileChanges?.state !== "reverted"
+                  ? () => {
+                      if (unit.header) context.reviewTurnDeep?.(unit.header);
+                    }
+                  : undefined
+              }
               hookInvocations={unit.hookInvocations}
               turnId={unit.turnId}
               className="opacity-0 transition-opacity group-hover/assistant-turn:opacity-100 focus-within:opacity-100"

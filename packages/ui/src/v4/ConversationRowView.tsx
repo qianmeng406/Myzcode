@@ -11,6 +11,7 @@ import {
   GitBranchIcon,
   GoalIcon,
   PencilIcon,
+  ScanSearchIcon,
   ShieldCheckIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,
@@ -28,6 +29,7 @@ import {
   TID_V4_FEEDBACK_LIKE,
   TID_V4_FORK,
   TID_V4_ORACLE_REVIEW,
+  TID_V4_ORACLE_REVIEW_DEEP,
   TID_V4_ROW,
   TID_V4_ROW_ATTACHMENTS,
   testId,
@@ -1321,6 +1323,7 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
   onFork,
   onFeedbackChange,
   onReviewTurn,
+  onReviewTurnDeep,
   className,
 }: {
   rowId: number;
@@ -1336,6 +1339,8 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
   onFeedbackChange?: AssistantFeedbackHandler;
   /** 审查这一回合：由轮尾装配处按「已完成 + 有 diff」裁决后传入；缺席即不渲染。 */
   onReviewTurn?: () => void;
+  /** 深度审查这一回合：与 onReviewTurn 同准入条件，走只读子代理多轮取证。 */
+  onReviewTurnDeep?: () => void;
   className?: string;
 }) {
   const { intl, locale } = useZCodeIntl();
@@ -1465,6 +1470,17 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
           onClick={onReviewTurn}
         >
           <ShieldCheckIcon className="size-3.5" />
+        </MessageAction>
+      ) : null}
+      {onReviewTurnDeep ? (
+        <MessageAction
+          aria-label={intl.formatMessage({ id: "chat.oracleReview.reviewDepth.deep" })}
+          label={intl.formatMessage({ id: "chat.oracleReview.reviewDepth.deep" })}
+          tooltip={intl.formatMessage({ id: "chat.oracleReview.reviewDepth.deep" })}
+          data-testid={testId(TID_V4_ORACLE_REVIEW_DEEP, String(rowId))}
+          onClick={onReviewTurnDeep}
+        >
+          <ScanSearchIcon className="size-3.5" />
         </MessageAction>
       ) : null}
       {onFork && entityId ? (
