@@ -102,6 +102,9 @@ test("深度审查 prompt 追加只读取证指引，标准审查不含", () => 
   assert.ok(deep.includes("只读工具"));
   assert.ok(deep.includes("git log"));
   assert.ok(deep.includes("VERDICT: PASS|WARN|FAIL")); // 输出格式与标准审查一致
+  // 深度审查不出现"无工具"禁令：与只读工具开放自相矛盾会让模型放弃取证（实测）。
+  assert.ok(!deep.includes("你没有可用工具"));
+  assert.ok(deep.includes("不要以工具调用作为最后一轮的结束"));
 
   const standard = buildOracleReviewPrompt({
     userRequest: "修复登录按钮",
@@ -109,6 +112,8 @@ test("深度审查 prompt 追加只读取证指引，标准审查不含", () => 
     projectName: "demo",
   });
   assert.ok(!standard.includes("深度审查指引"));
+  // 标准审查保留"无工具"禁令（防 tool-calls 空响应）。
+  assert.ok(standard.includes("你没有可用工具"));
 });
 
 test("注入门槛：只向其后回合的审查注入上次结论", () => {
