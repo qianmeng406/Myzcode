@@ -2116,7 +2116,7 @@ function ConversationComposerImpl({
   const optimizePromptTitle = intl.formatMessage({ id: "chat.composer.optimizePrompt" });
   // ✨ 旁的下拉：优化用模型清单（按 provider 分组）。没有可用模型时整个下拉不渲染。
   // Oracle 复用同一份模型清单；推理档两者取向相反：优化取最低档走辅助快速通道，
-  // Oracle 取最高档让把关模型尽量深想。
+  // Oracle 由用户在档位子菜单里自选（默认跟随模型档位，见 resolveOracleRequestOptions）。
   const optimizerModelGroups = useMemo(
     () =>
       (modelSelectionView?.providers ?? [])
@@ -2132,10 +2132,6 @@ function ConversationComposerImpl({
             // 全量档位：把关模型下拉的档位子菜单用（不再自动顶最高档后，
             // 强度控制交还用户，见 resolveOracleRequestOptions）。
             reasoningLevels: model.config.optionSpecs.reasoningLevel?.values ?? [],
-            oracleReasoningLevel:
-              model.config.optionSpecs.reasoningLevel?.values[
-                (model.config.optionSpecs.reasoningLevel?.values.length ?? 1) - 1
-              ],
           })),
         })),
     [modelSelectionView],
@@ -2316,12 +2312,27 @@ function ConversationComposerImpl({
                           oracleReview.model?.providerId === group.key &&
                           oracleReview.model.modelId === model.modelId;
                         const hasLevels = model.reasoningLevels.length > 0;
+                        // 无公开推理档的模型（非推理模型/渠道未暴露 optionSpec）回退为
+                        // 普通条目直接选中——SubTrigger 没有子菜单内容时不可选，会回归。
+                        if (!hasLevels) {
+                          return (
+                            <DropdownMenuItem
+                              key={model.modelId}
+                              onSelect={() =>
+                                oracleReview.onSelectModel({
+                                  providerId: group.key,
+                                  modelId: model.modelId,
+                                })
+                              }
+                            >
+                              <span className="min-w-0 flex-1 truncate">{model.modelId}</span>
+                              {selected ? <CheckIcon className="size-3.5 shrink-0" /> : null}
+                            </DropdownMenuItem>
+                          );
+                        }
                         return (
                           <DropdownMenuSub key={model.modelId}>
-                            <DropdownMenuSubTrigger
-                              disabled={false}
-                              className={cn("gap-2", !hasLevels && "pointer-events-none")}
-                            >
+                            <DropdownMenuSubTrigger className="gap-2">
                               <span className="min-w-0 flex-1 truncate">{model.modelId}</span>
                               {selected ? <CheckIcon className="size-3.5 shrink-0" /> : null}
                             </DropdownMenuSubTrigger>

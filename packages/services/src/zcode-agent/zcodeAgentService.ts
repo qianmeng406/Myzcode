@@ -419,8 +419,8 @@ const WORKSPACE_GENERATE_TEXT_CANCEL_BUFFER_MS = 5_000;
 // 若 RPC 先于 signal 超时，finally 会先摘掉 signal 的 cancel 监听器，取消永远发不出去，
 // CLI 侧循环成为孤儿（实测：审查烧满 deadline 后 CLI 侧多跑 3 分钟直到进程退出）。
 const WORKSPACE_GENERATE_TEXT_CANCEL_SLACK_MS = 30_000;
-// 在飞的 workspace generateText 操作登记（workspaceKey:querySource → 取消函数）：
-// UI 的审查卡片 ✕ 经 cancelWorkspaceGenerateText 主动取消在飞审查。
+// 在飞的 workspace generateText 操作登记（workspaceKey:remoteSessionId:querySource →
+// 取消函数）：UI 的审查卡片 ✕ 经 cancelWorkspaceGenerateText 主动取消在飞审查。
 const workspaceGenerateTextCancelTargets = new Map<string, () => Promise<boolean>>();
 
 function supportsLegacyRemoteTaskAllowlist(workspaceIdentity: string | undefined): boolean {
@@ -4407,23 +4407,31 @@ export function createZCodeAgentService(
           ? AbortSignal.timeout(params.requestTimeoutMs + WORKSPACE_GENERATE_TEXT_CANCEL_BUFFER_MS)
           : undefined);
       const operationId = signal ? randomUUID() : undefined;
-      const cancelOnce = async (): Promise<boolean> => {
-        if (!operationId) return false;
-        const result = await client.request(
-          zcodeProtocolMethods.workspaceCancelGenerateText,
-          { operationId },
-          zcodeWorkspaceCancelGenerateTextResultSchema,
-          { timeoutMs: 5_000 },
-        );
-        if (!result.cancelled) {
-          // cancelled:false = operationId 未配对（CLI 侧 controller 缺席）——
-          // 孤儿循环将继续烧 token，必须留痕归因。
-          logger.warn("workspace 模型请求取消未命中（operationId 未配对）", {
-            operationId,
-            workspaceKey: resolveWorkspaceKey(params),
-          });
-        }
-        return result.cancelled;
+      // in-flight 去重：横幅 ✕ 连点、dismiss 与 signal abort 同帧触发时只发一次
+      // cancel RPC（settle 后窗口关闭，再点仍可重发——重试语义保留）。
+      let cancelInFlight: Promise<boolean> | null = null;
+      const cancelOnce = (): Promise<boolean> => {
+        if (!operationId) return Promise.resolve(false);
+        cancelInFlight ??= (async () => {
+          const result = await client.request(
+            zcodeProtocolMethods.workspaceCancelGenerateText,
+            { operationId },
+            zcodeWorkspaceCancelGenerateTextResultSchema,
+            { timeoutMs: 5_000 },
+          );
+          if (!result.cancelled) {
+            // cancelled:false = operationId 未配对（CLI 侧 controller 缺席）——
+            // 孤儿循环将继续烧 token，必须留痕归因。
+            logger.warn("workspace 模型请求取消未命中（operationId 未配对）", {
+              operationId,
+              workspaceKey: resolveWorkspaceKey(params),
+            });
+          }
+          return result.cancelled;
+        })().finally(() => {
+          cancelInFlight = null;
+        });
+        return cancelInFlight;
       };
       const cancel = () => {
         cancelOnce().catch((error: unknown) => {
@@ -4437,8 +4445,11 @@ export function createZCodeAgentService(
         });
       };
       // 在飞操作登记：供 cancelWorkspaceGenerateText 从 UI（审查卡片 ✕）主动取消。
-      // 同 workspace+querySource 后到覆盖先到（审查是单横幅语义，先到的已在收尾）。
-      const cancelTargetKey = `${resolveWorkspaceKey(params)}:${params.querySource}`;
+      // 键含 remoteSessionId：同一 workspace 可同时开多个会话、各自审查同源
+      // （如两张标准审查横幅），不带会话维度会跨会话误杀。同会话内后到覆盖先到
+      // （审查是单横幅语义，被覆盖的先到请求其卡片已被新 pending 顶掉，✕ 只作用于
+      // 可见卡片）；先到的收尾用身份比对摘除登记，不会误删后到者的登记。
+      const cancelTargetKey = `${resolveWorkspaceKey(params)}:${params.remoteSessionId ?? ""}:${params.querySource}`;
       if (operationId) {
         workspaceGenerateTextCancelTargets.set(cancelTargetKey, cancelOnce);
       }
@@ -4488,11 +4499,20 @@ export function createZCodeAgentService(
     },
 
     async cancelWorkspaceGenerateText(params) {
-      // UI（审查卡片 ✕）主动取消：按 workspace+querySource 找到在飞操作的取消函数。
-      // 未命中（无在飞/已收尾）返回 false，调用方按幂等处理。
-      const key = `${resolveWorkspaceKey(params)}:${params.querySource}`;
+      // UI（审查卡片 ✕）主动取消：按 workspace+remoteSessionId+querySource 找到在飞
+      // 操作的取消函数。未命中（无在飞/已收尾/键不一致）返回 false 并落 debug 留痕——
+      // 键两侧须由同一组字段拼出（remoteSessionId 空缺两侧一致为空串），否则取消会
+      // 静默失效，这里提供归因线索。
+      const key = `${resolveWorkspaceKey(params)}:${params.remoteSessionId ?? ""}:${params.querySource}`;
       const cancelOnce = workspaceGenerateTextCancelTargets.get(key);
-      if (!cancelOnce) return false;
+      if (!cancelOnce) {
+        logger.debug(undefined, "workspace 模型请求主动取消未命中（无在飞登记）", {
+          workspaceKey: resolveWorkspaceKey(params),
+          remoteSessionId: params.remoteSessionId ?? null,
+          querySource: params.querySource,
+        });
+        return false;
+      }
       try {
         return await cancelOnce();
       } catch (error) {
