@@ -151,8 +151,7 @@ const zhCN: Record<string, string> = {
   "chat.oracleReview.reviewDepth.standard": "标准审查",
   "chat.oracleReview.reviewDepth.deep": "深度审查",
   "chat.oracleReview.reviewTurn": "审查该轮diff",
-  "chat.oracleReview.reviewTurnDeep":
-    "深度审查该轮diff（只读子代理多轮取证，耗时与成本数倍）",
+  "chat.oracleReview.reviewTurnDeep": "深度审查该轮diff（只读子代理多轮取证，耗时与成本数倍）",
   "chat.oracleReview.pending": "{model} 审查中…（已等待 {minutes}:{seconds}）",
   "chat.oracleReview.pendingOutput": "已输出 {chars} 字符",
   "chat.oracleReview.pendingDeep":
@@ -5703,6 +5702,10 @@ const zhCN: Record<string, string> = {
   "chat.elicitation.customAnswer.placeholder": "输入你的回答...",
   "chat.elicitation.noAnswerProvided": "未提供回答",
   "chat.elicitation.noQuestions": "没有可回答的问题。",
+  "chat.elicitation.planExecutionModel": "执行模型",
+  "chat.elicitation.planExecutionFollow": "跟随会话模型",
+  "chat.elicitation.planExecutionThought": "推理档",
+  "chat.elicitation.planExecutionThoughtDefault": "默认档位",
   "chat.elicitation.dismiss": "忽略",
   "chat.elicitation.continue": "继续",
   "chat.elicitation.review": "检查",

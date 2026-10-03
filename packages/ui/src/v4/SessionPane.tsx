@@ -4617,6 +4617,7 @@ export function SessionPane({
           remoteSessionId={remoteSessionId ?? undefined}
           provider={provider}
           snapshot={snapshot}
+          modelSelectionView={modelSelectionView}
         />
       ) : null}
       {composerNode}

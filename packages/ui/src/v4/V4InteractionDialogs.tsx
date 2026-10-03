@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ZCodeElicitationRequest, ZCodePermissionOption, ZCodeProvider } from "@zcode/shared";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ZCodePermissionOption, ZCodeProvider } from "@zcode/shared";
 import type { ConversationSnapshot } from "@zcode/shared/zcode-protocol-v4";
-import { ElicitationDialog } from "@/ElicitationDialog.js";
+import type { ModelSelectionView } from "@zcode/provider";
+import type { PlanExecutionModelChoice, PlanExecutionModelGroup } from "@/ElicitationDialog.js";
 import { PermissionDialog } from "@/PermissionDialog.js";
 import { useOptionalPlatform } from "@/hooks/usePlatform.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -20,9 +21,9 @@ import { pendingCommandRegistry } from "@/v4/pendingCommandRegistry.js";
 import { sendInteractionAutoResolutionSnooze } from "@/v4/interactionAutoResolutionCommand.js";
 import {
   pendingPermissionToLegacyRequest,
-  pendingUserInputToElicitationRequest,
   pendingUserInputToViewModel,
 } from "@/v4/pendingInteractionAdapter.js";
+import { V4PlanElicitationDialog } from "@/v4/V4PlanElicitationDialog.js";
 import { V4UserInputDialog } from "@/v4/V4UserInputDialog.js";
 import { useV4Conversation } from "@/v4/V4ConversationContext.js";
 
@@ -33,6 +34,8 @@ interface V4InteractionDialogsProps {
   remoteSessionId?: string;
   provider?: ZCodeProvider;
   snapshot: ConversationSnapshot | null;
+  /** 计划批准卡片「执行模型」下拉候选目录；缺席时下拉不渲染（跟随会话模型）。 */
+  modelSelectionView?: ModelSelectionView | null;
   onCommandSettled?: (commandId: string) => void;
   onPlanInteractionAccepted?: (interactionId: string) => void;
 }
@@ -42,21 +45,6 @@ function getCurrentSessionInteractionSnapshot(
   snapshot: ConversationSnapshot | null,
 ): ConversationSnapshot | null {
   return snapshot?.sessionId === sessionId ? snapshot : null;
-}
-
-function resolveV4ElicitationRequest(
-  projected: ZCodeElicitationRequest | null,
-  botProgress: ZCodeElicitationRequest | null,
-): ZCodeElicitationRequest | null {
-  // Bugfix：V4 snapshot 只保留原始阻塞请求，Bot 代答后的逐题进度必须覆盖同一 request 的投影。
-  if (projected && botProgress?.requestId === projected.requestId) {
-    return botProgress;
-  }
-  return projected;
-}
-
-function buildV4ElicitationProgressKey(request: ZCodeElicitationRequest): string {
-  return `${request.requestId}:${request.currentQuestionIndex ?? 0}:${JSON.stringify(request.answerDrafts ?? {})}`;
 }
 
 interface InteractionAutoResolutionIntentTracker {
@@ -96,6 +84,7 @@ export function V4InteractionDialogs({
   remoteSessionId,
   provider,
   snapshot,
+  modelSelectionView,
   onCommandSettled,
   onPlanInteractionAccepted,
 }: V4InteractionDialogsProps) {
@@ -188,6 +177,22 @@ export function V4InteractionDialogs({
   } | null>(null);
   const permissionResponseFlight = useRef<string | null>(null);
 
+  // 计划批准卡片的执行模型候选：全量推理档都列出（执行取向交给用户，不预绑高低档）。
+  const planExecutionModelGroups = useMemo<PlanExecutionModelGroup[]>(
+    () =>
+      (modelSelectionView?.providers ?? [])
+        .filter((provider) => provider.models.length > 0)
+        .map((provider) => ({
+          providerId: provider.providerId,
+          providerName: provider.providerName ?? undefined,
+          models: provider.models.map((model) => ({
+            modelId: model.modelId,
+            reasoningLevels: model.config.optionSpecs.reasoningLevel?.values ?? [],
+          })),
+        })),
+    [modelSelectionView],
+  );
+
   const resolveInteraction = useCallback(
     async (
       interactionId: string,
@@ -196,6 +201,8 @@ export function V4InteractionDialogs({
         freeText?: string;
         action?: "accept" | "decline" | "cancel";
         content?: Record<string, unknown>;
+        // plan-approval 专用：批准时指定的执行模型（含推理档），与批准决定单命令原子到达。
+        modelSelection?: PlanExecutionModelChoice;
       },
     ) => {
       const envelope = createCommandEnvelope({
@@ -354,59 +361,30 @@ export function V4InteractionDialogs({
     );
   }
 
-  const projectedElicitationRequest = pendingUserInputToElicitationRequest(sessionId, {
-    ...pending,
-    payload: pending.payload,
-  });
-  const elicitationRequest = resolveV4ElicitationRequest(
-    projectedElicitationRequest,
-    botElicitationProgress,
-  );
-  if (elicitationRequest) {
-    const isExitPlanMode = pending.payload.toolName?.trim().toLowerCase() === "exitplanmode";
-    const isAskUserQuestion =
-      pending.payload.toolName?.trim().toLowerCase() === "askuserquestion" ||
-      pending.autoResolution !== undefined;
+  const projectedElicitation = pending.payload.kind === "userInput";
+  if (projectedElicitation) {
     return (
-      <ElicitationDialog
-        key={buildV4ElicitationProgressKey(elicitationRequest)}
-        request={elicitationRequest}
-        initialFormDraft={
-          botElicitationProgress?.requestId === elicitationRequest.requestId
-            ? undefined
-            : localElicitationDraft
-        }
-        onFormDraftChange={persistElicitationDraft}
-        autoResolution={isAskUserQuestion ? pending.autoResolution : undefined}
-        onFirstInteraction={
-          isAskUserQuestion
-            ? (source) => {
-                if (!loggedSnoozeSourceIdsRef.current.has(pending.interactionId)) {
-                  loggedSnoozeSourceIdsRef.current.add(pending.interactionId);
-                  logger.debug("[v4-interaction] AskUserQuestion 请求暂停自动结束", {
-                    interactionId: pending.interactionId,
-                    source,
-                  });
-                }
-                autoResolutionIntentRef.current.markInteracted(pending.interactionId);
-                return sendSnoozeOnce(pending.interactionId, Boolean(pending.autoResolution));
-              }
-            : undefined
-        }
-        onRespond={(_requestId, action, content) => {
-          void resolveInteraction(pending.interactionId, {
-            action,
-            ...(content ? { content } : {}),
-          }).then((accepted) => {
-            if (!accepted) return;
-            removeElicitationDraft(pending.interactionId);
-            if (isExitPlanMode) {
-              // Plan 回执 ACK 与 replayable pending 清场是两条异步路径。
-              // 这里只上报已接受的 Plan interaction，由手机 pane 在仍读到旧权威状态时触发恢复。
-              onPlanInteractionAccepted?.(pending.interactionId);
-            }
-          });
+      <V4PlanElicitationDialog
+        sessionId={sessionId}
+        pending={pending}
+        botElicitationProgress={botElicitationProgress}
+        localElicitationDraft={localElicitationDraft}
+        persistElicitationDraft={persistElicitationDraft}
+        removeElicitationDraft={removeElicitationDraft}
+        planExecutionModelGroups={planExecutionModelGroups}
+        onFirstInteraction={(source) => {
+          if (!loggedSnoozeSourceIdsRef.current.has(pending.interactionId)) {
+            loggedSnoozeSourceIdsRef.current.add(pending.interactionId);
+            logger.debug("[v4-interaction] AskUserQuestion 请求暂停自动结束", {
+              interactionId: pending.interactionId,
+              source,
+            });
+          }
+          autoResolutionIntentRef.current.markInteracted(pending.interactionId);
+          return sendSnoozeOnce(pending.interactionId, Boolean(pending.autoResolution));
         }}
+        resolveInteraction={resolveInteraction}
+        onPlanInteractionAccepted={onPlanInteractionAccepted}
       />
     );
   }

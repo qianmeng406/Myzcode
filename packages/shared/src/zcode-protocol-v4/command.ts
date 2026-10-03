@@ -184,6 +184,10 @@ export const commandPayloadSchemas = {
       // optionId/freeText 兼容路径，旧客户端行为不变。
       action: z.enum(["accept", "decline", "cancel"]).optional(),
       content: z.record(z.string(), z.unknown()).optional(),
+      // plan-approval 专用：批准时指定的执行模型（含推理档）。仅 accept 且带值时
+      // CLI 才切换；缺省 = 跟随会话模型（现行行为）。字段放在 answer 内保证
+      // 「批准决定 + 模型选择」单命令原子到达，无跨命令时序依赖。
+      modelSelection: modelSelectionSchema.optional(),
     }),
   }),
   respondWorkspaceHookReview: workspaceHookReviewCommandTargetSchema.extend({

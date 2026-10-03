@@ -51,6 +51,7 @@ import { createToolModelStatusSink, withDefaultToolModelStatusSink } from "./mod
 import { runToolCallWithTelemetry } from "./telemetry.js";
 import {
   withAutomationCreateLimitTurnStop,
+  withPlanExitApprovedTurnStop,
   withPlanExitDeniedTurnStop,
   withTerminalToolTurnStop,
   withWorkflowRefineDeniedFollowUp,
@@ -511,22 +512,29 @@ async function executeToolCallImpl(
       );
     }
 
-    const result: ToolExecutionResult = withTerminalToolTurnStop(
+    const result: ToolExecutionResult = withPlanExitApprovedTurnStop(
+      withTerminalToolTurnStop(
+        {
+          toolCallId: canonicalToolCall.id,
+          toolName: canonicalToolCall.name,
+          success: true,
+          output,
+          display,
+          modelContent: finalModelContent,
+          ...(readFileStateMetadata ? { readFileStateMetadata } : {}),
+          performance: perf,
+          serialization,
+          durationMs,
+          startedAt: new Date(startTime),
+          completedAt: new Date(),
+        },
+        { entry },
+      ),
       {
-        toolCallId: canonicalToolCall.id,
+        mode,
+        planEnabled: deps.sessionModePort?.isPlanEnabled?.(),
         toolName: canonicalToolCall.name,
-        success: true,
-        output,
-        display,
-        modelContent: finalModelContent,
-        ...(readFileStateMetadata ? { readFileStateMetadata } : {}),
-        performance: perf,
-        serialization,
-        durationMs,
-        startedAt: new Date(startTime),
-        completedAt: new Date(),
       },
-      { entry },
     );
 
     await emitToolCallResult(
