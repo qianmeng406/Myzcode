@@ -1324,6 +1324,7 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
   onFeedbackChange,
   onReviewTurn,
   onReviewTurnDeep,
+  reviewPending,
   className,
 }: {
   rowId: number;
@@ -1341,6 +1342,8 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
   onReviewTurn?: () => void;
   /** 深度审查这一回合：与 onReviewTurn 同准入条件，走只读子代理多轮取证。 */
   onReviewTurnDeep?: () => void;
+  /** 有审查在进行中：两个审查按钮置灰，避免点击落入静默忽略分支。 */
+  reviewPending?: boolean;
   className?: string;
 }) {
   const { intl, locale } = useZCodeIntl();
@@ -1467,6 +1470,7 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
           label={intl.formatMessage({ id: "chat.oracleReview.reviewTurn" })}
           tooltip={intl.formatMessage({ id: "chat.oracleReview.reviewTurn" })}
           data-testid={testId(TID_V4_ORACLE_REVIEW, String(rowId))}
+          disabled={reviewPending}
           onClick={onReviewTurn}
         >
           <ShieldCheckIcon className="size-3.5" />
@@ -1474,10 +1478,11 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
       ) : null}
       {onReviewTurnDeep ? (
         <MessageAction
-          aria-label={intl.formatMessage({ id: "chat.oracleReview.reviewDepth.deep" })}
-          label={intl.formatMessage({ id: "chat.oracleReview.reviewDepth.deep" })}
-          tooltip={intl.formatMessage({ id: "chat.oracleReview.reviewDepth.deep" })}
+          aria-label={intl.formatMessage({ id: "chat.oracleReview.reviewTurnDeep" })}
+          label={intl.formatMessage({ id: "chat.oracleReview.reviewTurnDeep" })}
+          tooltip={intl.formatMessage({ id: "chat.oracleReview.reviewTurnDeep" })}
           data-testid={testId(TID_V4_ORACLE_REVIEW_DEEP, String(rowId))}
+          disabled={reviewPending}
           onClick={onReviewTurnDeep}
         >
           <ScanSearchIcon className="size-3.5" />

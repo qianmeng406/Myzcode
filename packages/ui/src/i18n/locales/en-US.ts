@@ -160,6 +160,8 @@ const enUS: Record<string, string> = {
   "chat.oracleReview.reviewDepth.standard": "Standard review",
   "chat.oracleReview.reviewDepth.deep": "Deep review",
   "chat.oracleReview.reviewTurn": "Review this turn's diff",
+  "chat.oracleReview.reviewTurnDeep":
+    "Deep review this turn's diff (read-only multi-turn investigation, several times the cost)",
   "chat.oracleReview.pending": "{model} is reviewing… (waiting {minutes}:{seconds})",
   "chat.oracleReview.pendingOutput": "{chars} chars generated",
   "chat.oracleReview.pendingDeep":

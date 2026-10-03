@@ -151,6 +151,8 @@ const zhCN: Record<string, string> = {
   "chat.oracleReview.reviewDepth.standard": "标准审查",
   "chat.oracleReview.reviewDepth.deep": "深度审查",
   "chat.oracleReview.reviewTurn": "审查该轮diff",
+  "chat.oracleReview.reviewTurnDeep":
+    "深度审查该轮diff（只读子代理多轮取证，耗时与成本数倍）",
   "chat.oracleReview.pending": "{model} 审查中…（已等待 {minutes}:{seconds}）",
   "chat.oracleReview.pendingOutput": "已输出 {chars} 字符",
   "chat.oracleReview.pendingDeep":

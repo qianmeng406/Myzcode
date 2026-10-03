@@ -1200,6 +1200,13 @@ function ConversationTurnGroupImpl({
   // 本轮是否有工具调用：脚本/命令改文件的回合据此保留审查入口
   // （checkpoint 不记录脚本改动，fileChanges 为空）。
   const hasTurnToolActivity = unit.assistantWorkRows.some((row) => row.kind === "toolCall");
+  // 标准/深度两个审查按钮共用的唯一准入判定：显隐规则改动只改这一处。
+  const canReviewThisTurn =
+    context.reviewTurn !== undefined &&
+    unit.header?.entityId !== undefined &&
+    unit.header.state === "completedSuccess" &&
+    ((unit.header.fileChanges?.files ?? 0) > 0 || hasTurnToolActivity) &&
+    unit.header.fileChanges?.state !== "reverted";
   const canRenderAssistantActions =
     !unit.timelineOnly &&
     latestAssistantTextRow?.state === "complete" &&
@@ -1427,27 +1434,20 @@ function ConversationTurnGroupImpl({
               onFork={canForkLatestAssistant ? onFork : undefined}
               onRetry={canRetryLatestAssistant ? onRetry : undefined}
               onFeedbackChange={onFeedbackChange}
+              reviewPending={context.oracleReviewPending ?? false}
               // 审查这一回合：成功结束且未撤销的回合都提供入口。除「有文件改动」外，
               // 还包含「本轮有工具活动」的回合——改动可能由脚本/命令完成，checkpoint
               // 不记录工具级改动（fileChanges 为空），漏掉它们会让脚本回合无法审查。
               // 结果统一显示在 composer 上方的 Oracle 横幅，一次只保留最近一次审查。
               onReviewTurn={
-                context.reviewTurn &&
-                unit.header?.entityId &&
-                unit.header.state === "completedSuccess" &&
-                ((unit.header.fileChanges?.files ?? 0) > 0 || hasTurnToolActivity) &&
-                unit.header.fileChanges?.state !== "reverted"
+                canReviewThisTurn
                   ? () => {
                       if (unit.header) context.reviewTurn?.(unit.header);
                     }
                   : undefined
               }
               onReviewTurnDeep={
-                context.reviewTurnDeep &&
-                unit.header?.entityId &&
-                unit.header.state === "completedSuccess" &&
-                ((unit.header.fileChanges?.files ?? 0) > 0 || hasTurnToolActivity) &&
-                unit.header.fileChanges?.state !== "reverted"
+                canReviewThisTurn && context.reviewTurnDeep
                   ? () => {
                       if (unit.header) context.reviewTurnDeep?.(unit.header);
                     }

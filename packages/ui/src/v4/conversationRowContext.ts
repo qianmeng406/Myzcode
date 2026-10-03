@@ -177,6 +177,8 @@ export interface ConversationRowRenderContext {
   reviewTurn?: (header: TurnHeaderRow) => void;
   /** 轮尾工具栏「深度审查这一回合」：与 reviewTurn 同准入条件，走只读子代理多轮取证。 */
   reviewTurnDeep?: (header: TurnHeaderRow) => void;
+  /** 有审查在进行中：轮尾审查按钮置灰，避免点击落入静默忽略分支被当成「没反应」。 */
+  oracleReviewPending?: boolean;
   previewFileRewind?: (
     target: ConversationRowTarget,
   ) => Promise<V4ConversationFileRewindPreviewResult>;
