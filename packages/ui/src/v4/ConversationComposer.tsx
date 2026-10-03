@@ -70,6 +70,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.js";
 import {
@@ -2126,6 +2129,9 @@ function ConversationComposerImpl({
             // 部分渠道（如 Command Code）在创建模型时强制要求推理档；
             // 选中即带该模型的最低公开档，正好与辅助快速通道的绑定一致。
             reasoningLevel: model.config.optionSpecs.reasoningLevel?.values[0],
+            // 全量档位：把关模型下拉的档位子菜单用（不再自动顶最高档后，
+            // 强度控制交还用户，见 resolveOracleRequestOptions）。
+            reasoningLevels: model.config.optionSpecs.reasoningLevel?.values ?? [],
             oracleReasoningLevel:
               model.config.optionSpecs.reasoningLevel?.values[
                 (model.config.optionSpecs.reasoningLevel?.values.length ?? 1) - 1
@@ -2139,6 +2145,9 @@ function ConversationComposerImpl({
   const oracleReviewButtonTitle = intl.formatMessage({ id: "chat.composer.oracleReview" });
   const oracleModelMenuTitle = intl.formatMessage({ id: "chat.composer.oracleModel" });
   const oracleModelFollowLabel = intl.formatMessage({ id: "chat.composer.oracleModelFollow" });
+  const oracleReasoningDefaultLabel = intl.formatMessage({
+    id: "chat.composer.oracleReasoningDefault",
+  });
   const oracleDepthDeepLabel = intl.formatMessage({ id: "chat.oracleReview.reviewDepth.deep" });
   const optimizePromptTooltip =
     optimizerModel && promptOptimizer.optimizing === false
@@ -2306,22 +2315,58 @@ function ConversationComposerImpl({
                         const selected =
                           oracleReview.model?.providerId === group.key &&
                           oracleReview.model.modelId === model.modelId;
+                        const hasLevels = model.reasoningLevels.length > 0;
                         return (
-                          <DropdownMenuItem
-                            key={model.modelId}
-                            onSelect={() =>
-                              oracleReview.onSelectModel({
-                                providerId: group.key,
-                                modelId: model.modelId,
-                                ...(model.oracleReasoningLevel
-                                  ? { options: { reasoningLevel: model.oracleReasoningLevel } }
-                                  : {}),
-                              })
-                            }
-                          >
-                            <span className="min-w-0 flex-1 truncate">{model.modelId}</span>
-                            {selected ? <CheckIcon className="size-3.5 shrink-0" /> : null}
-                          </DropdownMenuItem>
+                          <DropdownMenuSub key={model.modelId}>
+                            <DropdownMenuSubTrigger
+                              disabled={false}
+                              className={cn("gap-2", !hasLevels && "pointer-events-none")}
+                            >
+                              <span className="min-w-0 flex-1 truncate">{model.modelId}</span>
+                              {selected ? <CheckIcon className="size-3.5 shrink-0" /> : null}
+                            </DropdownMenuSubTrigger>
+                            {hasLevels ? (
+                              <DropdownMenuSubContent className="max-h-64 overflow-y-auto">
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    oracleReview.onSelectModel({
+                                      providerId: group.key,
+                                      modelId: model.modelId,
+                                    })
+                                  }
+                                >
+                                  <span className="min-w-0 flex-1 truncate">
+                                    {oracleReasoningDefaultLabel}
+                                  </span>
+                                  {selected && !oracleReview.model?.options?.reasoningLevel ? (
+                                    <CheckIcon className="size-3.5 shrink-0" />
+                                  ) : null}
+                                </DropdownMenuItem>
+                                {model.reasoningLevels.map((level) => {
+                                  const levelSelected =
+                                    selected &&
+                                    oracleReview.model?.options?.reasoningLevel === level;
+                                  return (
+                                    <DropdownMenuItem
+                                      key={level}
+                                      onSelect={() =>
+                                        oracleReview.onSelectModel({
+                                          providerId: group.key,
+                                          modelId: model.modelId,
+                                          options: { reasoningLevel: level },
+                                        })
+                                      }
+                                    >
+                                      <span className="min-w-0 flex-1 truncate">{level}</span>
+                                      {levelSelected ? (
+                                        <CheckIcon className="size-3.5 shrink-0" />
+                                      ) : null}
+                                    </DropdownMenuItem>
+                                  );
+                                })}
+                              </DropdownMenuSubContent>
+                            ) : null}
+                          </DropdownMenuSub>
                         );
                       })}
                     </div>

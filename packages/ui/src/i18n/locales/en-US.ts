@@ -157,6 +157,7 @@ const enUS: Record<string, string> = {
   "chat.composer.oracleDepth": "Review mode",
   "chat.composer.oracleModel": "Oracle review model",
   "chat.composer.oracleModelFollow": "Follow session model",
+  "chat.composer.oracleReasoningDefault": "Default level",
   "chat.oracleReview.reviewDepth.standard": "Standard review",
   "chat.oracleReview.reviewDepth.deep": "Deep review",
   "chat.oracleReview.reviewTurn": "Review this turn's diff",

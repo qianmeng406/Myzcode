@@ -703,6 +703,10 @@ export interface IZCodeAgentService {
   generateWorkspaceText(
     params: ZCodeAgentGenerateWorkspaceTextParams,
   ): Promise<ZCodeWorkspaceGenerateTextResult>;
+  /** 主动取消在飞的 workspace generateText（审查卡片 ✕）；未命中返回 false，幂等。 */
+  cancelWorkspaceGenerateText(
+    params: ZCodeAgentWorkspaceTarget & { querySource: string },
+  ): Promise<boolean>;
   testModelConnectivity(
     params: ZCodeAgentTestModelConnectivityParams,
   ): Promise<ZCodeProviderTestModelConnectivityResult>;

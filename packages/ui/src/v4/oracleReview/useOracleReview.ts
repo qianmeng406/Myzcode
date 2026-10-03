@@ -391,8 +391,30 @@ export function useOracleReview(params: {
       // 进行中的审查完成后不再把卡片顶回来（代次被推高，applyIfCurrent 失效）。
       invalidateOracleReviewSeq(sessionId);
       setOracleReviewState(sessionId, { status: "idle" });
+      // ✕ 同时真取消在飞请求（此前 dismiss 只挡 UI 写回，CLI 循环会孤儿跑到
+      // deadline）。标准/深度两个来源都尝试：pending 态不携带来源，命中哪个算哪个；
+      // 未命中（无在飞）幂等返回 false。取消失败不影响卡片清理。
+      const agentService = services?.zcodeAgentService;
+      if (agentService?.cancelWorkspaceGenerateText && params.workspacePath) {
+        for (const querySource of [ORACLE_TURN_REVIEW_QUERY_SOURCE, ORACLE_DEEP_REVIEW_QUERY_SOURCE]) {
+          void agentService
+            .cancelWorkspaceGenerateText({
+              workspacePath: params.workspacePath,
+              ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
+              ...(params.remoteSessionId ? { remoteSessionId: params.remoteSessionId } : {}),
+              querySource,
+            })
+            .catch((error: unknown) => {
+              logger.warn("[OracleReview] ✕ 取消在飞审查失败", {
+                sessionId,
+                querySource,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
+        }
+      }
     }
-  }, [sessionId]);
+  }, [sessionId, services, params.workspacePath, params.workspaceIdentity, params.remoteSessionId]);
 
   return {
     state,

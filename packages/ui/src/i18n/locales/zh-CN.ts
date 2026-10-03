@@ -148,6 +148,7 @@ const zhCN: Record<string, string> = {
   "chat.composer.oracleDepth": "审查方式",
   "chat.composer.oracleModel": "Oracle 把关模型",
   "chat.composer.oracleModelFollow": "跟随会话模型",
+  "chat.composer.oracleReasoningDefault": "默认档位",
   "chat.oracleReview.reviewDepth.standard": "标准审查",
   "chat.oracleReview.reviewDepth.deep": "深度审查",
   "chat.oracleReview.reviewTurn": "审查该轮diff",

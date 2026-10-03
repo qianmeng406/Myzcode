@@ -419,6 +419,9 @@ const WORKSPACE_GENERATE_TEXT_CANCEL_BUFFER_MS = 5_000;
 // 若 RPC 先于 signal 超时，finally 会先摘掉 signal 的 cancel 监听器，取消永远发不出去，
 // CLI 侧循环成为孤儿（实测：审查烧满 deadline 后 CLI 侧多跑 3 分钟直到进程退出）。
 const WORKSPACE_GENERATE_TEXT_CANCEL_SLACK_MS = 30_000;
+// 在飞的 workspace generateText 操作登记（workspaceKey:querySource → 取消函数）：
+// UI 的审查卡片 ✕ 经 cancelWorkspaceGenerateText 主动取消在飞审查。
+const workspaceGenerateTextCancelTargets = new Map<string, () => Promise<boolean>>();
 
 function supportsLegacyRemoteTaskAllowlist(workspaceIdentity: string | undefined): boolean {
   return Boolean(
@@ -4404,35 +4407,41 @@ export function createZCodeAgentService(
           ? AbortSignal.timeout(params.requestTimeoutMs + WORKSPACE_GENERATE_TEXT_CANCEL_BUFFER_MS)
           : undefined);
       const operationId = signal ? randomUUID() : undefined;
-      const cancel = () => {
-        if (!operationId) return;
-        void client
-          .request(
-            zcodeProtocolMethods.workspaceCancelGenerateText,
-            { operationId },
-            zcodeWorkspaceCancelGenerateTextResultSchema,
-            { timeoutMs: 5_000 },
-          )
-          .then((result) => {
-            if (!result.cancelled) {
-              // cancelled:false = operationId 未配对（CLI 侧 controller 缺席）——
-              // 孤儿循环将继续烧 token，必须留痕归因。
-              logger.warn("workspace 模型请求取消未命中（operationId 未配对）", {
-                operationId,
-                workspaceKey: resolveWorkspaceKey(params),
-              });
-            }
-          })
-          .catch((error: unknown) => {
-            // 取消是 best-effort 控制面操作，失败不能覆盖调用方原本的 AbortError；
-            // 保留 debug 轨迹用于区分“本地停止等待”和“CLI 已收到取消”。
-            logger.debug(undefined, "workspace 模型请求取消通知失败", {
-              operationId,
-              workspaceKey: resolveWorkspaceKey(params),
-              error: error instanceof Error ? error.message : String(error),
-            });
+      const cancelOnce = async (): Promise<boolean> => {
+        if (!operationId) return false;
+        const result = await client.request(
+          zcodeProtocolMethods.workspaceCancelGenerateText,
+          { operationId },
+          zcodeWorkspaceCancelGenerateTextResultSchema,
+          { timeoutMs: 5_000 },
+        );
+        if (!result.cancelled) {
+          // cancelled:false = operationId 未配对（CLI 侧 controller 缺席）——
+          // 孤儿循环将继续烧 token，必须留痕归因。
+          logger.warn("workspace 模型请求取消未命中（operationId 未配对）", {
+            operationId,
+            workspaceKey: resolveWorkspaceKey(params),
           });
+        }
+        return result.cancelled;
       };
+      const cancel = () => {
+        cancelOnce().catch((error: unknown) => {
+          // 取消是 best-effort 控制面操作，失败不能覆盖调用方原本的 AbortError；
+          // 保留 debug 轨迹用于区分“本地停止等待”和“CLI 已收到取消”。
+          logger.debug(undefined, "workspace 模型请求取消通知失败", {
+            operationId,
+            workspaceKey: resolveWorkspaceKey(params),
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      };
+      // 在飞操作登记：供 cancelWorkspaceGenerateText 从 UI（审查卡片 ✕）主动取消。
+      // 同 workspace+querySource 后到覆盖先到（审查是单横幅语义，先到的已在收尾）。
+      const cancelTargetKey = `${resolveWorkspaceKey(params)}:${params.querySource}`;
+      if (operationId) {
+        workspaceGenerateTextCancelTargets.set(cancelTargetKey, cancelOnce);
+      }
       signal?.addEventListener("abort", cancel, { once: true });
       try {
         return await client.request(
@@ -4472,6 +4481,26 @@ export function createZCodeAgentService(
         );
       } finally {
         signal?.removeEventListener("abort", cancel);
+        if (operationId && workspaceGenerateTextCancelTargets.get(cancelTargetKey) === cancelOnce) {
+          workspaceGenerateTextCancelTargets.delete(cancelTargetKey);
+        }
+      }
+    },
+
+    async cancelWorkspaceGenerateText(params) {
+      // UI（审查卡片 ✕）主动取消：按 workspace+querySource 找到在飞操作的取消函数。
+      // 未命中（无在飞/已收尾）返回 false，调用方按幂等处理。
+      const key = `${resolveWorkspaceKey(params)}:${params.querySource}`;
+      const cancelOnce = workspaceGenerateTextCancelTargets.get(key);
+      if (!cancelOnce) return false;
+      try {
+        return await cancelOnce();
+      } catch (error) {
+        logger.warn("workspace 模型请求主动取消失败", {
+          workspaceKey: resolveWorkspaceKey(params),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
       }
     },
 

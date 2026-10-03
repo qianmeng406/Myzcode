@@ -160,6 +160,18 @@ export function buildOracleReviewPrompt(params: {
     params.diffSections.length > 0
       ? params.diffSections.map((section) => `### ${section.path}\n${section.text}`).join("\n\n")
       : "（没有可审查的文本差异）";
+  // 取证白名单：diff 涉及的文件路径清单。慢渠道实测里审查者顺着对照上下文的
+  // 历史发现跑到了与本 diff 无关的工作区目录（对抗复核报告等），必须有明确的
+  // 可执行边界而不是一句"要克制"。
+  const diffFileManifest =
+    params.diffSections.length > 0
+      ? [
+          "## 本回合改动文件清单（取证白名单）",
+          ...params.diffSections.map((section) => `- ${section.path}`),
+          "你的取证（Read/Grep/Glob/Bash）只允许落在上述文件及其直接调用方/被调用方上。清单之外的任何文件——包括工作区中的报告、文档、脚本、历史回合产物——一律不得读取或搜索，即使下方对照上下文提到了它们。",
+          "",
+        ]
+      : [];
   const contextSections: string[] = [];
   if (params.recentCommits && params.recentCommits.length > 0) {
     contextSections.push(
@@ -171,6 +183,7 @@ export function buildOracleReviewPrompt(params: {
   if (params.previousReview) {
     contextSections.push(
       "## 上一次审查的结论（针对更早的改动，仅供对照，不是对本次 diff 的既定结论；若本回合改动声称处理了其中的问题，请对照下方 diff 与最近提交核验是否属实）",
+      "注意：历史发现提到的其他文件不在本回合取证范围内（除非本回合 diff 也触及它们）——不要为验证历史发现去调查与本 diff 无关的文件。",
       `裁决：${params.previousReview.verdict}`,
       `总评：${params.previousReview.summary || "（无）"}`,
       `问题清单：`,
@@ -186,7 +199,7 @@ export function buildOracleReviewPrompt(params: {
           "在给结论前请：①打开 diff 涉及的文件核对改动所在的真实上下文，确认行号与引用关系；②检查改动是否破坏了调用方/被调用方；③用搜索确认声称修复的问题确实已修。下结论必须基于你亲自读到的证据，diff 里看不出来的地方就去读代码，仍无法确认的如实标注不确定。",
           "取证要克制：围绕本次 diff 展开，不要漫无目的地浏览仓库。",
           // 取证范围与预算硬约束：实测无界取证会在慢渠道上把时间烧光且零结论。
-          "取证范围严格限定：只允许读取 diff 直接涉及的文件，以及它们的直接调用方/被调用方。禁止漫游仓库、禁止系统性浏览目录结构、禁止与已确认问题无关的扩展调查。",
+          "取证范围严格限定：只允许读取上方「本回合改动文件清单（取证白名单）」中的文件，以及它们的直接调用方/被调用方。禁止漫游仓库、禁止系统性浏览目录结构、禁止与已确认问题无关的扩展调查。",
           "时间预算有限：整个审查预计在少量轮次内完成。一旦掌握足以给出结论的证据就立即停止取证直接输出结论，宁可少取证也不要为边际收益继续消耗轮次。",
           // 只约束"收尾形态"而非"是否用工具"：模型以工具调用收尾会让本轮没有可解析正文。
           "无论是否使用工具，最终必须以文本直接给出 VERDICT 开头的结论，不要以工具调用作为最后一轮的结束。",
@@ -223,6 +236,7 @@ export function buildOracleReviewPrompt(params: {
     "",
     ...contextSections,
     ...depthSections,
+    ...diffFileManifest,
     ...(params.diffSource === "workspace"
       ? [
           "## 工作区改动（相对 HEAD 的未提交改动，unified diff）",
