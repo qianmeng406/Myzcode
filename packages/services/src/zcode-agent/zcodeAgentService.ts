@@ -415,6 +415,10 @@ const WSL_REMOTE_WORKSPACE_IDENTITY_PREFIX = "remote:wsl:";
 // 经 IPC 代理调用的 renderer 无法传真实 AbortSignal；宿主按调用方 requestTimeoutMs
 // 派生 signal 时，在客户端 deadline 之后追加这个缓冲再发取消通知，让 CLI 侧操作收尾。
 const WORKSPACE_GENERATE_TEXT_CANCEL_BUFFER_MS = 5_000;
+// 协议 client 的 timeoutMs 必须晚于派生 signal 的 abort 时刻（deadline + 缓冲 + 本松弛量）：
+// 若 RPC 先于 signal 超时，finally 会先摘掉 signal 的 cancel 监听器，取消永远发不出去，
+// CLI 侧循环成为孤儿（实测：审查烧满 deadline 后 CLI 侧多跑 3 分钟直到进程退出）。
+const WORKSPACE_GENERATE_TEXT_CANCEL_SLACK_MS = 30_000;
 
 function supportsLegacyRemoteTaskAllowlist(workspaceIdentity: string | undefined): boolean {
   return Boolean(
@@ -4409,6 +4413,16 @@ export function createZCodeAgentService(
             zcodeWorkspaceCancelGenerateTextResultSchema,
             { timeoutMs: 5_000 },
           )
+          .then((result) => {
+            if (!result.cancelled) {
+              // cancelled:false = operationId 未配对（CLI 侧 controller 缺席）——
+              // 孤儿循环将继续烧 token，必须留痕归因。
+              logger.warn("workspace 模型请求取消未命中（operationId 未配对）", {
+                operationId,
+                workspaceKey: resolveWorkspaceKey(params),
+              });
+            }
+          })
           .catch((error: unknown) => {
             // 取消是 best-effort 控制面操作，失败不能覆盖调用方原本的 AbortError；
             // 保留 debug 轨迹用于区分“本地停止等待”和“CLI 已收到取消”。
@@ -4433,15 +4447,27 @@ export function createZCodeAgentService(
             ...(params.maxOutputTokens ? { maxOutputTokens: params.maxOutputTokens } : {}),
             ...(params.stream ? { stream: true } : {}),
             ...(params.agentic ? { agentic: true } : {}),
+            ...(params.deadlineAt ? { deadlineAt: params.deadlineAt } : {}),
             ...(operationId ? { operationId } : {}),
           },
           zcodeWorkspaceGenerateTextResultSchema,
           // 不传 timeoutMs 时协议 client 默认 3 分钟超时会对 thinking 模型的长请求
           // 先于调用方自身 deadline 触发，并被 onRequestTimeout 误判 stale 杀进程。
-          // 调用方显式传入 requestTimeoutMs（自身 deadline + 取消缓冲）时以其为准。
+          // 调用方显式传入 requestTimeoutMs 时以其为准，且必须**晚于**派生 signal 的
+          // abort 时刻（deadline + 缓冲 + 松弛量）：RPC 先超时会让 finally 摘掉 cancel
+          // 监听器、取消永远发不出去（孤儿循环实测烧满 deadline 后多跑数分钟）。
+          // signal abort 后 cancel RPC 通知 CLI 收口，CLI 以 AbortError 结束本请求，
+          // 这里的 await 随服务端错误响应自然拒绝——错误语义比本地超时更准确。
           {
             signal,
-            ...(params.requestTimeoutMs ? { timeoutMs: params.requestTimeoutMs } : {}),
+            ...(params.requestTimeoutMs
+              ? {
+                  timeoutMs:
+                    params.requestTimeoutMs +
+                    WORKSPACE_GENERATE_TEXT_CANCEL_BUFFER_MS +
+                    WORKSPACE_GENERATE_TEXT_CANCEL_SLACK_MS,
+                }
+              : {}),
           },
         );
       } finally {

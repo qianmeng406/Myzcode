@@ -318,6 +318,8 @@ export interface ZCodeAgentGenerateWorkspaceTextParams extends ZCodeAgentWorkspa
    * 多轮取证后产出结论。逐轮内部走 streamText，进度通知带轮次/工具名。
    */
   agentic?: boolean;
+  /** 深度审查的软 deadline（epoch ms）：调查轮提前收敛进收尾轮（hard-abort 之外的 first-line 保障）。 */
+  deadlineAt?: number;
   signal?: AbortSignal;
   /**
    * 协议层 RPC 超时。thinking 模型的长请求会超过协议 client 默认的

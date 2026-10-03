@@ -783,9 +783,23 @@ export class ZCodeProtocolAgentServer {
   private cancelWorkspaceGenerateText(rawParams: unknown) {
     const params = parseParams(zcodeWorkspaceCancelGenerateTextParamsSchema, rawParams);
     const controller = this.workspaceGenerateTextControllers.get(params.operationId);
-    if (!controller) return { operationId: params.operationId, cancelled: false };
+    if (!controller) {
+      // cancelled:false = 未配对：孤儿操作将继续执行。留痕归因（宿主会同步告警）。
+      this.context.logger?.warn("workspace generate text cancel missed (no active operation)", {
+        activeOperations: [...this.workspaceGenerateTextControllers.keys()],
+        event: "zcode_protocol.workspace_generate_text_cancel_missed",
+        module: "zcode_protocol.server",
+        operationId: params.operationId,
+      });
+      return { operationId: params.operationId, cancelled: false };
+    }
     controller.abort(new DOMException("Workspace model request cancelled", "AbortError"));
     this.workspaceGenerateTextControllers.delete(params.operationId);
+    this.context.logger?.info("workspace generate text cancel delivered", {
+      event: "zcode_protocol.workspace_generate_text_cancel_delivered",
+      module: "zcode_protocol.server",
+      operationId: params.operationId,
+    });
     return { operationId: params.operationId, cancelled: true };
   }
 

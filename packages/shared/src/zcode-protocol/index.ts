@@ -2089,6 +2089,8 @@ export const zcodeWorkspaceGenerateTextParamsSchema = z
      * 多轮取证后产出结论；忽略单轮 stream 语义，逐轮走 streamText。
      */
     agentic: z.boolean().optional(),
+    /** 深度审查的软 deadline（epoch ms）：调查轮提前收敛进收尾轮，hard-abort 之外的第一道保障。 */
+    deadlineAt: z.number().int().positive().optional(),
     operationId: nonEmptyString.optional(),
   })
   .strict()

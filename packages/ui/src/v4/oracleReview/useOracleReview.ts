@@ -247,7 +247,15 @@ export function useOracleReview(params: {
           // （客户端各超时均 ≥180s 可排除）；流式的思考增量让连接持续活跃避开该窗口。
           stream: true,
           // 深度审查：只读子代理多轮取证（core 忽略单轮 stream 语义，逐轮内部流式）。
-          ...(depth === "deep" ? { agentic: true } : {}),
+          ...(depth === "deep"
+            ? {
+                agentic: true,
+                // 软 deadline 随请求下发：调查轮在扣除收尾预留后提前收敛进禁用
+                // 工具的收尾轮（hard-abort 之外的 first-line 保障，实测孤儿审查
+                // 烧满 deadline 零结论的教训）。
+                deadlineAt: Date.now() + ORACLE_DEEP_REVIEW_TIMEOUT_MS,
+              }
+            : {}),
           // 输出预算跟随模型声明的上限（resolveOracleRequestOptions 注释详述取舍）；
           // 超时由 requestTimeoutMs 兜底，审查结论从返回内容里解析。
           ...(requestOptions.maxOutputTokens !== undefined

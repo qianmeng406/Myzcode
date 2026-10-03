@@ -108,6 +108,9 @@ test("深度审查 prompt 追加只读取证指引，标准审查不含", () => 
   // 角色定位句在深度模式下不得出现会被读成"禁止任何调用"的"不执行任何操作"。
   assert.ok(!deep.includes("不执行任何操作"));
   assert.ok(deep.includes("不要修改任何代码"));
+  // 取证范围/预算硬约束（慢渠道零结论教训）。
+  assert.ok(deep.includes("取证范围严格限定"));
+  assert.ok(deep.includes("时间预算有限"));
 
   const standard = buildOracleReviewPrompt({
     userRequest: "修复登录按钮",

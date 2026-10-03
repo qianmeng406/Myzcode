@@ -77,12 +77,17 @@ export async function runToolAgentLoop(input: {
   workspaceRoot: string;
   /** tool-use 边界策略；拒绝理由会作为错误工具消息回填进下一轮请求。 */
   evaluateToolPolicy: (toolCall: ModelToolCall) => MemoryAgentToolPolicyDecision;
+  /** 每轮开始前的软停止判定：返回 true 时正常结束调查循环（区别于 abort 的抛错）。 */
+  shouldStop?: () => boolean;
 }): Promise<MemoryAgentLoopResult> {
   const messages = input.messages.map(cloneModelMessage);
   let turns = 0;
 
   for (; turns < input.maxTurns; turns += 1) {
     input.abortSignal?.throwIfAborted();
+    if (input.shouldStop?.()) {
+      break;
+    }
     // 只在 Memory 初始快照投影会漏掉 Read 等工具后续产生的媒体；每一次
     // provider 请求都必须在 request-local 副本上执行同一套 capability + budget 策略。
     const mediaProjection = projectMessagesForModelMediaPolicy(

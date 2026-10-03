@@ -36,6 +36,13 @@ const DEEP_REVIEW_MAX_TURNS = 24;
 // 空正文错误并丢掉整轮调查。此时追加一次禁用工具的收尾生成，强制模型给出结论。
 const DEEP_REVIEW_WRAP_UP_INSTRUCTION =
   "轮次预算已用尽。请基于以上已完成的调查直接给出最终结论，不要再调用任何工具——你没有可用工具，只输出最终结论正文（按任务要求的规定格式）。";
+// 调查时间触顶的收尾指令：与轮数用尽同构，但明确告知剩余时间不足，
+// 结论允许标注「因时间所限未核实」，不允许编造未取证的说法。
+const DEEP_REVIEW_DEADLINE_WRAP_UP_INSTRUCTION =
+  "调查时间即将用尽，不能再继续取证。请基于以上已完成的调查立即给出最终结论，不要再调用任何工具——你没有可用工具，只输出最终结论正文（按任务要求的规定格式）。未能核实的点在结论中如实标注「因时间所限未核实」，不要臆断。";
+// 收尾轮自身是一次完整生成（慢渠道可达数分钟），必须预留总预算的相当比例，
+// 否则调查轮把时间耗光、收尾轮刚起步就被外层 hard-abort，整段审查零结论。
+const DEEP_REVIEW_WRAP_UP_RESERVE_RATIO = 0.4;
 // 判定「已给出结论」的宽松特征：命中任一即认为有可解析输出，无需收尾。
 const DEEP_REVIEW_VERDICT_PATTERN = /VERDICT|结论|判定/i;
 
@@ -79,6 +86,12 @@ export async function runDeepReviewAgentLoop(
      */
     requestOptions?: ModelRequest["options"];
     traceContext?: TraceContext;
+    /**
+     * 软 deadline（epoch ms）：调查轮在 `deadlineAt - 收尾预留` 处停止并提前进入
+     * 禁用工具的收尾轮，保证「deadline 内要么有结论要么尽早失败」。缺席 = 无软
+     * deadline，仅由外层 hard-abort 兜底（实测孤儿审查零结论烧满全程的教训）。
+     */
+    deadlineAt?: number;
   },
 ): Promise<DeepReviewAgentLoopResult> {
   // 只读白名单的工具契约：从本 runtime 的注册表取定义，白名单外（写工具、
@@ -118,6 +131,13 @@ export async function runDeepReviewAgentLoop(
   let completedRoundsChars = 0;
   let roundStartChars = 0;
   let lastOutputChars = 0;
+  // 调查截止：总预算扣除收尾预留。到达后调查循环软停止，立即进入收尾轮。
+  const investigateDeadlineAt =
+    input.deadlineAt === undefined
+      ? undefined
+      : input.deadlineAt -
+        Math.round((input.deadlineAt - Date.now()) * DEEP_REVIEW_WRAP_UP_RESERVE_RATIO);
+  let stoppedByDeadline = false;
 
   const loopResult = await runToolAgentLoop({
     abortSignal: input.abortSignal,
@@ -165,16 +185,28 @@ export async function runDeepReviewAgentLoop(
     // 模型下一轮能看到拒绝原因。
     evaluateToolPolicy: (toolCall) => evaluateDeepReviewToolPolicy(toolCall, runtime),
     rootDir: runtime.workingDirectory,
+    shouldStop: () => {
+      if (investigateDeadlineAt !== undefined && Date.now() >= investigateDeadlineAt) {
+        stoppedByDeadline = true;
+        return true;
+      }
+      return false;
+    },
     tools,
     workingDirectory: runtime.workingDirectory,
     workspaceRoot: runtime.workspaceRoot,
   });
 
-  // 轮次用尽/结束时没有结论特征（典型：最后一轮只调工具没有正文）→ 收尾强制结论。
+  // 轮次用尽/时间触顶/结束时没有结论特征（典型：最后一轮只调工具没有正文）→ 收尾强制结论。
   if (!DEEP_REVIEW_VERDICT_PATTERN.test(lastText)) {
     const wrapUpMessages: ModelInputMessage[] = [
       ...loopResult.messages,
-      { role: "user", content: DEEP_REVIEW_WRAP_UP_INSTRUCTION },
+      {
+        role: "user",
+        content: stoppedByDeadline
+          ? DEEP_REVIEW_DEADLINE_WRAP_UP_INSTRUCTION
+          : DEEP_REVIEW_WRAP_UP_INSTRUCTION,
+      },
     ];
     currentRound += 1;
     input.onProgress?.({ outputChars: lastOutputChars, round: currentRound });

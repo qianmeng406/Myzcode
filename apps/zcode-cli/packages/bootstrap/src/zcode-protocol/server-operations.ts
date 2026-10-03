@@ -2867,6 +2867,7 @@ export async function generateWorkspaceText(
     ...(params.maxOutputTokens ? { maxOutputTokens: params.maxOutputTokens } : {}),
     ...(params.stream ? { stream: true } : {}),
     ...(params.agentic ? { agentic: true } : {}),
+    ...(params.deadlineAt ? { deadlineAt: params.deadlineAt } : {}),
     ...(progressNotifier ? { onProgress: progressNotifier.onProgress } : {}),
   };
   const app =

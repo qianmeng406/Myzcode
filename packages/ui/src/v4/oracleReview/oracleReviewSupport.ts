@@ -185,6 +185,9 @@ export function buildOracleReviewPrompt(params: {
           "你不只有这份 diff：你可以调用只读工具对仓库取证（Read 读文件、Grep 全文搜索、Glob 按模式找文件、Bash 仅限只读命令如 git log/git diff/ls；写命令会被拒绝）。",
           "在给结论前请：①打开 diff 涉及的文件核对改动所在的真实上下文，确认行号与引用关系；②检查改动是否破坏了调用方/被调用方；③用搜索确认声称修复的问题确实已修。下结论必须基于你亲自读到的证据，diff 里看不出来的地方就去读代码，仍无法确认的如实标注不确定。",
           "取证要克制：围绕本次 diff 展开，不要漫无目的地浏览仓库。",
+          // 取证范围与预算硬约束：实测无界取证会在慢渠道上把时间烧光且零结论。
+          "取证范围严格限定：只允许读取 diff 直接涉及的文件，以及它们的直接调用方/被调用方。禁止漫游仓库、禁止系统性浏览目录结构、禁止与已确认问题无关的扩展调查。",
+          "时间预算有限：整个审查预计在少量轮次内完成。一旦掌握足以给出结论的证据就立即停止取证直接输出结论，宁可少取证也不要为边际收益继续消耗轮次。",
           // 只约束"收尾形态"而非"是否用工具"：模型以工具调用收尾会让本轮没有可解析正文。
           "无论是否使用工具，最终必须以文本直接给出 VERDICT 开头的结论，不要以工具调用作为最后一轮的结束。",
           "",
@@ -467,19 +470,16 @@ export function resolveOracleRequestOptions(
   if (!selection) {
     return null;
   }
+  // 档位跟随用户选择/模型默认，**不再自动升到最高档**：实测把关模型在最高档上
+  // 单轮思考可达 10 分钟（慢渠道），多轮深度审查在 20 分钟 deadline 内结构性无法
+  // 收敛。要更高强度的把关，请在把关模型下拉里显式选档。
   const provider = modelSelectionView?.providers.find(
     (candidate) => candidate.providerId === selection.providerId,
   );
   const model = provider?.models.find((candidate) => candidate.modelId === selection.modelId);
-  const levels = model?.config.optionSpecs.reasoningLevel?.values;
-  const highestLevel = levels?.length ? levels[levels.length - 1] : undefined;
-  const resolvedSelection =
-    selection.options?.reasoningLevel || !highestLevel
-      ? selection
-      : { ...selection, options: { reasoningLevel: highestLevel } };
   const specMax = model?.config.optionSpecs.maxOutputTokens?.max;
   return {
-    selection: resolvedSelection,
+    selection,
     ...(typeof specMax === "number" && Number.isFinite(specMax) && specMax > 0
       ? { maxOutputTokens: specMax }
       : {}),

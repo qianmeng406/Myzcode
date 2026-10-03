@@ -66,6 +66,11 @@ export interface WorkspaceGenerateTextInput {
    * 外层 modelRequest 的单轮语义。
    */
   agentic?: boolean;
+  /**
+   * 深度审查的软 deadline（epoch ms）：调查轮在扣除收尾预留后提前进入禁用工具
+   * 的收尾轮，保证 deadline 内有结论。外层 hard-abort 仍是最终兜底。
+   */
+  deadlineAt?: number;
 }
 
 export interface WorkspaceGenerateTextProgress {
@@ -268,6 +273,7 @@ async function generateWorkspaceTextImpl(
             // 否则深度审查会退回默认选项、被 adapter 校验或 reasoning 吃空。
             requestOptions: modelRequest.options,
             traceContext: modelTraceContext,
+            ...(input.deadlineAt ? { deadlineAt: input.deadlineAt } : {}),
           })
         : input.stream
           ? streamModelTextResult(model, modelRequest, input.onProgress)
