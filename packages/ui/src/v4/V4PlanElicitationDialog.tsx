@@ -1,35 +1,20 @@
 // v4 userInput 交互的 ElicitationDialog 承载（从 V4InteractionDialogs 拆出控制其行数）。
+// 投影/Bot 代答覆盖/交互分类仍在宿主完成，这里只负责渲染与应答组装。
 // 计划批准（ExitPlanMode）复用问答卡片，并在这里挂上「执行模型/推理档」选择：
 // 批准 + 指定模型经 resolveInteraction answer.modelSelection 单命令原子到达 CLI。
 import type { ZCodeElicitationRequest } from "@zcode/shared";
-import type { PendingInteraction } from "@zcode/shared/zcode-protocol-v4";
+import type { InteractionAutoResolution } from "@zcode/shared/zcode-protocol-v4";
 import {
   ElicitationDialog,
   type PlanExecutionModelChoice,
   type PlanExecutionModelGroup,
 } from "@/ElicitationDialog.js";
 import type { ElicitationFormDraft } from "@/store/zcodeSessionStoreTypes.js";
-import { pendingUserInputToElicitationRequest } from "@/v4/pendingInteractionAdapter.js";
 
-function buildV4ElicitationProgressKey(request: ZCodeElicitationRequest): string {
-  return `${request.requestId}:${request.currentQuestionIndex ?? 0}:${JSON.stringify(request.answerDrafts ?? {})}`;
-}
-
-function resolveV4ElicitationRequest(
-  projected: ZCodeElicitationRequest | null,
-  botProgress: ZCodeElicitationRequest | null,
-): ZCodeElicitationRequest | null {
-  // Bugfix：V4 snapshot 只保留原始阻塞请求，Bot 代答后的逐题进度必须覆盖同一 request 的投影。
-  if (projected && botProgress?.requestId === projected.requestId) {
-    return botProgress;
-  }
-  return projected;
-}
-
-/** 把 v4 投影的 userInput 交互接进 ElicitationDialog；非问答类/无法投影时返回 null。 */
+/** 把已投影的 elicitation 请求接进 ElicitationDialog。 */
 export function V4PlanElicitationDialog(props: {
-  sessionId: string;
-  pending: PendingInteraction;
+  request: ZCodeElicitationRequest;
+  autoResolution?: InteractionAutoResolution;
   botElicitationProgress: ZCodeElicitationRequest | null;
   localElicitationDraft?: ElicitationFormDraft;
   persistElicitationDraft: (requestId: string, draft: ElicitationFormDraft) => void;
@@ -53,8 +38,8 @@ export function V4PlanElicitationDialog(props: {
   onPlanInteractionAccepted?: (interactionId: string) => void;
 }) {
   const {
-    sessionId,
-    pending,
+    request,
+    autoResolution,
     botElicitationProgress,
     localElicitationDraft,
     persistElicitationDraft,
@@ -64,42 +49,19 @@ export function V4PlanElicitationDialog(props: {
     resolveInteraction,
     onPlanInteractionAccepted,
   } = props;
-  if (pending.payload.kind !== "userInput") {
-    return null;
-  }
-  const projectedElicitationRequest = pendingUserInputToElicitationRequest(sessionId, {
-    ...pending,
-    payload: pending.payload,
-  });
-  if (!projectedElicitationRequest) {
-    return null;
-  }
-  const elicitationRequest = resolveV4ElicitationRequest(
-    projectedElicitationRequest,
-    botElicitationProgress,
-  );
-  if (!elicitationRequest) {
-    return null;
-  }
-  const isExitPlanMode = pending.payload.toolName?.trim().toLowerCase() === "exitplanmode";
-  const isAskUserQuestion =
-    pending.payload.toolName?.trim().toLowerCase() === "askuserquestion" ||
-    pending.autoResolution !== undefined;
   return (
     <ElicitationDialog
-      key={buildV4ElicitationProgressKey(elicitationRequest)}
-      request={elicitationRequest}
+      key={`${request.requestId}:${request.currentQuestionIndex ?? 0}:${JSON.stringify(request.answerDrafts ?? {})}`}
+      request={request}
       initialFormDraft={
-        botElicitationProgress?.requestId === elicitationRequest.requestId
-          ? undefined
-          : localElicitationDraft
+        botElicitationProgress?.requestId === request.requestId ? undefined : localElicitationDraft
       }
       onFormDraftChange={persistElicitationDraft}
-      planExecutionModelGroups={isExitPlanMode ? planExecutionModelGroups : undefined}
-      autoResolution={isAskUserQuestion ? pending.autoResolution : undefined}
-      onFirstInteraction={isAskUserQuestion ? onFirstInteraction : undefined}
+      planExecutionModelGroups={planExecutionModelGroups}
+      autoResolution={autoResolution}
+      onFirstInteraction={onFirstInteraction}
       onRespond={(_requestId, action, content, executionModel) => {
-        void resolveInteraction(pending.interactionId, {
+        void resolveInteraction(request.requestId, {
           action,
           ...(content ? { content } : {}),
           // 批准 + 指定执行模型：单命令原子到达（CLI broker 据此合并 modify 输入）。
@@ -116,12 +78,10 @@ export function V4PlanElicitationDialog(props: {
             : {}),
         }).then((accepted) => {
           if (!accepted) return;
-          removeElicitationDraft(pending.interactionId);
-          if (isExitPlanMode) {
-            // Plan 回执 ACK 与 replayable pending 清场是两条异步路径。
-            // 这里只上报已接受的 Plan interaction，由手机 pane 在仍读到旧权威状态时触发恢复。
-            onPlanInteractionAccepted?.(pending.interactionId);
-          }
+          removeElicitationDraft(request.requestId);
+          // Plan 回执 ACK 与 replayable pending 清场是两条异步路径。
+          // 这里只上报已接受的 Plan interaction，由手机 pane 在仍读到旧权威状态时触发恢复。
+          onPlanInteractionAccepted?.(request.requestId);
         });
       }}
     />

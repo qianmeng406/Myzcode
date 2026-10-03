@@ -53,6 +53,18 @@ test("批准不带执行模型：结果原样返回（同回合继续，现行�
   assert.equal(result.followUpUserInput, undefined);
 });
 
+test("真实时序：handler 已退出计划（planEnabled 显式 false，mode 仍 plan）照常触发", () => {
+  const result = withPlanExitApprovedTurnStop(
+    approvedResult({
+      approved: true,
+      mode: "build",
+      executionModelSelection: { providerId: "p", modelId: "m" },
+    }),
+    { mode: "plan", planEnabled: false, toolName: "ExitPlanMode" },
+  );
+  assert.equal(result.turnControl?.reason, "plan_exit_approved_model_switch");
+});
+
 test("非计划模式 / 非本工具 / 失败结果不进换模分支", () => {
   const output = {
     approved: true,

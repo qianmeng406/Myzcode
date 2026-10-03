@@ -107,10 +107,13 @@ export function withPlanExitApprovedTurnStop(
   result: ToolExecutionResult,
   input: { mode: CollaborationMode; planEnabled?: boolean; toolName: string },
 ): ToolExecutionResult {
+  // 守卫不能用 `planEnabled ?? mode === "plan"`：本 wrapper 在 handler **之后**运行，
+  // exitPlanMode 已把 planEnabled 置为显式 false（?? 不会被短路），只有 mode 仍是
+  // "plan"（执行态的 plan 是标志位，不随退出改写）——这是批准路径的真实状态。
   if (
-    !(input.planEnabled ?? input.mode === "plan") ||
     input.toolName !== EXIT_PLAN_MODE_TOOL_NAME ||
-    !result.success
+    !result.success ||
+    !(input.mode === "plan" || input.planEnabled === true)
   ) {
     return result;
   }

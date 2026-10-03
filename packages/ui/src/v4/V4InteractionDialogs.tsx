@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ZCodePermissionOption, ZCodeProvider } from "@zcode/shared";
+import type { ZCodeElicitationRequest, ZCodePermissionOption, ZCodeProvider } from "@zcode/shared";
 import type { ConversationSnapshot } from "@zcode/shared/zcode-protocol-v4";
 import type { ModelSelectionView } from "@zcode/provider";
 import type { PlanExecutionModelChoice, PlanExecutionModelGroup } from "@/ElicitationDialog.js";
@@ -21,6 +21,7 @@ import { pendingCommandRegistry } from "@/v4/pendingCommandRegistry.js";
 import { sendInteractionAutoResolutionSnooze } from "@/v4/interactionAutoResolutionCommand.js";
 import {
   pendingPermissionToLegacyRequest,
+  pendingUserInputToElicitationRequest,
   pendingUserInputToViewModel,
 } from "@/v4/pendingInteractionAdapter.js";
 import { V4PlanElicitationDialog } from "@/v4/V4PlanElicitationDialog.js";
@@ -45,6 +46,21 @@ function getCurrentSessionInteractionSnapshot(
   snapshot: ConversationSnapshot | null,
 ): ConversationSnapshot | null {
   return snapshot?.sessionId === sessionId ? snapshot : null;
+}
+
+function resolveV4ElicitationRequest(
+  projected: ZCodeElicitationRequest | null,
+  botProgress: ZCodeElicitationRequest | null,
+): ZCodeElicitationRequest | null {
+  // Bugfix：V4 snapshot 只保留原始阻塞请求，Bot 代答后的逐题进度必须覆盖同一 request 的投影。
+  if (projected && botProgress?.requestId === projected.requestId) {
+    return botProgress;
+  }
+  return projected;
+}
+
+function buildV4ElicitationProgressKey(request: ZCodeElicitationRequest): string {
+  return `${request.requestId}:${request.currentQuestionIndex ?? 0}:${JSON.stringify(request.answerDrafts ?? {})}`;
 }
 
 interface InteractionAutoResolutionIntentTracker {
@@ -361,30 +377,48 @@ export function V4InteractionDialogs({
     );
   }
 
-  const projectedElicitation = pending.payload.kind === "userInput";
+  const projectedElicitation =
+    pending.payload.kind === "userInput"
+      ? resolveV4ElicitationRequest(
+          pendingUserInputToElicitationRequest(sessionId, {
+            ...pending,
+            payload: pending.payload,
+          }),
+          botElicitationProgress,
+        )
+      : null;
   if (projectedElicitation) {
+    const isExitPlanMode = pending.payload.toolName?.trim().toLowerCase() === "exitplanmode";
+    const isAskUserQuestion =
+      pending.payload.toolName?.trim().toLowerCase() === "askuserquestion" ||
+      pending.autoResolution !== undefined;
     return (
       <V4PlanElicitationDialog
-        sessionId={sessionId}
-        pending={pending}
+        key={buildV4ElicitationProgressKey(projectedElicitation)}
+        request={projectedElicitation}
+        autoResolution={isAskUserQuestion ? pending.autoResolution : undefined}
         botElicitationProgress={botElicitationProgress}
         localElicitationDraft={localElicitationDraft}
         persistElicitationDraft={persistElicitationDraft}
         removeElicitationDraft={removeElicitationDraft}
-        planExecutionModelGroups={planExecutionModelGroups}
-        onFirstInteraction={(source) => {
-          if (!loggedSnoozeSourceIdsRef.current.has(pending.interactionId)) {
-            loggedSnoozeSourceIdsRef.current.add(pending.interactionId);
-            logger.debug("[v4-interaction] AskUserQuestion 请求暂停自动结束", {
-              interactionId: pending.interactionId,
-              source,
-            });
-          }
-          autoResolutionIntentRef.current.markInteracted(pending.interactionId);
-          return sendSnoozeOnce(pending.interactionId, Boolean(pending.autoResolution));
-        }}
+        planExecutionModelGroups={isExitPlanMode ? planExecutionModelGroups : undefined}
+        onFirstInteraction={
+          isAskUserQuestion
+            ? (source) => {
+                if (!loggedSnoozeSourceIdsRef.current.has(pending.interactionId)) {
+                  loggedSnoozeSourceIdsRef.current.add(pending.interactionId);
+                  logger.debug("[v4-interaction] AskUserQuestion 请求暂停自动结束", {
+                    interactionId: pending.interactionId,
+                    source,
+                  });
+                }
+                autoResolutionIntentRef.current.markInteracted(pending.interactionId);
+                return sendSnoozeOnce(pending.interactionId, Boolean(pending.autoResolution));
+              }
+            : undefined
+        }
         resolveInteraction={resolveInteraction}
-        onPlanInteractionAccepted={onPlanInteractionAccepted}
+        onPlanInteractionAccepted={isExitPlanMode ? onPlanInteractionAccepted : undefined}
       />
     );
   }

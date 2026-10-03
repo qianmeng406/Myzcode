@@ -97,13 +97,26 @@ export const ExitPlanModeInputSchema = z
       .describe(
         "Prompt-based permissions needed to implement the plan. These describe categories of actions rather than specific commands.",
       ),
-    // 非模型产出字段：批准确认窗上用户指定的执行模型经 broker 的 modify 决策合并进输入
-    // （模型从不主动填写；JSON Schema 不声明它，模型侧不可见）。handler 透传到输出。
+    // 非模型产出字段：批准确认窗上用户指定的执行模型经 broker 的 modify 决策合并进输入。
+    // 刻意不进 ExitPlanModeInputJsonSchema（模型面契约由下方 Model 基形生成）——模型
+    // 侧不可见即不会被幻觉填写；运行时校验/归一化按本 schema 放行该字段。
     executionModelSelection: ExecutionModelSelectionSchema.optional(),
   })
   .catchall(z.unknown());
 export type ExitPlanModeInput = z.infer<typeof ExitPlanModeInputSchema>;
-export const ExitPlanModeInputJsonSchema = toToolJsonSchema(ExitPlanModeInputSchema);
+// 模型可见契约：不含 executionModelSelection（用户在批准确认窗上选择，模型不可见）。
+const ExitPlanModeModelInputSchema = z
+  .object({
+    plan: ExitPlanModePlanSchema,
+    allowedPrompts: z
+      .array(ExitPlanModeAllowedPromptSchema)
+      .optional()
+      .describe(
+        "Prompt-based permissions needed to implement the plan. These describe categories of actions rather than specific commands.",
+      ),
+  })
+  .catchall(z.unknown());
+export const ExitPlanModeInputJsonSchema = toToolJsonSchema(ExitPlanModeModelInputSchema);
 
 export const ExitPlanModeOutputSchema = z
   .object({
