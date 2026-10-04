@@ -2383,7 +2383,9 @@ function ConversationComposerImpl({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            {oracleReview?.enabled ? (
+            {/* 手动审查入口不随 oracleReviewEnabled 隐藏：总开关只控「回合成功后的
+                自动把关」；用它连带隐藏按钮，用户关掉自动后就连手动入口一起找不到了。 */}
+            {oracleReview ? (
               <ControlHintTooltip title={oracleReviewButtonTitle}>
                 <Button
                   type="button"
@@ -2399,7 +2401,7 @@ function ConversationComposerImpl({
                 </Button>
               </ControlHintTooltip>
             ) : null}
-            {oracleReview?.enabled ? (
+            {oracleReview ? (
               // 深度审查：独立图标直接触发（ScanSearch=带扫描线的放大镜，与标准审查的盾牌区分）。
               <ControlHintTooltip title={oracleDepthDeepLabel}>
                 <Button
@@ -2416,7 +2418,7 @@ function ConversationComposerImpl({
                 </Button>
               </ControlHintTooltip>
             ) : null}
-            {oracleReview?.enabled && optimizerModelGroups.length > 0 ? (
+            {oracleReview && optimizerModelGroups.length > 0 ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -2702,7 +2704,7 @@ function ConversationComposerImpl({
           />
         </div>
       ) : null}
-      {oracleReview?.enabled ? (
+      {oracleReview ? (
         <OracleReviewBanner
           state={oracleReview.state}
           pendingElapsedSeconds={oracleReview.pendingElapsedSeconds}

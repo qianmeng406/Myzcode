@@ -2252,10 +2252,10 @@ export function SessionPane({
       workflowGraphByToolCallId,
       workflowDraftByToolCallId,
       fetchFileChanges: handleFetchFileChanges,
-      // 审查入口整体受 oracleReviewEnabled 门控：关闭时空审查开关不应只挡自动审查，
-      // 手动按钮/深度按钮同样是会发起付费审查请求的入口（后端无兜底）。
-      reviewTurn: oracleReview.enabled ? oracleReview.reviewTurnHeader : undefined,
-      reviewTurnDeep: oracleReview.enabled ? oracleReview.reviewTurnHeaderDeep : undefined,
+      // 轮尾审查入口是用户显式发起的手动审查，不受 oracleReviewEnabled 门控：
+      // 该开关只控「回合成功后的自动把关」（见 useOracleReview 的 completedSuccess 边沿）。
+      reviewTurn: oracleReview.reviewTurnHeader,
+      reviewTurnDeep: oracleReview.reviewTurnHeaderDeep,
       oracleReviewPending: oracleReview.state.status === "pending",
       previewFileRewind: workspaceFileRewindEnabled ? handlePreviewFileRewind : undefined,
       applyFileRewind: workspaceFileRewindEnabled ? handleApplyFileRewind : undefined,
@@ -2270,7 +2270,6 @@ export function SessionPane({
       modelSelectionView,
       oracleReview.reviewTurnHeader,
       oracleReview.reviewTurnHeaderDeep,
-      oracleReview.enabled,
       oracleReview.state.status,
       snapshot?.logEpoch,
       theme,

@@ -153,6 +153,7 @@ const enUS: Record<string, string> = {
   "chat.composer.optimizeModelFollow": "Follow session model",
   "chat.composer.optimizePromptFailed": "Failed to optimize the prompt. Try again later",
   "chat.composer.optimizePromptNoModel": "No model available. Select one in model settings first",
+  "chat.composer.optimizePromptViewLoading": "Model list is still loading. Try again in a moment",
   "chat.composer.optimizePromptUnknownModel": "The selected optimization model is unavailable. Pick another in model settings",
   "chat.composer.optimizePromptTooLong": "Draft is too long to optimize at once. Shorten or split it first",
   "chat.composer.optimizePromptParseFailed": "Could not parse the optimized result; your draft was kept",
@@ -2340,7 +2341,7 @@ const enUS: Record<string, string> = {
     "Prevent the system from sleeping due to idle. You can still sleep manually or by closing the lid. Desktop only.",
   "settings.oracleReview": "Oracle dual-model review",
   "settings.oracleReviewDescription":
-    "After a turn finishes successfully with file changes, a review model automatically audits this turn's diff. Pick the review model from the shield menu next to the input box; it defaults to the session model.",
+    "After a turn finishes successfully with file changes, a review model automatically audits this turn's diff. Pick the review model from the shield menu next to the input box; it defaults to the session model. Turning this off stops the automatic review only — the shield/deep buttons and the per-turn Review this turn entry can still start a review manually.",
   "settings.messageStreamShowReasoning": "Show reasoning",
   "settings.messageStreamShowReasoningDescription":
     "Show full reasoning inside the message stream. When off, the first reasoning item in each turn remains visible.",

@@ -329,6 +329,11 @@ export function resolveOracleRequestOptions(
 /** SessionPane → composer / 行渲染注入的完整控制面；composer 不再自持 hook 实例。 */
 export interface OracleReviewController {
   state: OracleReviewState;
+  /**
+   * 「回合成功后的自动把关」开关（settings.oracleReviewEnabled）。语义仅限自动把关：
+   * 手动入口（composer 两个按钮 / 轮尾 reviewTurnHeader）不据此隐藏——关掉自动不代表
+   * 不想手动审查，用同一开关连带隐藏入口会让用户找不到手动审查。
+   */
   enabled: boolean;
   /** pending 已等待秒数（每秒跳动）；结果/错误态归零。 */
   pendingElapsedSeconds: number;

@@ -144,6 +144,7 @@ const zhCN: Record<string, string> = {
   "chat.composer.optimizeModelFollow": "跟随会话模型",
   "chat.composer.optimizePromptFailed": "提示词优化失败，请稍后重试",
   "chat.composer.optimizePromptNoModel": "没有可用的模型，请先在模型设置中选择",
+  "chat.composer.optimizePromptViewLoading": "模型列表尚未加载完成，请稍后再试",
   "chat.composer.optimizePromptUnknownModel": "所选优化模型已不可用，请在模型设置中重新选择",
   "chat.composer.optimizePromptTooLong": "草稿过长，无法整体优化，请先精简或拆分后再试",
   "chat.composer.optimizePromptParseFailed": "优化结果无法解析，已保留原文",
@@ -2199,7 +2200,7 @@ const zhCN: Record<string, string> = {
     "打开后阻止系统因空闲进入休眠（仍可手动睡眠/合盖休眠）。桌面端全局生效。",
   "settings.oracleReview": "Oracle 双模型把关",
   "settings.oracleReviewDescription":
-    "回合成功结束且改过文件时，自动用把关模型复审本回合代码改动；把关模型在输入框旁的盾牌菜单选择，默认跟随会话模型。",
+    "回合成功结束且改过文件时，自动用把关模型复审本回合代码改动；把关模型在输入框旁的盾牌菜单选择，默认跟随会话模型。关闭后仅停用这份自动把关，输入框旁的盾牌/深度按钮与轮尾「审查这一回合」入口仍可手动发起审查。",
   "settings.messageStreamShowReasoning": "显示思考过程",
   "settings.messageStreamShowReasoningDescription":
     "在消息流中展示完整的模型思考内容；关闭时每轮仍展示第一次思考。",
