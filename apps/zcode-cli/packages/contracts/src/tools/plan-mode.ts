@@ -43,7 +43,6 @@ export const EnterPlanModeOutputSchema = z
         "yolo",
         "auto",
         "research",
-        "workflow",
         "minimal",
         "zcodeUpdate",
       ])
@@ -56,7 +55,6 @@ export const EnterPlanModeOutputSchema = z
         "yolo",
         "auto",
         "research",
-        "workflow",
         "minimal",
         "zcodeUpdate",
       ])
@@ -130,7 +128,6 @@ export const ExitPlanModeOutputSchema = z
         "yolo",
         "auto",
         "research",
-        "workflow",
         "minimal",
         "zcodeUpdate",
       ])
@@ -138,7 +135,7 @@ export const ExitPlanModeOutputSchema = z
     planEnabled: z.boolean().optional(),
     previousPlanEnabled: z.boolean().optional(),
     mode: z
-      .enum(["build", "edit", "yolo", "auto", "research", "workflow", "minimal", "zcodeUpdate"])
+      .enum(["build", "edit", "yolo", "auto", "research", "minimal", "zcodeUpdate"])
       .describe("Current session mode after exiting plan mode."),
     allowedPrompts: z.array(ExitPlanModeAllowedPromptSchema).optional(),
     // 批准确认窗上用户指定的执行模型；缺省 = 跟随会话模型（同回合继续，现行行为）。

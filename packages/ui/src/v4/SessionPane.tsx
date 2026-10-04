@@ -260,7 +260,6 @@ import type {
   OpenWorkflowActorSessionSideTabRequest,
   OpenWorkflowArtifactSideTabRequest,
   OpenScopedWorkflowRunDirectorySideTabRequest,
-  OpenScopedWorkflowStageSideTabRequest,
   OpenScopedWorkflowWorkspaceSideTabRequest,
   OpenWorkflowWorkspaceSideTabRequest,
   OpenScopedSubagentSideTabRequest,
@@ -365,8 +364,6 @@ export interface SessionPaneProps {
   /** 通知行的产物 chip → 全尺寸查看 tab。 */
   onOpenWorkflowArtifact?: (request: OpenScopedWorkflowArtifactSideTabRequest) => void;
   onOpenWorkflowRunDirectory?: (request: OpenScopedWorkflowRunDirectorySideTabRequest) => void;
-  /** composer「工作流」标记 chip → 项目开发模式阶段侧栏 tab。 */
-  onOpenWorkflowStage?: (request: OpenScopedWorkflowStageSideTabRequest) => void;
   /** 工具卡上的子代理药丸 → transcript tab；与详情页子代理行同一个宿主处理器。 */
   onOpenWorkflowActorSession?: (request: OpenScopedWorkflowActorSessionSideTabRequest) => void;
   /** 工具卡上的脚本药丸 → 脚本 transcript tab；与详情页脚本行同一个宿主处理器。 */
@@ -542,7 +539,6 @@ export function SessionPane({
   onOpenWorkflowRun,
   onOpenWorkflowArtifact,
   onOpenWorkflowRunDirectory,
-  onOpenWorkflowStage,
   onOpenWorkflowActorSession,
   onOpenWorkflowWorkspace,
   conversationFindQuery = "",
@@ -1892,17 +1888,6 @@ export function SessionPane({
     },
     [onOpenWorkflowRunDirectory, remoteSessionId, workspaceIdentity, workspacePath],
   );
-  // composer「工作流」标记 chip 的入口：chip 只说「打开」，会话与 workspace 身份在这里补齐
-  // （同 run 目录页的约定）。草稿会话没有 sessionId，回调直接不返回，chip 在 composer 侧缺席。
-  const handleOpenWorkflowStageFromComposer = useCallback(() => {
-    if (!sessionId) return;
-    onOpenWorkflowStage?.({
-      parentSessionId: sessionId,
-      workspacePath,
-      ...(workspaceIdentity ? { workspaceIdentity } : {}),
-      ...(remoteSessionId ? { remoteSessionId } : {}),
-    });
-  }, [onOpenWorkflowStage, remoteSessionId, sessionId, workspaceIdentity, workspacePath]);
   const handleAddSelectionToCurrentTask = useCallback(
     (reference: ConversationSelectionReference) => {
       if (!sessionId) return;
@@ -4475,7 +4460,6 @@ export function SessionPane({
       onSelectModel={handleSelectModel}
       onSelectThought={handleSelectThought}
       onSwitchMode={handleSwitchMode}
-      onOpenWorkflowStage={sessionId ? handleOpenWorkflowStageFromComposer : undefined}
       onOpenRunningBackgroundWorks={
         sessionId && runningBackgroundWorkCount > 0 ? handleOpenRunningBackgroundWorks : undefined
       }

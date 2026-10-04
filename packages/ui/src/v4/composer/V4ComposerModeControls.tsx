@@ -1,5 +1,5 @@
 import { memo, useCallback, useMemo } from "react";
-import { LightbulbIcon, ListChecks, XIcon, ChevronDownIcon } from "lucide-react";
+import { LightbulbIcon, XIcon, ChevronDownIcon } from "lucide-react";
 import {
   TID_CHAT_MODE_SELECT_TRIGGER,
   TID_CHAT_MODE_SELECT_ITEM,
@@ -45,8 +45,6 @@ function V4ComposerModeSwitchImpl({
   activeConfigPicker,
   onConfigPickerOpenChange,
   onSwitchMode,
-  onOpenWorkflowStage,
-  workflowStageActive,
 }: Pick<
   V4ComposerToolbarProps,
   | "workspacePath"
@@ -57,12 +55,7 @@ function V4ComposerModeSwitchImpl({
   | "activeConfigPicker"
   | "onConfigPickerOpenChange"
   | "onSwitchMode"
-> & {
-  /** live 会话模式是否为 workflow——必须读快照，不能读草稿（草稿只是下一次提交的意图）。 */
-  workflowStageActive?: boolean;
-  /** 点击「工作流」标记 chip 打开阶段进度侧栏；缺席（草稿会话等）则不渲染 chip。 */
-  onOpenWorkflowStage?: () => void;
-}) {
+>) {
   const { intl } = useZCodeIntl();
   const displayProvider = provider ?? ZCODE_AGENT_PROVIDER;
   const modeShortcutLabel = useShortcutCommandLabel("cycleSessionMode");
@@ -124,11 +117,10 @@ function V4ComposerModeSwitchImpl({
               aria-label={intl.formatMessage({ id: "chat.toolbar.mode.label" })}
               className={cn(
                 "group/mode h-7 gap-1 rounded-lg px-2 text-ui-base data-[composer-compact=true]:w-7 data-[composer-compact=true]:px-0",
-                // yolo / workflow / zcodeUpdate / minimal 同为自动执行权限，触发按钮同用警示色提示。
+                // yolo / zcodeUpdate / minimal 同为自动执行权限，触发按钮同用警示色提示。
                 // 与 display.tsx 的 isHighPermissionModeValue 同值域；这里拿不到那个 helper
                 // （它在展示层文件内部），改它时两处要一起改。
                 (selected.id === "yolo" ||
-                  selected.id === "workflow" ||
                   selected.id === "zcodeUpdate" ||
                   selected.id === "minimal") &&
                   "text-warning hover:text-warning",
@@ -226,34 +218,6 @@ function V4ComposerModeSwitchImpl({
           </ControlHintTooltip>
         </span>
       )}
-      {workflowStageActive && onOpenWorkflowStage ? (
-        // 项目开发模式模式激活时的阶段面板入口：chip 只负责打开侧栏（与 plan chip 的
-        // 「点击退出」不同，这里点击是导航而不是切模式——退出走模式下拉）。
-        <span data-testid="v4-composer-workflow-marker" className="flex items-center gap-1">
-          <span
-            role="separator"
-            aria-orientation="vertical"
-            className="h-3 w-px shrink-0 bg-border"
-          />
-          <ControlHintTooltip title={intl.formatMessage({ id: "workflow.stagePane.openMarker" })}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={disabled}
-              data-composer-collapse-priority="2"
-              onClick={onOpenWorkflowStage}
-              aria-label={intl.formatMessage({ id: "workflow.stagePane.openMarker" })}
-              className="group/workflow h-7 gap-1 rounded-lg px-2 text-ui-base text-foreground-subtle hover:text-foreground-subtle data-[composer-compact=true]:w-7 data-[composer-compact=true]:px-0"
-            >
-              <ListChecks className="size-4" />
-              <span className="inline group-data-[composer-compact=true]/workflow:hidden">
-                {intl.formatMessage({ id: "mode.workflow" })}
-              </span>
-            </Button>
-          </ControlHintTooltip>
-        </span>
-      ) : null}
     </div>
   );
 }

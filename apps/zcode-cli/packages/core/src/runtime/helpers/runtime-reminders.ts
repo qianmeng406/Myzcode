@@ -123,67 +123,8 @@ const RESEARCH_MODE_SPARSE_REMINDER = [
   "资料查询模式仍处于激活状态（完整指引见会话前文）。只读检索：用渠道工具多路检索并交叉验证，关键结论标注来源链接；不要尝试执行命令或修改文件。",
 ];
 
-// 项目开发模式（workflow mode）：文档驱动交付 SOP（方法学出处《项目开发标准工作流》）。
-// 与 research reminder 同为静态文案——模型每轮据此读台账定位阶段；对抗轮的 saved 工作流名
-// （wf-fe-acceptance / wf-adversarial-audit）是用户级资产，缺失时 reminder 要求如实告知而非手工模拟。
-const WORKFLOW_MODE_FULL_REMINDER = [
-  "# 项目开发模式 (Project Development Mode)",
-  "",
-  "当前处于项目开发模式。你按《项目开发标准工作流》交付本项目：文档驱动、双轨并行、对抗式验收、证据链交付。本模式持续生效直到用户切换模式；权限等同「完全访问」：命令与文件修改自动执行、不再逐次确认——因此纪律全靠本指引与台账约束，破坏性操作（删库/重置/迁移、任何指向非隔离环境或生产数据的动作）执行前仍先向用户说明。",
-  "",
-  "## 每轮先定位",
-  "",
-  "1. 读 `workflow/工作台账.md`（找不到再查 `docs/` 与根目录的 `工作台账*.md`）。",
-  "2. 有台账 → 从「当前阶段」与未完成条目续接，不重做已完成阶段。",
-  "3. 无台账 → 先判断项目形态再决定起点，二者必居其一：",
-  "   - **新项目**（工作区基本没有源码/工程文件）→ 从 W0 开始，W0 的首个产出就是把台账建到 `workflow/工作台账.md`。",
-  "   - **接手已有项目**（已有源码/在运行的业务）→ 先执行「接手盘点」（见下节）。盘点完成前不做任何开发改动。",
-  "4. 台账需含机器标记行 `<!-- std-workflow v1 stage:W2-F -->`（stage 值如 W0 / W0.5 / W1-F / W2-B / W5 / W11），每次推进阶段必须同步更新它。",
-  "5. 回复第一行用【Wx 阶段名】标注当前阶段；接手盘点期间标注【接手盘点】。",
-  "",
-  "## 阶段地图",
-  "",
-  "W0 分母冻结（需求/页面清单/配置项/权限矩阵/消息类型）→ W0.5 UI 设计冻结（UI 规范+3 基线页+用户视觉确认）→",
-  "前端轨 W1-F 工程基座 → W2-F 演示数据 → W3-F 专项验收〔对抗轮①〕→ W4-F 修复复测；后端轨 W1-B 工程基座 → W2-B 逐模块开发（双轨并行）→",
-  "W5 逐页联调（接真实接口 + 去演示化）→ W6 独立验收〔对抗轮②〕→ W7 缺陷修复与复验 → W8 发布复核〔对抗轮③〕→ W9 发布 → W10 需求终审〔对抗轮④〕→ W11 交付归档",
-  "",
-  "## 接手已有项目（存量项目无台账时的强制第一步）",
-  "",
-  "接手从未用过本流程的项目时，**不要从零重做，也不要默认代码现状可信**。先做只读盘点：",
-  "",
-  "1. **考古现状**（只读）：页面/路由清单、后端模块与接口、数据库 schema 与迁移、权限控制实际落点、配置项、启动/构建/迁移方式、现有测试与既有验收证据（如 独立验收/、验收截图/），已有文档（README/需求/设计/接口）一并收集。",
-  "2. **补基准**：文档齐全 → 沿用并在台账标注「沿用既有文档」；缺失 → 从代码反推基准文档（需求基线/页面清单，标注「反推自代码，待用户确认」）写到 `workflow/` 下。",
-  "3. **与用户确认分母与起点**：把盘点结论（功能清单、数据与权限现状、已验证 vs 未验证）和拟判定的阶段一起给用户确认，确认后才冻结台账——分母不能替用户拍板。",
-  "4. **建台账**：`workflow/工作台账.md`（含 stage 标记行，stage=判定阶段）。用户确认已验证的标 ✅（注明证据来源）；只写了没验证的一律标 ⚠️ 待验收——**代码能跑 ≠ 已通过**。",
-  "5. **从判定阶段续推**（默认规则，拿不准就问用户）：代码完整但零验收证据 → W5 逐页联调（含去演示化）或直接 W6 独立验收；部分页面/模块完成 → 双轨对应阶段并补分母；只缺交付验收 → W6/W8。已确认完成的工作不重做，缺口按该阶段门禁补齐。首轮对抗轮没有上一轮证据时 `previousEvidenceDir` 留空并如实说明，审查员从基准文档与代码独立审查。",
-  "",
-  "## 对抗轮（不要让用户做多余工作）",
-  "",
-  "到达 W3-F / W6 / W8 / W10 时，直接用 CreateWorkflow 的 saved 源运行全局工作流，参数从台账与目录结构自动解析，只向用户发起一次运行确认：",
-  "- W3-F → `wf-fe-acceptance`（pageDesignDoc/requirementDoc/uiSpecDoc/frontendDir/outputDir/devServer）",
-  "- W6/W8/W10 → `wf-adversarial-audit`（roundType 分别为 independent-acceptance / release-review / requirement-audit；baselineDocs/previousEvidenceDir/outputDir）",
-  "读报告 → 按缺陷整改 → 复跑，直至结论为放行。工作流缺失时如实告知并给出命令替代，不要手工编造工作流报告。",
-  "",
-  "## 六铁律（摘要）",
-  "",
-  "分母先行（先冻结清单再开发）｜三态判定（✅完成/⚠️部分/❌缺失，禁止二态）｜证据只增不改（每轮新目录，旧证据只读）｜不许放宽标准｜对抗式复核（任务是推翻上一轮结论）｜精确标识（文件:行号）",
-  "",
-  "## 台账与续接",
-  "",
-  "完成条目即时更新台账（状态/证据路径）；每轮结束写续接记录（下一步/环境状态/未决问题）。细则可读 `~/.zcode/skills/std-dev-workflow/references/`（stages/takeover/ui/frontend/backend/evidence/release）。",
-  "",
-  "## 边界",
-  "",
-  "- 用户明确要求临时脱离流程时可执行，但在台账中标注为越例。",
-  "- 不伪造证据、不跳过门禁；无法判定时如实说明无法判定。",
-];
-
-const WORKFLOW_MODE_SPARSE_REMINDER = [
-  "项目开发模式仍处于激活状态（完整指引见会话前文）：先读 workflow/工作台账.md 定位当前阶段再行动（无台账的存量项目先接手盘点，不要从零重做）；每次推进更新 stage 标记；到达对抗轮（W3-F/W6/W8/W10）直接运行 saved 工作流 wf-fe-acceptance / wf-adversarial-audit。",
-];
-
 // ZCode 更新模式（zcodeUpdate）：跟进官方发版的 SOP，四阶段固定，逐版本一条台账记录。
-// 与 workflow reminder 同为静态文案。最关键的一条约束：连不通上游时必须停在盘点阶段并
+// 静态文案。最关键的一条约束：连不通上游时必须停在盘点阶段并
 // 明确报「代理未就绪」——拿不到 diff 就不许继续，更不许凭印象描述官方改了什么。
 const ZCODE_UPDATE_MODE_FULL_REMINDER = [
   "# ZCode 更新模式 (ZCode Update Mode)",
@@ -337,15 +278,13 @@ export function buildRuntimeModeReminderBody(
   planEnabled = mode === "plan",
 ): string | null {
   const researchEnabled = mode === "research";
-  // plan+workflow 组合可达（EnterPlanMode 不改 mode；composer 勾选计划也保留当前 mode），
+  // plan+zcodeUpdate 组合可达（EnterPlanMode 不改 mode；composer 勾选计划也保留当前 mode），
   // 此时权限真值是 plan 只读——必须给 plan 指引而不是宣称「完全访问」的 SOP，否则模型
-  // 会按全权行事、每条命令被拒。所以 workflow 分支显式排除 planEnabled。
-  const workflowEnabled = mode === "workflow" && !planEnabled;
-  // zcodeUpdate 与 workflow 同理：同样宣称全权，同样必须让位给 plan 只读指引。
+  // 会按全权行事、每条命令被拒。所以 zcodeUpdate 分支显式排除 planEnabled。
   const zcodeUpdateEnabled = mode === "zcodeUpdate" && !planEnabled;
   // 极简模式**刻意不给任何 reminder**：它的定义就是不发注入，多一条模式提醒就自相矛盾。
   // 若将来要给它加提醒，先确认那不与「极简」的语义冲突。
-  if (!planEnabled && !researchEnabled && !workflowEnabled && !zcodeUpdateEnabled) return null;
+  if (!planEnabled && !researchEnabled && !zcodeUpdateEnabled) return null;
 
   const { foundRuntimeModeReminder, humanTurnsSinceReminder } =
     getRuntimeModeReminderTurnCount(entries);
@@ -360,9 +299,6 @@ export function buildRuntimeModeReminderBody(
   const isFirstReminder = nextReminderCount % RUNTIME_MODE_REMINDER_CONFIG.FULL_REMINDER_EVERY_N_ATTACHMENTS === 1;
   if (researchEnabled) {
     return (isFirstReminder ? RESEARCH_MODE_FULL_REMINDER : RESEARCH_MODE_SPARSE_REMINDER).join("\n");
-  }
-  if (workflowEnabled) {
-    return (isFirstReminder ? WORKFLOW_MODE_FULL_REMINDER : WORKFLOW_MODE_SPARSE_REMINDER).join("\n");
   }
   if (zcodeUpdateEnabled) {
     return (

@@ -70,7 +70,6 @@ const SWITCHABLE_MODES: ReadonlySet<string> = new Set([
   "plan",
   "yolo",
   "research",
-  "workflow",
   "minimal",
   "zcodeUpdate",
 ]);

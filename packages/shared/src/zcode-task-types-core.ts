@@ -154,7 +154,6 @@ export type ZCodeTaskMode =
   | "autoEdit"
   | "build"
   | "research"
-  | "workflow"
   | "minimal"
   | "zcodeUpdate";
 

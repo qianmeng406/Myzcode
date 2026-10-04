@@ -7,7 +7,6 @@ export const submissionModeSchema = z.enum([
   "plan",
   "yolo",
   "research",
-  "workflow",
   "minimal",
   "zcodeUpdate",
 ]);

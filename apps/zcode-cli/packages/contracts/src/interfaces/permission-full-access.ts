@@ -26,7 +26,6 @@ export const permissionFullAccessReceiptSchema = z
               "auto",
               "plan",
               "research",
-              "workflow",
               "minimal",
               "zcodeUpdate",
             ]),

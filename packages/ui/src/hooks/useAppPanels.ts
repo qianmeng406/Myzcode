@@ -30,7 +30,6 @@ import {
   openWorkflowRunSidePane,
   replaceWorkflowRunSidePane,
   openWorkflowRunDirectorySidePane,
-  openWorkflowStageSidePane,
   openWorkflowActorSessionSidePane,
   openWorkflowWorkspaceSidePane,
   openWorkflowArtifactSidePane,
@@ -69,7 +68,6 @@ import {
   type OpenScopedPlanDetailSideTabRequest,
   type OpenScopedWorkflowRunSideTabRequest,
   type OpenScopedWorkflowRunDirectorySideTabRequest,
-  type OpenScopedWorkflowStageSideTabRequest,
   type OpenScopedWorkflowActorSessionSideTabRequest,
   type OpenScopedWorkflowArtifactSideTabRequest,
   type OpenScopedWorkflowWorkspaceSideTabRequest,
@@ -1003,24 +1001,6 @@ export function useAppPanels(options: {
     [commitOpenedSidePaneState],
   );
 
-  const handleOpenWorkflowStage = useCallback(
-    (request: OpenScopedWorkflowStageSideTabRequest) => {
-      const workspaceKey = request.workspaceIdentity?.trim() || request.workspacePath;
-      setIsSidePaneCollapsed(false);
-      commitOpenedSidePaneState((current) =>
-        openWorkflowStageSidePane(current, {
-          ...request,
-          workspaceKey,
-        }),
-      );
-      logger.debug("[App] 打开项目开发模式阶段右侧 tab", {
-        parentSessionId: request.parentSessionId,
-        workspaceKey,
-      });
-    },
-    [commitOpenedSidePaneState],
-  );
-
   const handleOpenWorkflowActorSession = useCallback(
     (request: OpenScopedWorkflowActorSessionSideTabRequest) => {
       const workspaceKey = request.workspaceIdentity?.trim() || request.workspacePath;
@@ -1642,7 +1622,6 @@ export function useAppPanels(options: {
     handleOpenPlanDetail,
     handleOpenWorkflowRun,
     handleOpenWorkflowRunDirectory,
-    handleOpenWorkflowStage,
     handleOpenWorkflowActorSession,
     handleOpenWorkflowWorkspace,
     handleOpenWorkflowArtifact,

@@ -965,7 +965,6 @@ const zhCN: Record<string, string> = {
   "sidePane.selectionChat": "辅助对话",
   "sidePane.workflowRun": "工作流实例",
   "sidePane.workflowDirectory": "工作流目录",
-  "sidePane.workflowStage": "项目开发模式",
   "sidePane.workflowActor": "工作流子代理",
   "sidePane.workflowScript": "脚本步骤",
   "sidePane.workflowArtifact": "产物",
@@ -989,27 +988,6 @@ const zhCN: Record<string, string> = {
   // 页脚行刻意是「已结束的工作流」而不是「已完成」：这个桶里也有失败与取消的 run，
   // 而恰恰是它们最值得回去看（可恢复的那些）。
   "chat.statusPanel.endedWorkflows": "已结束的工作流",
-  // 项目开发模式（workflow mode）阶段侧栏：读 workflow/工作台账.md，渲染 W0→W11 阶段条。
-  "workflow.stagePane.title": "项目开发模式",
-  "workflow.stagePane.refresh": "刷新台账",
-  "workflow.stagePane.openMarker": "查看阶段进度",
-  "workflow.stagePane.mainLane": "主线",
-  "workflow.stagePane.frontendLane": "前端轨",
-  "workflow.stagePane.backendLane": "后端轨",
-  "workflow.stagePane.currentStage": "当前阶段",
-  "workflow.stagePane.currentAdversarial": "当前即对抗轮 {stage}（{workflow}）",
-  "workflow.stagePane.nextAdversarial": "下一个对抗轮 {stage}（{workflow}）",
-  "workflow.stagePane.noneAdversarial": "对抗轮已全部过去",
-  "workflow.stagePane.loading": "正在读取台账…",
-  "workflow.stagePane.truncated":
-    "台账超过 256KB 已截断显示；若阶段标记行在被截断部分，阶段条将不可用——请精简台账或把标记行移到文件开头。",
-  "workflow.stagePane.unknownStage": "台账标记「{stage}」不在已知阶段集合内，以下不做先后推断。",
-  "workflow.stagePane.noMarker":
-    "台账中未找到阶段标记行（<!-- std-workflow v1 stage:… -->），以下为台账原文。",
-  "workflow.stagePane.empty":
-    "未找到 workflow/工作台账.md。发送一条消息即可：新项目会从 W0 开始建立台账；已有项目会先做接手盘点（只读考古现状 → 与你确认分母与起点 → 从判定阶段续推），不会从零重做。",
-  "workflow.stagePane.readError":
-    "台账读取失败（可能是远程工作区或权限问题），可点击右上角刷新重试。",
   "workflowDirectory.title": "工作流实例",
   "workflowDirectory.running": "正在运行",
   "workflowDirectory.runningEmpty": "没有正在运行的工作流",
@@ -5774,13 +5752,11 @@ const zhCN: Record<string, string> = {
 
   // 模式
   "mode.plan": "计划",
-  "mode.workflow": "项目开发",
   "mode.label.glm.build": "变更前确认",
   "mode.label.glm.edit": "自动编辑",
   "mode.label.glm.plan": "计划模式",
   "mode.label.glm.yolo": "完全访问",
   "mode.label.glm.research": "资料查询",
-  "mode.label.glm.workflow": "项目开发模式",
   "mode.label.glm.minimal": "极简模式",
   "mode.label.glm.zcodeUpdate": "ZCode 更新模式",
   "mode.description.glm.build": "改文件前先问我。",
@@ -5788,8 +5764,6 @@ const zhCN: Record<string, string> = {
   "mode.description.glm.plan": "编辑前先出计划。",
   "mode.description.glm.yolo": "减少确认次数。",
   "mode.description.glm.research": "只读联网检索：查文档、问答与文献，写操作被拒绝。",
-  "mode.description.glm.workflow":
-    "文档驱动的项目交付：按台账推进阶段门禁，对抗轮自动运行复核工作流；命令与文件修改自动执行。",
   "mode.description.glm.minimal":
     "只下发系统工具与最小上下文：保留身份行与工作目录，去掉技能、记忆、项目指令与 MCP 工具；命令与文件修改自动执行。",
   "mode.description.glm.zcodeUpdate":

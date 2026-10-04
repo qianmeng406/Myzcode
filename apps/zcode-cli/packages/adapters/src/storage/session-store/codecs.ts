@@ -33,7 +33,6 @@ export function isCollaborationMode(value: unknown): value is CollaborationMode 
     value === "yolo" ||
     value === "auto" ||
     value === "research" ||
-    value === "workflow" ||
     value === "minimal" ||
     value === "zcodeUpdate"
   );

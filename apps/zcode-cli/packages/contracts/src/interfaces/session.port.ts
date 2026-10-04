@@ -36,7 +36,6 @@ export type CollaborationMode =
   | "yolo"
   | "auto"
   | "research"
-  | "workflow"
   | "minimal"
   | "zcodeUpdate";
 export type SessionStatus = "idle" | "running" | "waiting" | "paused" | "completed" | "error";
@@ -298,7 +297,7 @@ export interface TurnInputIntentMetadata {
   /** Admission 时固定；Queue/Guide 后续不得重新读取 Composer 或 Session 最新选择。 */
   modelSelection?: ModelSelection;
   /** 与本次用户 Submission 一起固定的协作模式。 */
-  mode?: "build" | "edit" | "plan" | "yolo" | "research" | "workflow" | "minimal" | "zcodeUpdate";
+  mode?: "build" | "edit" | "plan" | "yolo" | "research" | "minimal" | "zcodeUpdate";
   admissionSeq: number;
   admittedAt: number;
   requestedDelivery: "auto" | "startNow" | "queue" | "guide";

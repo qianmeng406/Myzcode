@@ -136,7 +136,6 @@ const STABLE_FORK_MODES = new Set<CollaborationMode>([
   "yolo",
   "auto",
   "research",
-  "workflow",
   "minimal",
   "zcodeUpdate",
 ]);

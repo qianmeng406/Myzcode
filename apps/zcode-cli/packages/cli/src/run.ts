@@ -142,7 +142,6 @@ const normalizePromptMode = (value: string | undefined): CliPermissionMode | und
     mode === "edit" ||
     mode === "yolo" ||
     mode === "research" ||
-    mode === "workflow" ||
     mode === "minimal"
   ) {
     return mode;
@@ -151,7 +150,7 @@ const normalizePromptMode = (value: string | undefined): CliPermissionMode | und
   // 否则 `--mode zcodeUpdate` 会被小写化后判成不支持。
   if (mode === "zcodeupdate") return "zcodeUpdate";
   throw new Error(
-    `Unsupported --mode value: ${value}. Supported modes: build, edit, plan, research, workflow, minimal, zcodeUpdate, yolo.`,
+    `Unsupported --mode value: ${value}. Supported modes: build, edit, plan, research, minimal, zcodeUpdate, yolo.`,
   );
 };
 

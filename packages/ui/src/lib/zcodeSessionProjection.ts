@@ -44,12 +44,6 @@ const ZCODE_AGENT_MODE_OPTIONS = [
     description: "Read-only web research across docs, code Q&A, and academic sources.",
   },
   {
-    id: "workflow",
-    name: "Project development mode",
-    description:
-      "Document-driven delivery with staged gates and adversarial review; commands and edits run without confirmation.",
-  },
-  {
     id: "minimal",
     name: "Minimal mode",
     description:

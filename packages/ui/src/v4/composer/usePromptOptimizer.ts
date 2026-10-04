@@ -42,53 +42,59 @@ const OPTIMIZE_REQUEST_TIMEOUT_MS = 30_000;
 
 export interface PromptOptimizerRequest {
   draft: string;
-  /** 发起时的草稿版本凭据；应用候选前用它确认输入框没变过。 */
+  /** 发起时的草稿版本凭据（内容修订号，不是文本本身）；应用候选前用它确认输入框没变过。 */
   version: string;
   mode: PromptOptimizerMode;
   contextRange: PromptOptimizerContextRange;
   /** 当前会话窗口（只读，不回溯分页）。 */
   rows: readonly ConversationRow[];
-  /** 当前会话模型选择；缺席时读 modelSelection 视图兜底（不做跨提供方静默切换）。 */
-  selection: ModelSelection | null | undefined;
-}
-
-/** 只取校验所需字段；视图类型由服务层持有，避免把 UI 展示模型耦合进请求路径。 */
-interface OptimizerModelView {
-  preferredSelection?: ModelSelection | null;
-  providers: readonly {
-    providerId: string;
-    models: readonly {
-      modelId: string;
-      config?: { optionSpecs?: { reasoningLevel?: { values?: readonly string[] } } };
-    }[];
-  }[];
+  /** 当前会话模型选择；调用方已在自家 ModelSelectionView 里解析过。 */
+  selection: ModelSelection | null;
+  /**
+   * 所选模型声明的推理档位；`null` = 该模型不在当前视图里（已下线/换提供方）。
+   * 由调用方传入而不是在 hook 里 await getView()：await 会把「分配请求身份」推迟到
+   * 第一个挂起点之后，造成重复请求与取消空窗。
+   */
+  modelReasoningLevels: readonly string[] | null;
+  /**
+   * 组件本地的 ModelSelectionView 是否已就绪。
+   * 用于区分两种完全不同的失败：视图还没加载完（稍后重试即可）与模型真的不在列表里
+   * （需要用户重新选择）。缺了这个标志，视图未就绪会被误报成「模型已不可用」。
+   */
+  modelViewReady: boolean;
+  /** 发起时草稿是否含 mention/附件等纯文本无法重建的内容（决定能否自动替换）。 */
+  richContext: boolean;
 }
 
 type SelectionResolution =
-  | { ok: true; selection: ModelSelection }
-  | { ok: false; reason: "no-model" | "unknown-model" };
+  | { ok: true; selection: ModelSelection; selectionKey: string }
+  | { ok: false; reason: "no-model" | "view-loading" | "unknown-model" };
 
-function resolveSelection(
-  pick: ModelSelection | null | undefined,
-  view: OptimizerModelView | null,
-): SelectionResolution {
-  const chosen = pick ?? view?.preferredSelection ?? null;
+/** 导出仅为单测：三态失败原因的判定必须可验证，不能只靠 UI 手测。 */
+export function resolveOptimizerSelection(request: PromptOptimizerRequest): SelectionResolution {
+  const chosen = request.selection;
   if (!chosen) {
     return { ok: false, reason: "no-model" };
   }
-  const model = view?.providers
-    .find((provider) => provider.providerId === chosen.providerId)
-    ?.models.find((candidate) => candidate.modelId === chosen.modelId);
-  if (!model) {
-    // 模型已下线/换提供方：明确报错，不静默改用别的模型。
+  if (!request.modelViewReady) {
+    return { ok: false, reason: "view-loading" };
+  }
+  const levels = request.modelReasoningLevels;
+  if (levels === null) {
+    // 视图已就绪却找不到该模型：已下线/换提供方。明确报错，不静默改用别的模型。
     return { ok: false, reason: "unknown-model" };
   }
-  const levels = model.config?.optionSpecs?.reasoningLevel?.values ?? [];
+  const current = chosen.options?.reasoningLevel;
+  const baseKey = `${chosen.providerId}/${chosen.modelId}`;
   if (levels.length === 0) {
-    return { ok: true, selection: { providerId: chosen.providerId, modelId: chosen.modelId } };
+    // 模型不接受推理档：带档位会被 adapters 校验拒绝，直接去掉。
+    return {
+      ok: true,
+      selection: { providerId: chosen.providerId, modelId: chosen.modelId },
+      selectionKey: baseKey,
+    };
   }
   // 部分渠道强制要求推理档；缺省/失效时补最低公开档（与辅助快速通道一致）。
-  const current = chosen.options?.reasoningLevel;
   const reasoningLevel = current && levels.includes(current) ? current : levels[0]!;
   return {
     ok: true,
@@ -97,6 +103,7 @@ function resolveSelection(
       modelId: chosen.modelId,
       options: { reasoningLevel },
     },
+    selectionKey: `${baseKey}#${reasoningLevel}`,
   };
 }
 
@@ -185,6 +192,7 @@ export function usePromptOptimizer(options: UsePromptOptimizerOptions) {
     async (request: PromptOptimizerRequest): Promise<void> => {
       const agentService = services?.zcodeAgentService;
       const draft = request.draft.trim();
+      // 单飞检查必须同步完成：任何 await 之后再判 pending 都挡不住连点。
       if (!agentService || !draft || isPromptOptimizerPending(scopeKey)) {
         return;
       }
@@ -192,39 +200,39 @@ export function usePromptOptimizer(options: UsePromptOptimizerOptions) {
         toast(intl.formatMessage({ id: "chat.composer.optimizePromptTooLong" }));
         return;
       }
-      // 完全相同输入已有成功结果：直接复用，不打第二次请求。
-      const existing = getPromptOptimizerState(scopeKey);
-      if (
-        existing?.status === "ready" &&
-        existing.baseDraft === draft &&
-        existing.baseVersion === request.version &&
-        existing.mode === request.mode &&
-        existing.contextRange === request.contextRange
-      ) {
-        return;
-      }
-
-      const view = (await services?.modelSelectionService
-        .getView()
-        .catch(() => null)) as unknown as OptimizerModelView | null;
-      const resolution = resolveSelection(request.selection, view);
+      const resolution = resolveOptimizerSelection(request);
       if (!resolution.ok) {
         toast(
           intl.formatMessage({
             id:
               resolution.reason === "no-model"
                 ? "chat.composer.optimizePromptNoModel"
-                : "chat.composer.optimizePromptUnknownModel",
+                : resolution.reason === "view-loading"
+                  ? "chat.composer.optimizePromptViewLoading"
+                  : "chat.composer.optimizePromptUnknownModel",
           }),
         );
+        return;
+      }
+      const context = buildPromptOptimizerContext(
+        request.contextRange === "conversation" ? request.rows : [],
+      );
+      // 复用键必须含模型选择与上下文材料：否则换模型、或会话里多了关键对话后，
+      // 再点一次仍会拿到旧结果。
+      const cacheKey = [
+        resolution.selectionKey,
+        request.mode,
+        request.contextRange,
+        request.version,
+        `${draft.length}:${context.text.length}:${context.text}`,
+      ].join("\u0001");
+      const existing = getPromptOptimizerState(scopeKey);
+      if (existing?.status === "ready" && existing.cacheKey === cacheKey) {
         return;
       }
 
       const requestId = nextPromptOptimizerRequestId(scopeKey);
       const operationId = `prompt-optimizer:${requestId}:${Math.random().toString(36).slice(2, 10)}`;
-      const context = buildPromptOptimizerContext(
-        request.contextRange === "conversation" ? request.rows : [],
-      );
       const startedAt = Date.now();
       setPromptOptimizerState(scopeKey, {
         status: "pending",
@@ -235,6 +243,8 @@ export function usePromptOptimizer(options: UsePromptOptimizerOptions) {
         mode: request.mode,
         contextRange: request.contextRange,
         startedAt,
+        cacheKey,
+        richContext: request.richContext,
       });
 
       try {
@@ -332,32 +342,44 @@ export function usePromptOptimizer(options: UsePromptOptimizerOptions) {
 
   /**
    * 记录撤销点（应用候选时由 Composer 调用）：appliedText 是刚写入输入框的正文，
-   * undoText 是替换前的正文。前者让 Composer 判定「用户是否还在这次的替换状态上」，
-   * 避免后续编辑/发送后仍用旧快照覆盖新内容。
+   * undoText/undoEditorStateJson 是替换前的编辑器快照。前者让 Composer 判定
+   * 「用户是否还在这次的替换状态上」，后者让撤销能还原 mention/格式而不只是纯文本。
    */
   const markApplied = useCallback(
-    (appliedText: string, undoText: string): void => {
+    (appliedText: string, undo: { text: string; editorStateJson?: string }): void => {
       const current = getPromptOptimizerState(scopeKey);
       if (!current) {
         return;
       }
-      patchPromptOptimizerState(scopeKey, current.requestId, { appliedText, undoText });
+      patchPromptOptimizerState(scopeKey, current.requestId, {
+        appliedText,
+        undoText: undo.text,
+        undoEditorStateJson: undo.editorStateJson,
+      });
     },
     [scopeKey],
   );
 
-  /** 取回撤销文本并清除撤销点；无撤销点时返回 null。 */
-  const consumeUndo = useCallback((): string | null => {
+  /** 取回撤销快照并清除撤销点；无撤销点时返回 null。 */
+  const consumeUndo = useCallback((): {
+    text: string;
+    editorStateJson?: string;
+  } | null => {
     const current = getPromptOptimizerState(scopeKey);
     const undoText = current?.undoText;
     if (!current || undoText === undefined) {
       return null;
     }
+    const undoEditorStateJson = current.undoEditorStateJson;
     patchPromptOptimizerState(scopeKey, current.requestId, {
       appliedText: undefined,
       undoText: undefined,
+      undoEditorStateJson: undefined,
     });
-    return undoText;
+    return {
+      text: undoText,
+      ...(undoEditorStateJson === undefined ? {} : { editorStateJson: undoEditorStateJson }),
+    };
   }, [scopeKey]);
 
   const clearUndo = useCallback((): void => {
@@ -366,6 +388,7 @@ export function usePromptOptimizer(options: UsePromptOptimizerOptions) {
       patchPromptOptimizerState(scopeKey, current.requestId, {
         appliedText: undefined,
         undoText: undefined,
+        undoEditorStateJson: undefined,
       });
     }
   }, [scopeKey]);

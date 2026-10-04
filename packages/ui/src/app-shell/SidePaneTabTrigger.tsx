@@ -11,7 +11,6 @@ import {
   FolderIcon,
   MapIcon,
   MessageSquareTextIcon,
-  ListChecksIcon,
   ListTreeIcon,
   NotepadTextIcon,
   PackageIcon,
@@ -281,12 +280,6 @@ export function SidePaneTabIcon({ tab }: { tab: WorkspaceSidePaneTab }) {
   if (tab.type === "workflow-directory") {
     return <ListTreeIcon className="size-3.5" />;
   }
-  // 项目开发模式阶段页与模式下拉同一枚字形（ListChecks，display.tsx 的 workflow 模式图标）：
-  // 它是「模式状态的可视化」，来源与 tab 一致，点开不跳变。注意与 plan-detail 注释相反，
-  // 这里刻意避开与 Todo 撞形的顾虑——模式图标优先复用。
-  if (tab.type === "workflow-stage") {
-    return <ListChecksIcon className="size-3.5" />;
-  }
   // actor transcript 是「一个 actor 的对话记录」：既不是整次运行（Workflow），也不是子智能体
   // 会话（Bot）。三者在 tab 条上必须能一眼分开——它们的可见性与回收语义都不同。
   if (tab.type === "workflow-actor-session") {
@@ -497,9 +490,6 @@ export function getSidePaneTabTitle(
   }
   if (tab.type === "workflow-directory") {
     return formatMessage({ id: "sidePane.workflowDirectory" });
-  }
-  if (tab.type === "workflow-stage") {
-    return formatMessage({ id: "sidePane.workflowStage" });
   }
   // 实例序号必须留在标题里：同一车道族的实例共用脚本里那一个名字，少了序号 tab 条上就是
   // 两个无法区分的「reviewer」。拼接而不是本地化模板——照 selection-side-chat 的先例。

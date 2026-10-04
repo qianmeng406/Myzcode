@@ -9,6 +9,7 @@ import {
   validateOptimizedPrompt,
 } from "../src/v4/composer/promptOptimizerPrompt.js";
 import { buildPromptOptimizerContext } from "../src/v4/composer/promptOptimizerContext.js";
+import { resolveOptimizerSelection } from "../src/v4/composer/usePromptOptimizer.js";
 import {
   getPromptOptimizerState,
   invalidatePromptOptimizerScope,
@@ -204,6 +205,120 @@ test("窗口为空时标 missing，不编造上下文", () => {
   assert.equal(context.text, "");
 });
 
+test("系统来源输入与未完成的助手正文都不进上下文", () => {
+  const rows: ConversationRow[] = [
+    userRow("t1", "后台结果不是用户需求", { origin: "backgroundResult" }),
+    userRow("t1", "目标续跑也不是", { origin: "goalContinuation" }),
+    {
+      kind: "assistantText",
+      turnId: "t1",
+      rowId: 9,
+      createdAt: 0,
+      createdAtSeq: 0,
+      text: "还在流式输出的半截正文",
+      state: "streaming",
+    } as unknown as ConversationRow,
+    userRow("t2", "真正的用户请求"),
+  ];
+  const context = buildPromptOptimizerContext(rows);
+  assert.equal(context.missing, false);
+  assert.ok(!context.text.includes("后台结果"));
+  assert.ok(!context.text.includes("目标续跑"));
+  assert.ok(!context.text.includes("半截正文"));
+  assert.ok(context.text.includes("真正的用户请求"));
+});
+
+test("轮次归属优先 productTurnId，窗口不足只保留最近三轮", () => {
+  const withProduct = (turnId: string, productTurnId: string, text: string): ConversationRow =>
+    ({ ...(userRow(turnId, text) as unknown as Record<string, unknown>), productTurnId }) as unknown as ConversationRow;
+  const rows: ConversationRow[] = [
+    withProduct("t1", "p1", "第一轮"),
+    withProduct("t2", "p2", "第二轮"),
+    withProduct("t3", "p3", "第三轮"),
+    withProduct("t4", "p4", "第四轮"),
+  ];
+  const context = buildPromptOptimizerContext(rows);
+  assert.ok(!context.text.includes("第一轮"));
+  assert.ok(context.text.includes("第二轮"));
+  assert.ok(context.text.includes("第四轮"));
+});
+
+test("预算优先保留最新材料，较早内容被截断并披露", () => {
+  const rows: ConversationRow[] = [
+    userRow("t1", "旧的约束".repeat(400)),
+    userRow("t2", "中间一轮"),
+    userRow("t3", "最新确认：只做设计，不要实现"),
+  ];
+  const context = buildPromptOptimizerContext(rows);
+  assert.equal(context.truncated, true);
+  assert.ok(context.text.includes("最新确认：只做设计"));
+});
+
+// ── 模型选择解析（三态失败必须可分辨） ──
+
+test("模型解析区分未选/视图未就绪/模型不存在", () => {
+  const base = {
+    draft: "d",
+    version: "1",
+    mode: "polish" as const,
+    contextRange: "draft" as const,
+    rows: [],
+    richContext: false,
+  };
+  assert.deepEqual(resolveOptimizerSelection({ ...base, selection: null, modelReasoningLevels: null, modelViewReady: true }), {
+    ok: false,
+    reason: "no-model",
+  });
+  // 视图还没加载完：不能误报成「模型已不可用」。
+  assert.deepEqual(
+    resolveOptimizerSelection({
+      ...base,
+      selection: { providerId: "p", modelId: "m" },
+      modelReasoningLevels: null,
+      modelViewReady: false,
+    }),
+    { ok: false, reason: "view-loading" },
+  );
+  assert.deepEqual(
+    resolveOptimizerSelection({
+      ...base,
+      selection: { providerId: "p", modelId: "m" },
+      modelReasoningLevels: null,
+      modelViewReady: true,
+    }),
+    { ok: false, reason: "unknown-model" },
+  );
+});
+
+test("推理档缺失时补最低公开档，无效档位被替换", () => {
+  const base = {
+    draft: "d",
+    version: "1",
+    mode: "polish" as const,
+    contextRange: "draft" as const,
+    rows: [],
+    richContext: false,
+    modelViewReady: true,
+    selection: { providerId: "p", modelId: "m" },
+  };
+  const resolved = resolveOptimizerSelection({ ...base, modelReasoningLevels: ["low", "high"] });
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.ok ? resolved.selection.options?.reasoningLevel : "", "low");
+  const invalid = resolveOptimizerSelection({
+    ...base,
+    selection: { providerId: "p", modelId: "m", options: { reasoningLevel: "gone" } },
+    modelReasoningLevels: ["low", "high"],
+  });
+  assert.equal(invalid.ok ? invalid.selection.options?.reasoningLevel : "", "low");
+  const unsupported = resolveOptimizerSelection({
+    ...base,
+    selection: { providerId: "p", modelId: "m", options: { reasoningLevel: "low" } },
+    modelReasoningLevels: [],
+  });
+  assert.equal(unsupported.ok, true);
+  assert.equal(unsupported.ok ? unsupported.selection.options : undefined, undefined);
+});
+
 // ── 作用域状态与序号防回写 ──
 
 test("requestId 递增后旧请求不再 current", () => {
@@ -255,6 +370,33 @@ test("不同 scope 状态互不影响", () => {
   assert.equal(getPromptOptimizerState("b"), null);
   setPromptOptimizerState("a", null);
   assert.equal(getPromptOptimizerState("a"), null);
+});
+
+test("缓存键与撤销快照随 patch 一起保存（含编辑器状态）", () => {
+  resetPromptOptimizerStoreForTest();
+  const id = nextPromptOptimizerRequestId("s");
+  setPromptOptimizerState("s", {
+    status: "pending",
+    requestId: id,
+    operationId: "op",
+    baseDraft: "d",
+    baseVersion: "3",
+    mode: "polish",
+    contextRange: "conversation",
+    startedAt: 0,
+    cacheKey: "model|polish|conversation|3",
+    richContext: true,
+  });
+  const patched = patchPromptOptimizerState("s", id, {
+    status: "ready",
+    optimized: "候选",
+    appliedText: "候选",
+    undoText: "d",
+    undoEditorStateJson: '{"root":{"children":[{"type":"prompt-mention"}]}}',
+  });
+  assert.equal(patched?.cacheKey, "model|polish|conversation|3");
+  assert.equal(patched?.richContext, true);
+  assert.ok(patched?.undoEditorStateJson?.includes("prompt-mention"));
 });
 
 test("草稿输入预算常量对外可见（超限由上层提示，不静默截断）", () => {

@@ -5,7 +5,6 @@ const SWITCHABLE_COMMAND_CENTER_MODES = [
   "build",
   "edit",
   "research",
-  "workflow",
   "minimal",
   "zcodeUpdate",
   "yolo",

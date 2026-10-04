@@ -23,80 +23,12 @@ function modeReminder(): RuntimeMessageEntry {
   } as unknown as RuntimeMessageEntry;
 }
 
-test("workflow mode emits the full SOP on the first reminder", () => {
-  const body = buildRuntimeModeReminderBody([], "workflow");
-  assert.ok(body);
-  assert.ok(body!.includes("# 项目开发模式"));
-  assert.ok(body!.includes("workflow/工作台账.md"));
-  assert.ok(body!.includes("wf-fe-acceptance"));
-  assert.ok(body!.includes("wf-adversarial-audit"));
-  assert.ok(body!.includes("std-workflow v1 stage"));
-  // 接手已有项目：无台账的存量项目必须先盘点，不能从零重做。
-  assert.ok(body!.includes("接手盘点"));
-  assert.ok(body!.includes("不要从零重做"));
-  assert.ok(body!.includes("代码能跑 ≠ 已通过"));
-  // 权限语义：等同完全访问（自动执行），破坏性操作仍先说明。
-  assert.ok(body!.includes("权限等同「完全访问」"));
-  assert.ok(body!.includes("破坏性操作"));
-});
-
-test("workflow mode throttles like research mode within 5 human turns", () => {
-  const entries = [modeReminder(), humanTurn(), humanTurn()];
-  assert.equal(buildRuntimeModeReminderBody(entries, "workflow"), null);
-});
-
-test("workflow mode alternates to the sparse reminder when eligible", () => {
-  // 一条已存在的 reminder（count=1 → 下一条是第 2 条，2 % 5 != 1 → sparse），
-  // 且距离它已有 5 个未应答的人类轮。
-  const entries = [
-    modeReminder(),
-    humanTurn(),
-    humanTurn(),
-    humanTurn(),
-    humanTurn(),
-    humanTurn(),
-  ];
-  const body = buildRuntimeModeReminderBody(entries, "workflow");
-  assert.ok(body);
-  assert.ok(!body!.includes("# 项目开发模式"));
-  assert.ok(body!.includes("项目开发模式仍处于激活状态"));
-});
-
-test("workflow mode cycles back to the full SOP every 5th attachment", () => {
-  const fullAgain = [
-    ...Array.from({ length: 5 }, () => humanTurn()),
-    modeReminder(), // count=1
-    ...Array.from({ length: 5 }, () => humanTurn()),
-    modeReminder(), // count=2（sparse）
-    ...Array.from({ length: 5 }, () => humanTurn()),
-    modeReminder(), // count=3
-    ...Array.from({ length: 5 }, () => humanTurn()),
-    modeReminder(), // count=4
-    ...Array.from({ length: 5 }, () => humanTurn()),
-    modeReminder(), // count=5 → 下一条是第 6 条？不——见下
-  ];
-  // 第 5 条已存在时下一条是第 6 条；6 % 5 = 1 → full。这里从 5 条推进到第 6 次附加：
-  const entries = [...fullAgain, ...Array.from({ length: 5 }, () => humanTurn())];
-  const body = buildRuntimeModeReminderBody(entries, "workflow");
-  assert.ok(body);
-  assert.ok(body!.includes("# 项目开发模式"));
-});
-
-test("research and plan modes are unaffected by the workflow branch", () => {
+test("research and plan modes each emit their own reminder", () => {
   const research = buildRuntimeModeReminderBody([], "research");
   assert.ok(research!.includes("# 资料查询模式"));
   const plan = buildRuntimeModeReminderBody([], "plan", true);
   assert.ok(plan!.includes("Plan mode is active"));
   assert.equal(buildRuntimeModeReminderBody([], "build"), null);
-});
-
-test("plan+workflow combo yields the plan reminder, not the full-access SOP", () => {
-  // 权限真值是 plan 只读（workflow 放行分支被 planEnabled 挡住），reminder 必须同口径：
-  // 给出宣称「完全访问」的 SOP 会让模型按全权行事、每条命令被拒。
-  const body = buildRuntimeModeReminderBody([], "workflow", true);
-  assert.ok(body);
-  assert.ok(body!.includes("Plan mode is active"));
-  assert.ok(!body!.includes("权限等同「完全访问」"));
 });
 
 test("zcodeUpdate mode emits its own staging SOP on the first reminder", () => {
@@ -112,11 +44,11 @@ test("zcodeUpdate mode emits its own staging SOP on the first reminder", () => {
   // 不 merge 官方分支、不 push 是这套流程的核心边界。
   assert.ok(body!.includes("不 cherry-pick、不 merge"));
   assert.ok(body!.includes("不 push"));
-  // 权限语义与 workflow 同口径：等同完全访问，破坏性操作仍先说明。
+  // 权限语义：等同完全访问，破坏性操作仍先说明。
   assert.ok(body!.includes("权限等同「完全访问」"));
 });
 
-test("zcodeUpdate mode throttles and then goes sparse like workflow", () => {
+test("zcodeUpdate mode throttles and then goes sparse", () => {
   assert.equal(
     buildRuntimeModeReminderBody([modeReminder(), humanTurn(), humanTurn()], "zcodeUpdate"),
     null,
@@ -146,5 +78,4 @@ test("minimal mode deliberately emits no reminder of its own", () => {
   assert.ok(withPlan);
   assert.ok(withPlan!.includes("Plan mode is active"));
   assert.ok(!withPlan!.includes("# ZCode 更新模式"));
-  assert.ok(!withPlan!.includes("# 项目开发模式"));
 });

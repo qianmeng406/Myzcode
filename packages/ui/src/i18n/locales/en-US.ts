@@ -1053,7 +1053,6 @@ const enUS: Record<string, string> = {
   "sidePane.selectionChat": "Side conversation",
   "sidePane.workflowRun": "Workflow run",
   "sidePane.workflowDirectory": "Workflow runs",
-  "sidePane.workflowStage": "Project development mode",
   "sidePane.workflowActor": "Workflow subagent",
   "sidePane.workflowScript": "Script steps",
   "sidePane.workflowArtifact": "Artifact",
@@ -1072,28 +1071,6 @@ const enUS: Record<string, string> = {
   "subagentDirectory.status.lost": "Lost",
   "chat.statusPanel.endedAgents": "Ended",
   "chat.statusPanel.endedWorkflows": "Ended workflows",
-  // Project development mode (workflow mode) stage pane: reads workflow/工作台账.md and renders the W0→W11 strip.
-  "workflow.stagePane.title": "Project development mode",
-  "workflow.stagePane.refresh": "Refresh ledger",
-  "workflow.stagePane.openMarker": "View stage progress",
-  "workflow.stagePane.mainLane": "Main",
-  "workflow.stagePane.frontendLane": "Frontend",
-  "workflow.stagePane.backendLane": "Backend",
-  "workflow.stagePane.currentStage": "Current stage",
-  "workflow.stagePane.currentAdversarial": "Adversarial round {stage} in progress ({workflow})",
-  "workflow.stagePane.nextAdversarial": "Next adversarial round {stage} ({workflow})",
-  "workflow.stagePane.noneAdversarial": "All adversarial rounds passed",
-  "workflow.stagePane.loading": "Reading the ledger…",
-  "workflow.stagePane.truncated":
-    "Ledger exceeds 256KB and is shown truncated; if the stage marker line fell past the cut, the strip is unavailable — trim the ledger or move the marker to the top.",
-  "workflow.stagePane.unknownStage":
-    'Ledger marker "{stage}" is not a known stage; no ordering inferred below.',
-  "workflow.stagePane.noMarker":
-    "No stage marker found in the ledger (<!-- std-workflow v1 stage:… -->); showing the raw ledger below.",
-  "workflow.stagePane.empty":
-    "No workflow/工作台账.md found. Send a message to begin: a greenfield project starts the ledger from W0, while an existing project gets a read-only takeover survey first (scan the current state, confirm the denominator and starting stage with you, then continue from there) — nothing is redone from scratch.",
-  "workflow.stagePane.readError":
-    "Failed to read the ledger (remote workspace or permissions). Try the refresh button above.",
   "workflowDirectory.title": "Workflow runs",
   "workflowDirectory.running": "Running",
   "workflowDirectory.runningEmpty": "No workflows are running",
@@ -6034,13 +6011,11 @@ const enUS: Record<string, string> = {
 
   // Modes
   "mode.plan": "Plan",
-  "mode.workflow": "Project dev",
   "mode.label.glm.build": "Ask before changes",
   "mode.label.glm.edit": "Edit automatically",
   "mode.label.glm.plan": "Plan mode",
   "mode.label.glm.yolo": "Full access",
   "mode.label.glm.research": "Research",
-  "mode.label.glm.workflow": "Project development mode",
   "mode.label.glm.minimal": "Minimal mode",
   "mode.label.glm.zcodeUpdate": "ZCode update mode",
   "mode.description.glm.build": "Ask before file changes.",
@@ -6048,8 +6023,6 @@ const enUS: Record<string, string> = {
   "mode.description.glm.plan": "Plan before editing.",
   "mode.description.glm.yolo": "Run with fewer confirmations.",
   "mode.description.glm.research": "Read-only web research; edits and commands are denied.",
-  "mode.description.glm.workflow":
-    "Document-driven delivery with staged gates and automated adversarial review; commands and edits run without confirmation.",
   "mode.description.glm.minimal":
     "Send only the system tools with a bare identity line and working directory; no skills, memory, project instructions, or MCP tools. Commands and edits run without confirmation.",
   "mode.description.glm.zcodeUpdate":

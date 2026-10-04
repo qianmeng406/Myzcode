@@ -120,7 +120,6 @@ export type CliPermissionMode =
   | "edit"
   | "yolo"
   | "research"
-  | "workflow"
   | "minimal"
   | "zcodeUpdate";
 export type CliRuntimeMode = CliPermissionMode | "auto";

@@ -460,8 +460,6 @@ interface ConversationComposerProps {
   onSwitchMode: (mode: string) => void;
   /** 打开当前 session 的 Status panel，并直达 Running 明细。 */
   onOpenRunningBackgroundWorks?: () => void;
-  /** live 模式为 workflow 时打开项目开发模式阶段侧栏；scope（会话/workspace）由宿主组装。 */
-  onOpenWorkflowStage?: () => void;
   /**
    * 后台任务入口点击的落点：`"workflow-run"` = 唯一在跑的工作流直达详情页（宿主判定），
    * 缺省 `"panel"` = 展开状态胶囊。入口据此换 tooltip；行为本身在 onOpenRunningBackgroundWorks 里。
@@ -551,7 +549,6 @@ function ConversationComposerImpl({
   onSelectThought,
   onSwitchMode,
   onOpenRunningBackgroundWorks,
-  onOpenWorkflowStage,
   backgroundWorkOpenTarget = "panel",
   runningSubagentCount = 0,
   onRecoverCustomModelSelection,
@@ -1157,20 +1154,61 @@ function ConversationComposerImpl({
     if (!draft || promptOptimizer.optimizing || pendingRef.current) {
       return;
     }
-    // 结果只进预览：由用户确认后再替换输入框（见下方 optimizeUndoReady 流程）。
+    // 模型解析必须是同步的：await 之后再分配请求身份会留下重复请求与取消空窗，
+    // 所以这里用组件已有的 ModelSelectionView 直接算出推理档清单。
+    const pick = optimizerModel ?? modelSelectionView?.preferredSelection ?? null;
+    const pickedModel = pick
+      ? modelSelectionView?.providers
+          .find((provider) => provider.providerId === pick.providerId)
+          ?.models.find((candidate) => candidate.modelId === pick.modelId)
+      : undefined;
+    // mention 节点只能靠编辑器状态还原：快照里带 prompt-mention 就不能自动替换。
+    const mentionInDraft = Boolean(
+      snapshotDraftOfEditor().editorStateJson?.includes('"prompt-mention"'),
+    );
     void promptOptimizer.optimize({
       draft,
-      version: draft,
+      // 版本用内容修订号，不用文本本身：空白/缩进改动也必须算「草稿变了」。
+      version: String(contentRevisionRef.current),
       mode: optimizerMode,
       contextRange: optimizerContextRange,
       rows: snapshot?.rows.window ?? [],
-      selection: optimizerModel ?? modelSelectionView?.preferredSelection ?? null,
+      selection: pick,
+      // null = 该模型不在当前视图里（已下线/换提供方）：明确报错，不静默改模型。
+      // 视图未就绪时 providers 为空，此时靠 modelViewReady 区分「还没加载」而不是误报。
+      modelReasoningLevels: pickedModel
+        ? (pickedModel.config.optionSpecs.reasoningLevel?.values ?? [])
+        : null,
+      modelViewReady: modelSelectionState.status === "ready",
+      richContext:
+        hasAttachments ||
+        hasCodeCommentContexts ||
+        hasWebElementContexts ||
+        hasPptxElementReferences ||
+        hasConversationSelectionReferences ||
+        mentionInDraft,
     });
-  }, [modelSelectionView, optimizerContextRange, optimizerMode, optimizerModel, promptOptimizer, snapshot]);
+  }, [
+    hasAttachments,
+    hasCodeCommentContexts,
+    hasConversationSelectionReferences,
+    hasPptxElementReferences,
+    hasWebElementContexts,
+    modelSelectionView,
+    optimizerContextRange,
+    optimizerMode,
+    optimizerModel,
+    promptOptimizer,
+    snapshot,
+    snapshotDraftOfEditor,
+  ]);
   const optimizerState = promptOptimizer.state;
-  const normalizeDraftForCompare = (value: string) => value.replace(/\s+/g, " ").trim();
+  // 精确比较（只裁首尾空白）：折叠空白会把「改了缩进/换行」当成没改。
+  const compareDraftExact = (value: string) => value.trim();
   // 富文本引用/附件无法用纯文本重建：此时只提供预览，禁用自动替换，避免丢引用关系。
+  // 冻结态（发起时）+ 实时态取并集：中途新加的附件同样要拦住替换。
   const optimizerHasRichContext =
+    optimizerState?.richContext === true ||
     hasAttachments ||
     hasCodeCommentContexts ||
     hasWebElementContexts ||
@@ -1180,7 +1218,7 @@ function ConversationComposerImpl({
     optimizerState?.status === "ready" ||
     optimizerState?.status === "error" ||
     optimizerState?.status === "cancelled"
-      ? normalizeDraftForCompare(text) !== normalizeDraftForCompare(optimizerState.baseDraft)
+      ? compareDraftExact(text) !== compareDraftExact(optimizerState.baseDraft)
       : false;
   const canApplyOptimizer =
     optimizerState?.status === "ready" &&
@@ -1193,32 +1231,44 @@ function ConversationComposerImpl({
       if (!current || current.status !== "ready" || !candidate.trim()) {
         return;
       }
-      const before = textRef.current;
+      // 撤销点必须在替换前抓取：mention/格式只有编辑器状态能还原。
+      const undo = snapshotDraftOfEditor();
       inputApiRef.current?.setText(candidate);
       updateText(candidate);
-      promptOptimizer.markApplied(candidate, before);
+      promptOptimizer.markApplied(candidate, { text: undo.text, ...(undo.editorStateJson ? { editorStateJson: undo.editorStateJson } : {}) });
     },
-    [promptOptimizer, updateText],
+    [promptOptimizer, snapshotDraftOfEditor, updateText],
   );
   const optimizerUndoReady =
     optimizerState?.appliedText !== undefined &&
-    normalizeDraftForCompare(text) === normalizeDraftForCompare(optimizerState.appliedText);
+    compareDraftExact(text) === compareDraftExact(optimizerState.appliedText);
   const handleUndoOptimizer = useCallback(() => {
-    const undoText = promptOptimizer.consumeUndo();
-    if (undoText === null) {
+    const undo = promptOptimizer.consumeUndo();
+    if (undo === null) {
       return;
     }
-    inputApiRef.current?.setText(undoText);
-    updateText(undoText);
+    // 有编辑器快照就按快照还原（mention/段落结构），没有才退纯文本。
+    if (undo.editorStateJson) {
+      inputApiRef.current?.setEditorStateJson(undo.editorStateJson);
+      updateText(undo.text);
+      return;
+    }
+    inputApiRef.current?.setText(undo.text);
+    updateText(undo.text);
   }, [promptOptimizer, updateText]);
-  // 预览里允许直接改候选：按 requestId 记本地编辑，换一次请求即失效。
+  // 预览里允许直接改候选：键必须含 scope——requestId 在每个 scope 内独立递增，
+  // 只用 requestId 会让 A 会话的编辑串到 B 会话同名 ID 的预览里。
   const [optimizerDraftEdit, setOptimizerDraftEdit] = useState<{
-    requestId: number;
+    editKey: string;
     text: string;
   } | null>(null);
+  const optimizerEditKey =
+    optimizerState && optimizerState.status === "ready"
+      ? `${draftScopeId}\u0000${optimizerState.requestId}`
+      : null;
   const optimizerPreviewText =
     optimizerState?.status === "ready"
-      ? optimizerDraftEdit?.requestId === optimizerState.requestId
+      ? optimizerDraftEdit?.editKey === optimizerEditKey
         ? optimizerDraftEdit.text
         : (optimizerState.optimized ?? "")
       : "";
@@ -1540,6 +1590,9 @@ function ConversationComposerImpl({
         // 发送成功：清本次提交捕获的 scope 草稿；prompt history 已在真实发送前同步写盘，
         // 避免首发 promote 丢失或误清 promotion 后的新 scope。
         finalizeSubmittedDraft();
+        // 提交已接纳：这份草稿的优化结果与撤销点同时作废。否则在飞结果会在消息
+        // 发出后迟到发布，或用户重新输入同样文本时旧撤销点又把上一条草稿写回来。
+        promptOptimizer.dismiss();
         sendAction.complete({ resultSource: "authority_ack", admissionResult: "accepted" });
       } catch (error) {
         rollbackPromptHistory();
@@ -2249,7 +2302,11 @@ function ConversationComposerImpl({
                 type="button"
                 variant="ghost"
                 size="icon-md"
-                disabled={disabled || (!hasText && !promptOptimizer.optimizing)}
+                disabled={
+                  disabled ||
+                  modelSelectionState.status !== "ready" ||
+                  (!hasText && !promptOptimizer.optimizing)
+                }
                 onClick={promptOptimizer.optimizing ? promptOptimizer.cancel : handleOptimizePrompt}
                 data-testid="v4-composer-optimize-prompt"
                 aria-label={
@@ -2577,7 +2634,14 @@ function ConversationComposerImpl({
       optimizeModelMenuTitle,
       optimizePromptTitle,
       optimizePromptTooltip,
+      optimizeOptionsLabel,
+      optimizeModeLabel,
+      optimizeContextLabel,
+      optimizerMode,
+      optimizerContextRange,
       promptOptimizer.optimizing,
+      promptOptimizer.cancel,
+      intl,
       draftConfig,
       draftMode,
       handleStopClick,
@@ -2622,8 +2686,6 @@ function ConversationComposerImpl({
           activeConfigPicker={activeConfigPicker}
           onConfigPickerOpenChange={handleConfigPickerOpenChange}
           onSwitchMode={onSwitchMode}
-          workflowStageActive={snapshot?.config?.mode === "workflow"}
-          onOpenWorkflowStage={onOpenWorkflowStage}
         />
         {/* 附件画廊重构曾整段覆盖 leadingActions，误删 CUA 常驻入口。
             入口自身继续负责平台、远程与设置可见性，不在 composer 重复判定。 */}
@@ -2649,13 +2711,11 @@ function ConversationComposerImpl({
       handleConfigPickerOpenChange,
       backgroundWorkOpenTarget,
       onOpenRunningBackgroundWorks,
-      onOpenWorkflowStage,
       onSwitchMode,
       provider,
       remoteSessionId,
       runningSubagentCount,
       snapshot?.backgroundWorks,
-      snapshot?.config?.mode,
       workspaceIdentity,
       workspacePath,
     ],
@@ -2784,7 +2844,7 @@ function ConversationComposerImpl({
                   value={optimizerPreviewText}
                   onChange={(event) =>
                     setOptimizerDraftEdit({
-                      requestId: optimizerState.requestId,
+                      editKey: optimizerEditKey ?? "",
                       text: event.target.value,
                     })
                   }

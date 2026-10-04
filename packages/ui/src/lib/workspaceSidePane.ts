@@ -300,30 +300,6 @@ export interface OpenWorkflowRunDirectorySideTabRequest {
 }
 
 /**
- * 项目开发模式（workflow mode）的阶段进度 tab：读 `workflow/工作台账.md`，渲染 W0→W11
- * 阶段条与台账正文。
- *
- * 身份是 **对话**（同 workflow-directory）：一条对话只有一个项目台账，composer 的
- * 「工作流」标记 chip 重复点击幂等地聚焦同一个 tab。tab 不冻结任何台账数据——面板
- * 挂载时自己读文件并监听目录变更，把摘要冻进 tab 只会让重启后恢复的 tab 显示过期阶段。
- */
-export interface WorkflowStageSidePaneTab {
-  id: string;
-  type: "workflow-stage";
-  ownerTaskId?: string | null;
-  openedAt?: number;
-  workspaceKey: string;
-  workspacePath: string;
-  workspaceIdentity?: string;
-  remoteSessionId?: string;
-  parentSessionId: string;
-}
-
-export interface OpenWorkflowStageSideTabRequest {
-  parentSessionId: string;
-}
-
-/**
  * 一个 dwf actor 实例的 transcript tab。
  *
  * 身份是 **actor 会话**：一个实例一条真实持久会话，所以 `actorSessionId` 就是 tab 身份。
@@ -505,12 +481,6 @@ export interface OpenScopedWorkflowRunDirectorySideTabRequest extends OpenWorkfl
   remoteSessionId?: string;
 }
 
-export interface OpenScopedWorkflowStageSideTabRequest extends OpenWorkflowStageSideTabRequest {
-  workspacePath: string;
-  workspaceIdentity?: string;
-  remoteSessionId?: string;
-}
-
 export interface OpenScopedPlanDetailSideTabRequest extends OpenPlanDetailSideTabRequest {
   workspacePath: string;
   workspaceIdentity?: string;
@@ -576,7 +546,6 @@ export type WorkspaceSidePaneTab =
   | PlanDetailSidePaneTab
   | WorkflowRunSidePaneTab
   | WorkflowRunDirectorySidePaneTab
-  | WorkflowStageSidePaneTab
   | WorkflowActorSessionSidePaneTab
   | WorkflowWorkspaceSidePaneTab
   | WorkflowArtifactSidePaneTab;
@@ -886,26 +855,6 @@ function createWorkflowRunDirectorySidePaneTab(
       encodeSidePaneTabIdPart(options.parentSessionId),
     ].join(":"),
     type: "workflow-directory",
-    openedAt: Date.now(),
-    workspaceKey: options.workspaceKey,
-    workspacePath: options.workspacePath,
-    ...(options.workspaceIdentity ? { workspaceIdentity: options.workspaceIdentity } : {}),
-    ...(options.remoteSessionId ? { remoteSessionId: options.remoteSessionId } : {}),
-    parentSessionId: options.parentSessionId,
-  };
-}
-
-function createWorkflowStageSidePaneTab(
-  options: OpenScopedWorkflowStageSideTabRequest & { workspaceKey: string },
-): WorkflowStageSidePaneTab {
-  return {
-    // 结构化 id：一条对话只有一份项目台账，chip 重复点击幂等地聚焦同一个 tab。
-    id: [
-      "workflow-stage",
-      encodeSidePaneTabIdPart(options.workspaceKey),
-      encodeSidePaneTabIdPart(options.parentSessionId),
-    ].join(":"),
-    type: "workflow-stage",
     openedAt: Date.now(),
     workspaceKey: options.workspaceKey,
     workspacePath: options.workspacePath,
@@ -1914,21 +1863,6 @@ export function openWorkflowRunDirectorySidePane(
 }
 
 /**
- * 打开或复用一条对话的项目开发模式阶段 tab（身份与复用语义同 workflow-directory）。
- * tab 不带台账数据：面板每次挂载自己读 `workflow/工作台账.md`，所以没有该回收的过期状态。
- */
-export function openWorkflowStageSidePane(
-  current: WorkspaceSidePaneState | null,
-  options: OpenScopedWorkflowStageSideTabRequest & { workspaceKey: string },
-): WorkspaceSidePaneState {
-  const nextTab = createWorkflowStageSidePaneTab(options);
-  const existing = current?.tabs.find(
-    (tab): tab is WorkflowStageSidePaneTab => tab.type === "workflow-stage" && tab.id === nextTab.id,
-  );
-  return activateSidePaneTab(current, existing ? { ...existing, ...nextTab } : nextTab);
-}
-
-/**
  * 打开或复用一个 actor transcript tab。
  *
  * 复用规则与 workflow-run 同构（结构化 id 幂等），GC 同样**没有**：actor 会话在 run 结束
@@ -2009,7 +1943,6 @@ export function isSidePaneTabVisibleForParent(
     tab.type === "plan-detail" ||
     tab.type === "workflow-run" ||
     tab.type === "workflow-directory" ||
-    tab.type === "workflow-stage" ||
     tab.type === "workflow-actor-session" ||
     tab.type === "workflow-workspace" ||
     tab.type === "workflow-artifact"

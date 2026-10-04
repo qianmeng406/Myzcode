@@ -22,7 +22,6 @@ const zcodeTaskModeRealtimeValues = [
   "autoEdit",
   "build",
   "research",
-  "workflow",
   "minimal",
   "zcodeUpdate",
 ] as const satisfies readonly ZCodeTaskMode[];

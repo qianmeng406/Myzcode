@@ -78,7 +78,6 @@ export const zcodeSessionModeSchema = z.enum([
   "yolo",
   "auto",
   "research",
-  "workflow",
   "minimal",
   "zcodeUpdate",
 ]);

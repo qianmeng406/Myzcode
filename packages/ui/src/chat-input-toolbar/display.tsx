@@ -37,7 +37,6 @@ import {
   Feather,
   GitCompare,
   HandIcon,
-  ListChecks,
   NotepadText,
   ShieldAlertIcon,
   ShieldCheckIcon,
@@ -204,18 +203,15 @@ function getConfigOptionEntryDescription(
 }
 
 function isHighPermissionModeValue(value: unknown): boolean {
-  // yolo / workflow / zcodeUpdate / minimal 同为自动执行权限：旧工具栏的持续 warning 文字
+  // yolo / zcodeUpdate / minimal 同为自动执行权限：旧工具栏的持续 warning 文字
   // 与盾牌语义要覆盖它们。
-  return value === "yolo" || value === "workflow" || value === "zcodeUpdate" || value === "minimal";
+  return value === "yolo" || value === "zcodeUpdate" || value === "minimal";
 }
 
 export function resolveModeOptionIcon(value: unknown): LucideIcon {
-  // 特定判断先于 isHighPermissionModeValue 的通用盾牌：workflow 虽是高权限，但图标保持
-  // 清单形（与模式下拉/阶段侧栏一致），高权限的提示由 warning 颜色承担。
-  // research（资料查询）：只读检索语义，用望远镜与 plan 的记事本区分。
+  // 特定判断先于 isHighPermissionModeValue 的通用盾牌：research（资料查询）为只读检索语义，
+  // 用望远镜与 plan 的记事本区分。
   if (typeof value === "string" && value.toLocaleLowerCase() === "research") return Telescope;
-  // workflow（项目开发模式）：台账/检查单驱动的交付流程，用清单勾选图标。
-  if (typeof value === "string" && value.toLocaleLowerCase() === "workflow") return ListChecks;
   // minimal（极简模式）：只留工具与最小上下文，用羽毛表示「轻」。
   if (typeof value === "string" && value.toLocaleLowerCase() === "minimal") return Feather;
   // zcodeUpdate（更新模式）：逐版本 diff 对比，用差异对比图标。

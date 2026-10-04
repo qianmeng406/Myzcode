@@ -223,7 +223,6 @@ export const commandPayloadSchemas = {
       "plan",
       "yolo",
       "research",
-      "workflow",
       "minimal",
       "zcodeUpdate",
     ]),

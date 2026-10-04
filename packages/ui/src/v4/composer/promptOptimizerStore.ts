@@ -27,6 +27,17 @@ export interface PromptOptimizerState {
   contextRange: PromptOptimizerContextRange;
   startedAt: number;
   durationMs?: number;
+  /**
+   * 复用键：草稿 + 版本 + 模式 + 上下文范围 + 上下文材料 + 解析后的模型选择。
+   * 少任何一项都会出现「换了模型/多了关键对话却仍返回旧结果」。
+   */
+  cacheKey?: string;
+  /**
+   * 发起时冻结的「草稿含无法用纯文本重建的内容」（mention 节点 / 附件 / 外部引用）。
+   * 冻结而非即时判断：判断必须对应**被优化的那份草稿**，否则用户中途加个附件
+   * 就会改变对既有候选的解释。
+   */
+  richContext?: boolean;
   optimized?: string;
   unresolved?: readonly string[];
   warnings?: readonly PromptOptimizerWarningCode[];
@@ -35,6 +46,8 @@ export interface PromptOptimizerState {
   appliedText?: string;
   /** 替换前的正文；仅在输入框仍等于 appliedText 时允许还原。 */
   undoText?: string;
+  /** 替换前的编辑器状态：mention/格式只能靠它还原，纯文本做不到。 */
+  undoEditorStateJson?: string;
 }
 
 const MAX_TRACKED_SCOPES = 24;

@@ -241,7 +241,6 @@ export function App({
     handleOpenPlanDetail,
     handleOpenWorkflowRun,
     handleOpenWorkflowRunDirectory,
-    handleOpenWorkflowStage,
     handleOpenWorkflowActorSession,
     handleOpenWorkflowWorkspace,
     handleOpenWorkflowArtifact,
@@ -1261,7 +1260,6 @@ export function App({
         handleOpenPlanDetail={handleOpenPlanDetail}
         handleOpenWorkflowRun={handleOpenWorkflowRun}
         handleOpenWorkflowRunDirectory={handleOpenWorkflowRunDirectory}
-        handleOpenWorkflowStage={handleOpenWorkflowStage}
         handleOpenWorkflowActorSession={handleOpenWorkflowActorSession}
         handleOpenWorkflowWorkspace={handleOpenWorkflowWorkspace}
         handleOpenWorkflowArtifact={handleOpenWorkflowArtifact}

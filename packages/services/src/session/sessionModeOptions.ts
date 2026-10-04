@@ -8,7 +8,6 @@ const CANONICAL_SESSION_MODES = new Set<ZCodeTaskMode>([
   "autoEdit",
   "build",
   "research",
-  "workflow",
   "minimal",
   "zcodeUpdate",
 ]);
@@ -48,6 +47,10 @@ function normalizePersistedSessionMode(
     case "full-auto":
     case "full_auto":
       return "yolo";
+    // 「项目开发模式」（workflow）已移除：旧会话/配置里遗留的值回退到 build，
+    // 即撤销其「自动执行命令/编辑」授权，回到改动前询问的保守默认。
+    case "workflow":
+      return "build";
     default:
       return undefined;
   }

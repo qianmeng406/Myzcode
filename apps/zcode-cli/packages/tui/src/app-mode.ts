@@ -7,7 +7,6 @@ export const TUI_SWITCHABLE_MODES = [
   "build",
   "edit",
   "research",
-  "workflow",
   "minimal",
   "zcodeUpdate",
   "yolo",
