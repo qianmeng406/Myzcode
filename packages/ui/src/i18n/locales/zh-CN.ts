@@ -3294,7 +3294,7 @@ const zhCN: Record<string, string> = {
     "内置 Z.ai 与 BigModel 供应商，支持通过 OAuth 辅助完成配置。",
   "settings.modelProvider.presetEmpty": "尚未同步，请先完成 OAuth 登录。",
   "settings.modelProvider.customTitle": "自定义供应商",
-  "settings.modelProvider.commandCodeTitle": "官方渠道",
+  "settings.modelProvider.commandCodeTitle": "CommandCode 网关渠道",
   "settings.modelProvider.refresh": "刷新",
   "settings.modelProvider.reorderProvider": "拖拽调整供应商顺序",
   "settings.modelProvider.reorderModel": "拖拽调整模型顺序",
