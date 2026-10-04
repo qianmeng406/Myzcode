@@ -93,6 +93,10 @@ import {
   zcodeStateUpdatedNotificationSchema,
   zcodeUserInputRequestParamsSchema,
   zcodeWorkspacePresentationSchema,
+  zcodeOracleReviewListRecordsParamsSchema,
+  zcodeOracleReviewListRecordsResultSchema,
+  zcodeOracleReviewSaveRecordParamsSchema,
+  zcodeOracleReviewSaveRecordResultSchema,
   zcodeWorkspaceCancelGenerateTextResultSchema,
   zcodeWorkspaceGenerateTextResultSchema,
   zcodeWorkspaceHookTrustGrantResultSchema,
@@ -422,6 +426,9 @@ const WORKSPACE_GENERATE_TEXT_CANCEL_SLACK_MS = 30_000;
 // 在飞的 workspace generateText 操作登记（workspaceKey:remoteSessionId:querySource →
 // 取消函数）：UI 的审查卡片 ✕ 经 cancelWorkspaceGenerateText 主动取消在飞审查。
 const workspaceGenerateTextCancelTargets = new Map<string, () => Promise<boolean>>();
+// 显式 operationId → 取消函数：审查的上下文分析/正式审查阶段各持独立 operationId，
+// 同 workspace 多会话并发审查时按 operationId 精确取消，不再依赖 querySource 键。
+const workspaceGenerateTextCancelByOperationId = new Map<string, () => Promise<boolean>>();
 
 function supportsLegacyRemoteTaskAllowlist(workspaceIdentity: string | undefined): boolean {
   return Boolean(
@@ -4406,7 +4413,7 @@ export function createZCodeAgentService(
         (params.requestTimeoutMs
           ? AbortSignal.timeout(params.requestTimeoutMs + WORKSPACE_GENERATE_TEXT_CANCEL_BUFFER_MS)
           : undefined);
-      const operationId = signal ? randomUUID() : undefined;
+      const operationId = params.operationId ?? (signal ? randomUUID() : undefined);
       // in-flight 去重：横幅 ✕ 连点、dismiss 与 signal abort 同帧触发时只发一次
       // cancel RPC（settle 后窗口关闭，再点仍可重发——重试语义保留）。
       let cancelInFlight: Promise<boolean> | null = null;
@@ -4452,6 +4459,7 @@ export function createZCodeAgentService(
       const cancelTargetKey = `${resolveWorkspaceKey(params)}:${params.remoteSessionId ?? ""}:${params.querySource}`;
       if (operationId) {
         workspaceGenerateTextCancelTargets.set(cancelTargetKey, cancelOnce);
+        workspaceGenerateTextCancelByOperationId.set(operationId, cancelOnce);
       }
       signal?.addEventListener("abort", cancel, { once: true });
       try {
@@ -4495,14 +4503,40 @@ export function createZCodeAgentService(
         if (operationId && workspaceGenerateTextCancelTargets.get(cancelTargetKey) === cancelOnce) {
           workspaceGenerateTextCancelTargets.delete(cancelTargetKey);
         }
+        if (
+          operationId &&
+          workspaceGenerateTextCancelByOperationId.get(operationId) === cancelOnce
+        ) {
+          workspaceGenerateTextCancelByOperationId.delete(operationId);
+        }
       }
     },
 
     async cancelWorkspaceGenerateText(params) {
-      // UI（审查卡片 ✕）主动取消：按 workspace+remoteSessionId+querySource 找到在飞
-      // 操作的取消函数。未命中（无在飞/已收尾/键不一致）返回 false 并落 debug 留痕——
-      // 键两侧须由同一组字段拼出（remoteSessionId 空缺两侧一致为空串），否则取消会
-      // 静默失效，这里提供归因线索。
+      // UI（审查卡片 ✕）主动取消。带 operationId 时**只**按该 operationId 精确命中
+      // ——未命中即返回 false，绝不回退到键匹配：调用方给的 operationId 属于它要取消
+      // 的那次请求，回退会在「旧 operationId 已收尾、同 workspace 另一会话正同键在飞」
+      // 时误杀别人的请求（串杀正是本改造要消除的场景）。
+      // 省略 operationId 时才走 workspace+remoteSessionId+querySource 键匹配（旧调用方）。
+      if (params.operationId) {
+        const byOperationId = workspaceGenerateTextCancelByOperationId.get(params.operationId);
+        if (!byOperationId) {
+          logger.debug(undefined, "workspace 模型请求取消未命中（operationId 未配对）", {
+            workspaceKey: resolveWorkspaceKey(params),
+            operationId: params.operationId,
+          });
+          return false;
+        }
+        try {
+          return await byOperationId();
+        } catch (error) {
+          logger.warn("workspace 模型请求主动取消失败", {
+            operationId: params.operationId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return false;
+        }
+      }
       const key = `${resolveWorkspaceKey(params)}:${params.remoteSessionId ?? ""}:${params.querySource}`;
       const cancelOnce = workspaceGenerateTextCancelTargets.get(key);
       if (!cancelOnce) {
@@ -4522,6 +4556,37 @@ export function createZCodeAgentService(
         });
         return false;
       }
+    },
+
+    // Oracle 审查记录：会话附属持久化（CLI 侧 session entry），超时重发安全。
+    async saveOracleReviewRecord(params) {
+      const client = await getClient(params);
+      const wireParams = zcodeOracleReviewSaveRecordParamsSchema.parse({
+        workspace: buildWorkspaceRef(params),
+        sessionId: params.sessionId,
+        record: params.record,
+      });
+      return client.request(
+        zcodeProtocolMethods.oracleReviewSaveRecord,
+        wireParams,
+        zcodeOracleReviewSaveRecordResultSchema,
+        { timeoutMs: 10_000 },
+      );
+    },
+
+    async listOracleReviewRecords(params) {
+      const client = await getClient(params);
+      const wireParams = zcodeOracleReviewListRecordsParamsSchema.parse({
+        workspace: buildWorkspaceRef(params),
+        sessionId: params.sessionId,
+        ...(params.limit !== undefined ? { limit: params.limit } : {}),
+      });
+      return client.request(
+        zcodeProtocolMethods.oracleReviewListRecords,
+        wireParams,
+        zcodeOracleReviewListRecordsResultSchema,
+        { timeoutMs: 10_000 },
+      );
     },
 
     async testModelConnectivity(params: ZCodeAgentTestModelConnectivityParams) {

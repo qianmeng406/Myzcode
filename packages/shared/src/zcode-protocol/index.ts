@@ -2162,6 +2162,67 @@ export const zcodeWorkspaceCancelGenerateTextResultSchema = z
   .object({ operationId: nonEmptyString, cancelled: z.boolean() })
   .strict();
 
+// ── Oracle 审查记录（会话附属持久化；冷恢复后卡片与历史可复原）──
+// 存储面是 CLI 的 session entry（type=oracle/conversation_review，touchSession:false
+// ——审查写入不得伪装成用户刚操作过会话）。原始对话不另存副本：记录只保留稳定
+// 引用（target 的 rowId/entityId/productTurnId）与结论本体。
+export const zcodeOracleReviewRecordSchema = z
+  .object({
+    reviewId: nonEmptyString,
+    sessionId: nonEmptyString,
+    depth: z.enum(["standard", "deep"]),
+    mode: z.enum(["auto", "manual"]),
+    target: z
+      .object({
+        rowId: z.number().int().nonnegative(),
+        entityId: nonEmptyString,
+        productTurnId: nonEmptyString.optional(),
+      })
+      .strict(),
+    verdict: z.enum(["pass", "warn", "fail", "insufficient", "unknown"]),
+    summary: z.string(),
+    findings: z.string(),
+    /** deep：需求核验表（REQUIREMENTS 段原文，逐行）；缺席 = 该次审查没有产出。 */
+    requirements: z.string().optional(),
+    scope: z.string().optional(),
+    limits: z.string().optional(),
+    modelLabel: nonEmptyString,
+    createdAt: z.number().int().positive(),
+    completedAt: z.number().int().positive(),
+  })
+  .strict();
+export type ZCodeOracleReviewRecord = z.infer<typeof zcodeOracleReviewRecordSchema>;
+
+export const zcodeOracleReviewSaveRecordParamsSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    sessionId: nonEmptyString,
+    record: zcodeOracleReviewRecordSchema,
+  })
+  .strict();
+export const zcodeOracleReviewSaveRecordResultSchema = z
+  .object({ saved: z.boolean() })
+  .strict();
+
+export const zcodeOracleReviewListRecordsParamsSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    sessionId: nonEmptyString,
+    limit: z.number().int().min(1).max(50).optional(),
+  })
+  .strict();
+export const zcodeOracleReviewListRecordsResultSchema = z
+  .object({
+    /** completedAt 降序（最新优先；与 CLI 实现、services 接口、UI 投影同一口径）。 */
+    records: z.array(zcodeOracleReviewRecordSchema),
+    /** CLI/宿主缺 session entry 存储面（旧版本）时 true：UI 保持内存态行为。 */
+    unavailable: z.boolean().optional(),
+  })
+  .strict();
+export type ZCodeOracleReviewListRecordsResult = z.infer<
+  typeof zcodeOracleReviewListRecordsResultSchema
+>;
+
 export const zcodeProviderTestModelConnectivityParamsSchema = z
   .object({
     workspace: zcodeWorkspaceRefSchema,
@@ -3645,6 +3706,9 @@ export const zcodeProtocolMethods = {
   // （commit message），待 v4 workspace 查询/命令面覆盖后移除。
   workspaceGenerateText: "workspace/generateText",
   workspaceCancelGenerateText: "workspace/cancelGenerateText",
+  // Oracle 审查记录持久化：会话附属（session entry），冷恢复后卡片/历史可复原。
+  oracleReviewSaveRecord: "oracleReview/saveRecord",
+  oracleReviewListRecords: "oracleReview/listRecords",
   providerTestModelConnectivity: "provider/testModelConnectivity",
   mcpList: "mcp/list",
   pluginsList: "plugins/list",

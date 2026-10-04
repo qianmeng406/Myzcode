@@ -42,6 +42,7 @@ import {
   type OffPeakCreateTaskSummary,
 } from "@/ToolCallBlocks/renderers/offpeak-create.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { isOracleReviewableTurnState } from "@/v4/oracleReview/oracleReviewMaterial.js";
 import type { AssistantPreviewCard } from "@/lib/assistantPreviewCards.js";
 import { useAssistantCodeCommentFeatureEnabled } from "@/AssistantCodeCommentFeatureProvider.js";
 import {
@@ -1197,16 +1198,14 @@ function ConversationTurnGroupImpl({
     () => (unit.isRunning ? [] : resolveOffPeakTurnCards(unit.assistantWorkRows)),
     [unit.assistantWorkRows, unit.isRunning],
   );
-  // 本轮是否有工具调用：脚本/命令改文件的回合据此保留审查入口
-  // （checkpoint 不记录脚本改动，fileChanges 为空）。
-  const hasTurnToolActivity = unit.assistantWorkRows.some((row) => row.kind === "toolCall");
   // 标准/深度两个审查按钮共用的唯一准入判定：显隐规则改动只改这一处。
+  // v2 对话审查：准入 = 对话终态（成功/被中断/失败）+ 有持久实体 + 非 controlOnly；
+  // 不再要求有文件改动或工具活动——纯对话回合同样可审，diff 只是辅助证据。
   const canReviewThisTurn =
     context.reviewTurn !== undefined &&
     unit.header?.entityId !== undefined &&
-    unit.header.state === "completedSuccess" &&
-    ((unit.header.fileChanges?.files ?? 0) > 0 || hasTurnToolActivity) &&
-    unit.header.fileChanges?.state !== "reverted";
+    unit.header.executionKind !== "controlOnly" &&
+    isOracleReviewableTurnState(unit.header.state);
   const canRenderAssistantActions =
     !unit.timelineOnly &&
     latestAssistantTextRow?.state === "complete" &&

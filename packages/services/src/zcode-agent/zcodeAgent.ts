@@ -320,6 +320,11 @@ export interface ZCodeAgentGenerateWorkspaceTextParams extends ZCodeAgentWorkspa
   agentic?: boolean;
   /** 深度审查的软 deadline（epoch ms）：调查轮提前收敛进收尾轮（hard-abort 之外的 first-line 保障）。 */
   deadlineAt?: number;
+  /**
+   * 调用方显式 operationId：进度通知与取消按它精确路由（审查的上下文分析/正式
+   * 审查阶段各持一个）。省略时宿主在派生 signal 场景下自行生成（与旧语义一致）。
+   */
+  operationId?: string;
   signal?: AbortSignal;
   /**
    * 协议层 RPC 超时。thinking 模型的长请求会超过协议 client 默认的
@@ -703,10 +708,23 @@ export interface IZCodeAgentService {
   generateWorkspaceText(
     params: ZCodeAgentGenerateWorkspaceTextParams,
   ): Promise<ZCodeWorkspaceGenerateTextResult>;
-  /** 主动取消在飞的 workspace generateText（审查卡片 ✕）；未命中返回 false，幂等。 */
+  /** 主动取消在飞的 workspace generateText（审查卡片 ✕）；未命中返回 false，幂等。
+   * 带 operationId 时按调用方显式 operationId 精确命中（同 workspace 多会话/多阶段
+   * 并发审查不串杀）；省略时退回 workspace+remoteSessionId+querySource 键匹配。 */
   cancelWorkspaceGenerateText(
-    params: ZCodeAgentWorkspaceTarget & { querySource: string },
+    params: ZCodeAgentWorkspaceTarget & { querySource: string; operationId?: string },
   ): Promise<boolean>;
+  /** Oracle 审查记录持久化（会话附属 session entry）；存储面缺席时 saved:false。 */
+  saveOracleReviewRecord(
+    params: ZCodeAgentWorkspaceTarget & {
+      sessionId: string;
+      record: import("@zcode/shared").ZCodeOracleReviewRecord;
+    },
+  ): Promise<{ saved: boolean }>;
+  /** Oracle 审查记录读取（completedAt 降序）；存储面缺席时 unavailable:true。 */
+  listOracleReviewRecords(
+    params: ZCodeAgentWorkspaceTarget & { sessionId: string; limit?: number },
+  ): Promise<import("@zcode/shared").ZCodeOracleReviewListRecordsResult>;
   testModelConnectivity(
     params: ZCodeAgentTestModelConnectivityParams,
   ): Promise<ZCodeProviderTestModelConnectivityResult>;

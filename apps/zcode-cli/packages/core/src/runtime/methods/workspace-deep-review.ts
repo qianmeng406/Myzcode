@@ -6,6 +6,7 @@ import type {
   ModelUsage,
   TraceContext,
 } from "../deps.js";
+import { isAbsolute, normalize, relative, resolve } from "node:path";
 import {
   PermissionService,
   createDenyPermissionBroker,
@@ -298,19 +299,117 @@ export function describeDeepReviewToolTarget(toolCall: ModelToolCall): string | 
 
 type DeepReviewToolPolicyDecision = { allowed: true } | { allowed: false; reason: string };
 
+// ── 取证路径边界（v2：从「diff 文件白名单」放宽为「工作区只读」的硬边界）──
+// prompt 层只约束行为（任务相关的源码/测试/配置/文档），真正的边界在 tool-use
+// 策略层：Read/Grep/Glob 的目标路径经词法归一化后必须落在工作区内；Bash 只读命令
+// 里出现的绝对路径同样不得逃出工作区（防 `cat /etc/passwd` 绕过 Read 的限制）。
+// 词法检查不解析符号链接（executor 的 symlink 语义不变），是 best-effort 硬闸；
+// 无法确认目标的 Bash 命令宁可拒绝，由模型改用 Read/Grep/Glob 取证。
+//
+// 已知的两类词法盲区（实测逃逸/误拒）必须显式处理，不能只靠 resolve：
+// - `~` 与裸 `..`：前者在 Bash 里被真实展开到 HOME，后者无分隔符会被路径检查跳过；
+//   两者都无法用词法包含判定，一律按「工作区外」拒绝（保守方向）。
+// - MSYS/git-bash 盘符路径 `/c/Users/x`：win32 下 normalize 成 `\c\Users\x` 与
+//   `C:\` 不同根，会把工作区内文件误判成逃逸 —— 先归一为 `C:\Users\x` 再判包含。
+
+function isPathInsideRoot(candidate: string, root: string): boolean {
+  // relative() 按平台语义统一处理分隔符；「.. 开头或仍是绝对路径」即逃逸。
+  const rel = relative(normalize(root), normalize(candidate));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/** MSYS/git-bash 盘符路径（/c/Users/x）归一为 win32 形式（C:\Users\x）后再判包含。 */
+function normalizeMsysDrivePath(input: string): string {
+  if (process.platform !== "win32") return input;
+  const match = /^\/([A-Za-z])(\/|$)/.exec(input);
+  if (!match) return input;
+  return `${match[1]!.toUpperCase()}:\\${input.slice(2).replace(/\//g, "\\")}`;
+}
+
+/** HOME 相对（~ / ~/x）：Bash 会展开到工作区外，词法上无法确认，一律拒绝。 */
+function isHomeRelativePath(token: string): boolean {
+  return token === "~" || token.startsWith("~/") || token.startsWith("~\\");
+}
+
+/** 工具输入里的路径字段：相对路径相对工作目录解析，绝对路径必须落在工作区内。 */
+function isAllowedEvidencePath(
+  rawPath: string,
+  workingDirectory: string,
+  workspaceRoot: string,
+): boolean {
+  const trimmed = rawPath.trim();
+  if (!trimmed) return true;
+  // URL/URI（含 ://）不是文件路径，交给工具自身语义处理。
+  if (trimmed.includes("://")) return true;
+  if (isHomeRelativePath(trimmed)) return false;
+  const candidate = normalizeMsysDrivePath(trimmed);
+  const resolved = isAbsolute(candidate)
+    ? normalize(candidate)
+    : resolve(workingDirectory, normalize(candidate));
+  return (
+    isPathInsideRoot(resolved, workingDirectory) || isPathInsideRoot(resolved, workspaceRoot)
+  );
+}
+
+function stringRecord(input: unknown): Record<string, unknown> | null {
+  return input && typeof input === "object" && !Array.isArray(input)
+    ? (input as Record<string, unknown>)
+    : null;
+}
+
+/** Bash 命令的粗粒度路径扫描：任何疑似工作区外的路径都拒绝（保守方向）。 */
+function bashEscapesWorkspace(command: string, workingDirectory: string, workspaceRoot: string): boolean {
+  // shell 引号内的路径也按 token 切：deep review 的取证命令不需要精巧转义。
+  const tokens = command.split(/\s+/);
+  for (const rawToken of tokens) {
+    const token = rawToken.replace(/^['"]|['"]$/g, "");
+    if (!token || token.startsWith("-")) continue;
+    if (token.includes("://")) continue;
+    // HOME 相对与裸父目录：Bash 展开后必然指向工作区外（`~`→HOME，`..`→父目录），
+    // 且 `..` 无分隔符会被下面的路径检查跳过，必须在这里单独拦。
+    if (isHomeRelativePath(token)) return true;
+    if (token === ".." || token.startsWith("../") || token.startsWith("..\\")) return true;
+    // 含路径分隔符或以盘符/根开头的 token 才按路径检查；纯文件名交给相对解析。
+    const looksLikePath = token.includes("/") || token.includes("\\") || /^[A-Za-z]:/.test(token);
+    if (!looksLikePath) continue;
+    if (!isAllowedEvidencePath(token, workingDirectory, workspaceRoot)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function describeDeepReviewPathInput(toolCall: ModelToolCall): string | null {
+  const input = stringRecord(toolCall.input);
+  if (!input) return null;
+  for (const key of ["file_path", "filePath", "path", "glob"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return null;
+}
+
 /** 导出仅为单测；生产路径只经 runDeepReviewAgentLoop 的循环边界调用。 */
 export function evaluateDeepReviewToolPolicy(
   toolCall: ModelToolCall,
   runtime: AgentRuntimeInternal,
 ): DeepReviewToolPolicyDecision {
   if (toolCall.name === "Read" || toolCall.name === "Grep" || toolCall.name === "Glob") {
+    const rawPath = describeDeepReviewPathInput(toolCall);
+    if (
+      rawPath !== null &&
+      !isAllowedEvidencePath(rawPath, runtime.workingDirectory, runtime.workspaceRoot)
+    ) {
+      return {
+        allowed: false,
+        reason: `Deep review is read-only and workspace-scoped: path "${rawPath.slice(0, 200)}" is outside the workspace. Only files inside the workspace can be read.`,
+      };
+    }
     return { allowed: true };
   }
   if (toolCall.name === "Bash") {
-    const command =
-      toolCall.input && typeof toolCall.input === "object" && !Array.isArray(toolCall.input)
-        ? (toolCall.input as Record<string, unknown>).command
-        : undefined;
+    const input = stringRecord(toolCall.input);
+    const command = typeof input?.command === "string" ? input.command : undefined;
     if (
       typeof command === "string" &&
       isRuntimeReadOnlyBashCommand(command, {
@@ -318,6 +417,16 @@ export function evaluateDeepReviewToolPolicy(
         workspaceRoot: runtime.workspaceRoot,
       })
     ) {
+      if (
+        command &&
+        bashEscapesWorkspace(command, runtime.workingDirectory, runtime.workspaceRoot)
+      ) {
+        return {
+          allowed: false,
+          reason:
+            "Deep review is read-only and workspace-scoped: this command references paths outside the workspace. Use Read/Grep/Glob for workspace files instead.",
+        };
+      }
       return { allowed: true };
     }
     return {

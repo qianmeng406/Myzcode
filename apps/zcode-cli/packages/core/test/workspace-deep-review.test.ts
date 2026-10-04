@@ -54,6 +54,115 @@ test("深度审查策略：读类工具放行，写工具与非只读 Bash 一�
   assert.equal(agent.allowed, false);
 });
 
+test("深度审查路径边界：工作区内放行，穿越与工作区外绝对路径拒绝", () => {
+  assert.deepEqual(
+    evaluateDeepReviewToolPolicy(toolCall("Read", { file_path: "/repo/src/a.ts" }), fakeRuntime),
+    { allowed: true },
+  );
+  // 相对路径相对工作目录解析后仍在工作区内
+  assert.deepEqual(
+    evaluateDeepReviewToolPolicy(toolCall("Read", { file_path: "src/a.ts" }), fakeRuntime),
+    { allowed: true },
+  );
+  // .. 穿越逃逸
+  const escape = evaluateDeepReviewToolPolicy(
+    toolCall("Read", { file_path: "../outside/a.ts" }),
+    fakeRuntime,
+  );
+  assert.equal(escape.allowed, false);
+  // 绝对路径在工作区外
+  const outside = evaluateDeepReviewToolPolicy(
+    toolCall("Read", { file_path: "/etc/passwd" }),
+    fakeRuntime,
+  );
+  assert.equal(outside.allowed, false);
+  if (!outside.allowed) assert.match(outside.reason, /workspace/i);
+  // Grep 的目录参数同样受限；Glob 的相对 pattern 放行
+  const grepOutside = evaluateDeepReviewToolPolicy(
+    toolCall("Grep", { pattern: "x", path: "/var/log" }),
+    fakeRuntime,
+  );
+  assert.equal(grepOutside.allowed, false);
+  assert.deepEqual(
+    evaluateDeepReviewToolPolicy(toolCall("Glob", { pattern: "src/**/*.ts" }), fakeRuntime),
+    { allowed: true },
+  );
+});
+
+test("深度审查 Bash 路径扫描：只读命令引用工作区外路径被拒，选项与相对路径放行", () => {
+  // 只读命令但目标在工作区外：拒绝并提示改用 Read/Grep/Glob
+  const outside = evaluateDeepReviewToolPolicy(
+    toolCall("Bash", { command: "cat /etc/passwd" }),
+    fakeRuntime,
+  );
+  assert.equal(outside.allowed, false);
+  if (!outside.allowed) assert.match(outside.reason, /workspace/i);
+  // 相对路径、选项、工作区内绝对路径都放行
+  assert.deepEqual(
+    evaluateDeepReviewToolPolicy(toolCall("Bash", { command: "ls src/a.ts" }), fakeRuntime),
+    { allowed: true },
+  );
+  assert.deepEqual(
+    evaluateDeepReviewToolPolicy(toolCall("Bash", { command: "ls -la /repo/src" }), fakeRuntime),
+    { allowed: true },
+  );
+  // URL 不按路径检查（交给工具语义）；分类器放行 cat 时不再被路径扫描误拒
+  assert.deepEqual(
+    evaluateDeepReviewToolPolicy(
+      toolCall("Bash", { command: "cat /repo/src/a.ts | grep https://example.com" }),
+      fakeRuntime,
+    ),
+    { allowed: true },
+  );
+});
+
+test("深度审查路径边界：HOME 相对与裸父目录一律拒绝（Bash 展开后在工作区外）", () => {
+  // `~` / `~/x`：win32 下 isAbsolute=false 会被当相对路径解析回工作区内，
+  // 但 Bash 会真实展开到 HOME —— 必须显式拒绝。
+  for (const path of ["~", "~/secrets.txt", "~\\secrets.txt"]) {
+    const read = evaluateDeepReviewToolPolicy(toolCall("Read", { file_path: path }), fakeRuntime);
+    assert.equal(read.allowed, false);
+  }
+  const bashHome = evaluateDeepReviewToolPolicy(
+    toolCall("Bash", { command: "cat ~/AppData/Local/Temp/probe.txt" }),
+    fakeRuntime,
+  );
+  assert.equal(bashHome.allowed, false);
+  // 裸 `..` 无分隔符，会被 looksLikePath 跳过；`..` 展开后在父目录。
+  for (const command of ["ls ..", "ls ../wf-trial", "cat ..\\outside.txt"]) {
+    const result = evaluateDeepReviewToolPolicy(toolCall("Bash", { command }), fakeRuntime);
+    assert.equal(result.allowed, false);
+  }
+});
+
+test("深度审查路径边界：git-bash 盘符路径（/c/...）归一后按工作区包含判定", () => {
+  const winRuntime = {
+    workingDirectory: "C:\\repo",
+    workspaceRoot: "C:\\repo",
+  } as unknown as Parameters<typeof evaluateDeepReviewToolPolicy>[1];
+  // MSYS 盘符路径指向工作区内：不应误拒（模型会复用 Bash 输出的路径形式）。
+  assert.deepEqual(
+    evaluateDeepReviewToolPolicy(
+      toolCall("Bash", { command: "ls /c/repo/src" }),
+      winRuntime,
+    ),
+    { allowed: true },
+  );
+  assert.deepEqual(
+    evaluateDeepReviewToolPolicy(
+      toolCall("Read", { file_path: "/c/repo/src/a.ts" }),
+      winRuntime,
+    ),
+    { allowed: true },
+  );
+  // 其它盘符仍是工作区外。
+  const other = evaluateDeepReviewToolPolicy(
+    toolCall("Bash", { command: "cat /d/other/secret.txt" }),
+    winRuntime,
+  );
+  assert.equal(other.allowed, false);
+});
+
 /** 每轮返回固定事件流的假模型（streamText 路径）。 */
 function fakeModel(script: ModelStreamEvent[][]): Model {
   let index = 0;

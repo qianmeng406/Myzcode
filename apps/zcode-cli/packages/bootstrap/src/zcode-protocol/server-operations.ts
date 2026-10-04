@@ -46,6 +46,9 @@ import {
   zcodeProtocolErrorCodes,
   zcodeProtocolMethods,
   zcodeProtocolNotifications,
+  zcodeOracleReviewListRecordsParamsSchema,
+  zcodeOracleReviewRecordSchema,
+  zcodeOracleReviewSaveRecordParamsSchema,
   zcodeSessionCancelBackgroundTaskParamsSchema,
   zcodeSessionCompactParamsSchema,
   zcodeSessionCloseParamsSchema,
@@ -4168,4 +4171,70 @@ function emitStateUpdated(
     workspace: record.workspace,
   };
   context.notify({ method: "state.updated", params: notification });
+}
+
+// ── Oracle 审查记录持久化 ──
+// 存储面是 session entry（type=oracle/conversation_review，外键级联随会话删除）。
+// touchSession:false：后台审查写入不得伪装成用户刚操作过会话。旧宿主/旧 CLI 缺
+// session entry 端口时如实回 unavailable，UI 保持内存态行为。
+
+const ORACLE_REVIEW_ENTRY_TYPE = "oracle/conversation_review";
+const ORACLE_REVIEW_LIST_DEFAULT_LIMIT = 20;
+
+export async function saveOracleReviewRecord(
+  context: ZCodeProtocolAgentServerContext,
+  rawParams: unknown,
+): Promise<{ saved: boolean }> {
+  const params = parseParams(zcodeOracleReviewSaveRecordParamsSchema, rawParams);
+  const sessionStore = context.deps.sessionStore;
+  if (!sessionStore?.saveSessionEntry) {
+    return { saved: false };
+  }
+  const now = Date.now();
+  try {
+    await sessionStore.saveSessionEntry({
+      id: `oracle-review:${params.sessionId}:${params.record.reviewId}`,
+      sessionID: params.sessionId as SessionId,
+      type: ORACLE_REVIEW_ENTRY_TYPE,
+      touchSession: false,
+      time: { created: now, updated: now },
+      data: params.record,
+    });
+    return { saved: true };
+  } catch (error) {
+    // 落盘失败不阻塞审查本身（结果已在 UI 内存态展示）；留痕便于归因。
+    context.logger?.warn?.("Oracle 审查记录保存失败", {
+      sessionId: params.sessionId,
+      reviewId: params.record.reviewId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { saved: false };
+  }
+}
+
+export async function listOracleReviewRecords(
+  context: ZCodeProtocolAgentServerContext,
+  rawParams: unknown,
+): Promise<{ records: unknown[]; unavailable?: boolean }> {
+  const params = parseParams(zcodeOracleReviewListRecordsParamsSchema, rawParams);
+  const sessionStore = context.deps.sessionStore;
+  if (!sessionStore?.sessionEntries) {
+    return { records: [], unavailable: true };
+  }
+  const entries = await sessionStore.sessionEntries({
+    sessionID: params.sessionId as SessionId,
+    type: ORACLE_REVIEW_ENTRY_TYPE,
+  });
+  const records: unknown[] = [];
+  for (const entry of entries) {
+    // 逐条 safeParse：单条旧版本/损坏记录不拖垮整个历史恢复。
+    const parsed = zcodeOracleReviewRecordSchema.safeParse(entry.data);
+    if (parsed.success) {
+      records.push(parsed.data);
+    }
+  }
+  records.sort(
+    (a, b) => (b as { completedAt: number }).completedAt - (a as { completedAt: number }).completedAt,
+  );
+  return { records: records.slice(0, params.limit ?? ORACLE_REVIEW_LIST_DEFAULT_LIMIT) };
 }

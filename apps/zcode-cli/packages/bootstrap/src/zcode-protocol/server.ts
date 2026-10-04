@@ -33,12 +33,14 @@ import {
   goalSession,
   getTaskTokenUsage,
   getUsageStats,
+  listOracleReviewRecords,
   listSessions,
   listSessionSubagents,
   readEvents,
   readMessages,
   readSession,
   resumeSession,
+  saveOracleReviewRecord,
   sendPrompt,
   setMode,
   setModel,
@@ -562,6 +564,11 @@ export class ZCodeProtocolAgentServer {
         return await getUsageStats(this.context, request.params);
       case V4_METHODS.conversationUsage:
         return await getTaskTokenUsage(this.context, request.params);
+      // Oracle 审查记录：会话附属持久化（session entry），CLI 侧按 sessionId 隔离。
+      case zcodeProtocolMethods.oracleReviewSaveRecord:
+        return await saveOracleReviewRecord(this.context, request.params);
+      case zcodeProtocolMethods.oracleReviewListRecords:
+        return await listOracleReviewRecords(this.context, request.params);
       case V4_METHODS.command:
         return this.requireV4Gateway().handleCommand(request.params);
       case V4_METHODS.commandsQuery:
