@@ -74,6 +74,25 @@
 - 同主机并发 stdio + resident 连接共享同一数据根，SQLite 锁冲突是既有风险类，
   v1 不新增处理，如实记录。
 
+## 5.1 打包版发布：远端资源 CDN
+
+常驻功能改的是服务端产物，而打包版默认从官方 CDN 按版本号取 `zcode-server.cjs`，
+fork 的服务端改动不会自动随包发布（实测：安装包会部署官方产物，`--resident-start`
+落到 stdio 分支并以 hello-ack 超时收场）。发布方式：
+
+1. 构建产物后运行 `node scripts/pack-remote-assets-cdn.mjs --platforms linux-x64`
+   （可多平台逗号分隔），把 `packages/desktop/mock-cdn` 的扁平布局转成 CDN 布局：
+   `zcode/electron/releases/<version>/manifest-<arch>.json` 与
+   `zcode/electron/releases/components/<arch>/<id>/<version>.tar.gz`
+   （归档根 = mount 目录内容，`sha256` 校验归档本身，版本号后缀 = 归档哈希前 12 位；
+   已用官方 3.14.3 server-bundle 实物核对）。
+2. 把产出目录内容上传到自建托管根。
+3. 把 `ZCODE_CDN_BASE_URL` 指向该根：写进 `.env.production`（构建期固化，推荐）或用
+   运行时 env 覆盖。注意运行时覆盖要求**应用进程真的拿到该变量**——应用已在运行时再次
+   启动只会聚焦旧实例，env 不会生效。
+4. manifest 每次部署都强制联网刷新（`refreshManifest: true`），因此本地已有官方缓存
+   不会击败自定义源（已实测确认）。
+
 ## 6. 验收
 
 1. 单测：bridge 双向管道与双向终止语义；daemon.json 读写与陈旧判定；per-connection
