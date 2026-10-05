@@ -144,3 +144,33 @@ test("批准不带执行模型：真实 handler 退出后不触发换模（同�
   assert.equal(result.turnControl, undefined);
   assert.equal(result.followUpUserInput, undefined);
 });
+
+test("broker modify 产出的完整输入形状贯穿真实 handler 与换模交接", async () => {
+  const port = createFakeSessionModePort({ mode: "build", planEnabled: true });
+  const selection = {
+    providerId: "command-code",
+    modelId: "deepseek/deepseek-v4.1-flash",
+    options: { reasoningLevel: "high" },
+  };
+  // 与 interaction-broker.planApprovalResponseToBrokerResult 的 modify 输出同形：
+  // 原始工具输入（plan + allowedPrompts）+ executionModelSelection。这里是上下半程的接缝——
+  // bootstrap 侧测试断言「UI 应答 → 该形状」，本测试断言「该形状 → 真实换模交接」。
+  const brokerModifiedInput = {
+    plan: "- step 1",
+    allowedPrompts: [],
+    executionModelSelection: selection,
+  };
+
+  const result = await runExitPlanMode(port, "build", brokerModifiedInput);
+
+  assert.equal(port.isPlanEnabled?.(), false);
+  assert.equal(result.turnControl?.reason, "plan_exit_approved_model_switch");
+  assert.equal(result.turnControl?.stopTurnAfterResult, true);
+  assert.equal(result.followUpUserInput?.reasonSource, "plan_approval_feedback");
+  assert.deepEqual(result.followUpUserInput?.modelSelection, selection);
+  // 交接提示带上推理档，用户能核对「批准时选的档位」确实被执行回合采用。
+  assert.match(
+    result.followUpUserInput?.input ?? "",
+    /command-code\/deepseek\/deepseek-v4\.1-flash \(reasoning: high\)/,
+  );
+});

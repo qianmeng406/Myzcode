@@ -302,7 +302,10 @@ async function requestExitPlanModeApproval(
   return planApprovalResponseToBrokerResult(request, response);
 }
 
-function v4AnswerToPlanApprovalResponse(answer: V4InteractionAnswer): ZCodeUserInputResponse {
+/** 导出仅供单测：v4 应答 → 计划批准响应（含 UI action 路径的执行模型选择搬运）的纯映射。 */
+export function v4AnswerToPlanApprovalResponse(
+  answer: V4InteractionAnswer,
+): ZCodeUserInputResponse {
   // 同 v4AnswerToUserInputResponse——host adapter 收敛路径直传
   // action/content，planApprovalResponseToBrokerResult 继续做 approve/feedback 归一。
   if (answer.action) {
