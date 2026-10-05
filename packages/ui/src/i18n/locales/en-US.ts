@@ -1777,6 +1777,11 @@ const enUS: Record<string, string> = {
   "ssh.assetInstallMode.remote-download": "Download on remote server",
   "ssh.assetInstallModeDescription":
     "Remote server download reduces upload waiting, but the server must reach the ZCode CDN and have download, extract, and checksum tools.",
+  "ssh.residentMode": "Execution mode",
+  "ssh.residentMode.standard": "Standard session",
+  "ssh.residentMode.resident": "Resident",
+  "ssh.residentModeDescription":
+    "With Resident, remote tasks are owned by a resident process on your server: they keep running after you close this app or go offline, and progress and results are restored on reconnect. Linux servers only.",
   "ssh.password": "Password",
   "ssh.passwordPlaceholder": "Enter your SSH password",
   "ssh.privateKey": "Private key",

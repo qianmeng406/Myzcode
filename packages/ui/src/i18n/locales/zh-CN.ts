@@ -1656,6 +1656,11 @@ const zhCN: Record<string, string> = {
   "ssh.assetInstallMode.remote-download": "远端服务器下载",
   "ssh.assetInstallModeDescription":
     "远端服务器下载可减少上传等待，但服务器需要能访问 ZCode CDN，并具备下载、解压和校验工具。",
+  "ssh.residentMode": "运行方式",
+  "ssh.residentMode.standard": "标准连接",
+  "ssh.residentMode.resident": "常驻运行",
+  "ssh.residentModeDescription":
+    "常驻运行时，远端任务由服务器上的常驻进程持有：关闭本应用或断网后任务继续执行，重新连接后恢复进度和结果。仅支持 Linux 服务器。",
   "ssh.password": "密码",
   "ssh.passwordPlaceholder": "输入 SSH 密码",
   "ssh.privateKey": "私钥",

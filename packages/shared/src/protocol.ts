@@ -143,6 +143,8 @@ export interface SSHRemoteTargetSnapshot {
    * 这里只保存 credentialService 的键名，恢复时再去安全存储读取真实口令。
    */
   privateKeyPassphraseCredentialKey?: string;
+  /** 常驻模式：重连时保持同一语义（断开不终止远端任务）。 */
+  resident?: boolean;
 }
 
 export interface WSLRemoteTargetSnapshot {
