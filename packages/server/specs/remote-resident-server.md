@@ -80,8 +80,11 @@
 fork 的服务端改动不会自动随包发布（实测：安装包会部署官方产物，`--resident-start`
 落到 stdio 分支并以 hello-ack 超时收场）。发布方式：
 
-1. 构建产物后运行 `node scripts/pack-remote-assets-cdn.mjs --platforms linux-x64`
-   （可多平台逗号分隔），把 `packages/desktop/mock-cdn` 的扁平布局转成 CDN 布局：
+1. 生成发布树：**桌面构建已自动串联**（`prepare:runtime-assets` 在 prepare:remote-assets
+   之后调用本步骤），也可单独跑 `pnpm pack:remote-cdn`；平台列表用
+   `ZCODE_REMOTE_CDN_PLATFORMS`（默认 linux-x64，逗号分隔可多平台），
+   跳过用 `ZCODE_SKIP_REMOTE_CDN_PACK=1`。
+   产出在 `packages/desktop/dist-remote-cdn`，把 `packages/desktop/mock-cdn` 的扁平布局转成 CDN 布局：
    `zcode/electron/releases/<version>/manifest-<arch>.json` 与
    `zcode/electron/releases/components/<arch>/<id>/<version>.tar.gz`
    （归档根 = mount 目录内容，`sha256` 校验归档本身，版本号后缀 = 归档哈希前 12 位；

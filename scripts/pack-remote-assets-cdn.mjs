@@ -60,7 +60,9 @@ function nextComponentVersion(previousVersion, archiveSha256) {
 }
 
 async function createArchiveBuffer(cwd) {
-  const archive = createTarArchive({ gzip: true, cwd, portable: true }, ["."]);
+  // portable + noMtime：归档必须确定性——否则同一内容每次打包哈希都不同（实测），
+  // 部署身份随之变化，用户每次连接都要重传全部组件。
+  const archive = createTarArchive({ gzip: true, cwd, portable: true, noMtime: true }, ["."]);
   const chunks = [];
   for await (const chunk of archive) {
     chunks.push(chunk);
