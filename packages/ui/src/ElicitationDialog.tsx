@@ -24,6 +24,10 @@ import { cn } from "@/components/lib/utils.js";
 import { Textarea } from "@/components/ui/textarea.js";
 import { InteractionRequestOriginBadge } from "@/InteractionRequestOriginBadge.js";
 import { isImeComposingKeyEvent } from "@/lib/imeComposition.js";
+import {
+  completePlanExecutionModelChoice,
+  isPlanExecutionModelChoiceValid,
+} from "@/lib/planExecutionModel.js";
 import type { ElicitationFormDraft } from "@/store/zcodeSessionStoreTypes.js";
 import { useZCodeIntl } from "./i18n/IntlProvider.js";
 
@@ -34,7 +38,7 @@ export interface PlanExecutionModelGroup {
   models: Array<{ modelId: string; reasoningLevels: readonly string[] }>;
 }
 
-/** 用户在批准卡片上选定的执行模型；reasoningLevel 缺省 = 模型默认档。 */
+/** 用户在批准卡片上选定的执行模型；选中模型即由 completePlanExecutionModelChoice 补齐最高档，reasoningLevel 缺省仅表示模型无档位。 */
 export interface PlanExecutionModelChoice {
   providerId: string;
   modelId: string;
@@ -430,6 +434,23 @@ function ElicitationDialogContent({
   // 计划批准卡片的「执行模型/推理档」选择：null = 跟随会话模型（批准后同回合
   // 无缝继续，现行行为）。组件按 requestId 重建，无需随 request 重置。
   const [executionModel, setExecutionModel] = useState<PlanExecutionModelChoice | null>(null);
+  const selectPlanExecutionModel = useCallback(
+    (picked: PlanExecutionModelChoice) => {
+      // 选中模型即补齐最高档：与 Composer 切模型（completeNewModelSelection）同语义，
+      // 避免“选了模型但档位为空”生成 registry 拒绝的 ModelSelection。
+      setExecutionModel(completePlanExecutionModelChoice(planExecutionModelGroups, picked) ?? null);
+    },
+    [planExecutionModelGroups],
+  );
+  // 候选目录更新（模型被禁用/删除、档位变化）后，当前选择可能失效。失效时回退到
+  // 「跟随会话模型」，防止批准仍提交 registry 会拒绝的模型/档位。
+  useEffect(() => {
+    setExecutionModel((current) =>
+      current && !isPlanExecutionModelChoiceValid(planExecutionModelGroups, current)
+        ? null
+        : current,
+    );
+  }, [planExecutionModelGroups]);
   const executionModelGroup = executionModel
     ? planExecutionModelGroups?.find((group) => group.providerId === executionModel.providerId)
     : undefined;
@@ -499,14 +520,23 @@ function ElicitationDialogContent({
   const submitWithDrafts = useCallback(
     (nextDrafts: DraftState) => {
       const content = buildElicitationResponseContent(questions, nextDrafts);
-      onRespond(
-        request.requestId,
-        "accept",
-        content,
-        isPlanApproval && executionModel ? executionModel : undefined,
-      );
+      // 提交前再校验一次选择仍有效（目录可能在批准瞬间刚更新），失效则按跟随会话模型提交。
+      const executionModelChoice =
+        isPlanApproval &&
+        executionModel &&
+        isPlanExecutionModelChoiceValid(planExecutionModelGroups, executionModel)
+          ? executionModel
+          : undefined;
+      onRespond(request.requestId, "accept", content, executionModelChoice);
     },
-    [onRespond, questions, request.requestId, isPlanApproval, executionModel],
+    [
+      onRespond,
+      questions,
+      request.requestId,
+      isPlanApproval,
+      executionModel,
+      planExecutionModelGroups,
+    ],
   );
 
   const advanceFromQuestion = useCallback(
@@ -755,7 +785,10 @@ function ElicitationDialogContent({
       }
       if (action === "submit") {
         event.preventDefault();
-        submit();
+        // 复用 continueOrSubmit：计划批准在空答案时会显式补 approve（空答案在
+        // 计划审批协议里表示拒绝）。直接在空反馈框按 Enter 若走 submit() 会把
+        // 「接受计划」变成「拒绝计划」，与主提交按钮语义不一致。
+        continueOrSubmit();
         return;
       }
       if (action === "previous") {
@@ -772,6 +805,7 @@ function ElicitationDialogContent({
     },
     [
       advanceFromQuestion,
+      continueOrSubmit,
       dismiss,
       drafts,
       goBack,
@@ -780,7 +814,6 @@ function ElicitationDialogContent({
       questionIndex,
       questions,
       reportFirstInteraction,
-      submit,
     ],
   );
 
@@ -1189,7 +1222,7 @@ function ElicitationDialogContent({
                             <DropdownMenuItem
                               key={model.modelId}
                               onSelect={() =>
-                                setExecutionModel({
+                                selectPlanExecutionModel({
                                   providerId: group.providerId,
                                   modelId: model.modelId,
                                 })
@@ -1225,21 +1258,6 @@ function ElicitationDialogContent({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="start" className="max-h-72 w-52 overflow-y-auto">
-                        <DropdownMenuItem
-                          onSelect={() =>
-                            setExecutionModel((current) =>
-                              current ? { ...current, reasoningLevel: undefined } : current,
-                            )
-                          }
-                        >
-                          <span className="min-w-0 flex-1 truncate">
-                            {planExecutionThoughtDefaultLabel}
-                          </span>
-                          {executionModel.reasoningLevel === undefined ? (
-                            <CheckIcon className="size-3.5 shrink-0" />
-                          ) : null}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
                         {(executionModelOption?.reasoningLevels ?? []).map((level) => {
                           const selected = executionModel.reasoningLevel === level;
                           return (

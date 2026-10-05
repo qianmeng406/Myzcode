@@ -102,19 +102,18 @@ function readPlanExitDeniedFeedback(result: ToolExecutionResult): string | undef
  * 无法中途更换——停掉规划回合，把换模意图经 followUpUserInput（队列车道 + intent
  * modelSelection）交给下一回合。下一回合经 applySubmissionExecutionState 应用该选择
  * 并持久化为会话粘性选择，后续回合保持。未指定模型的批准不进此分支（同回合继续，原行为）。
+ *
+ * 计划状态来源必须是入参 planEnabled——它在 handler **之前**捕获（见 call-runner 的
+ * planEnabledBeforeHandler）。不能在这里重新读 sessionModePort：本 wrapper 在 handler
+ * 之后运行，exitPlanMode 已把 planEnabled 清成显式 false，重新读取会把真实批准路径
+ * 误判为非计划模式，导致换模被跳过、仍由规划模型继续执行。
  */
 export function withPlanExitApprovedTurnStop(
   result: ToolExecutionResult,
   input: { mode: CollaborationMode; planEnabled?: boolean; toolName: string },
 ): ToolExecutionResult {
-  // 守卫不能用 `planEnabled ?? mode === "plan"`：本 wrapper 在 handler **之后**运行，
-  // exitPlanMode 已把 planEnabled 置为显式 false（?? 不会被短路），只有 mode 仍是
-  // "plan"（执行态的 plan 是标志位，不随退出改写）——这是批准路径的真实状态。
-  if (
-    input.toolName !== EXIT_PLAN_MODE_TOOL_NAME ||
-    !result.success ||
-    !(input.mode === "plan" || input.planEnabled === true)
-  ) {
+  const wasPlanMode = input.planEnabled === true || input.mode === "plan";
+  if (input.toolName !== EXIT_PLAN_MODE_TOOL_NAME || !result.success || !wasPlanMode) {
     return result;
   }
   const output = isRecord(result.output) ? result.output : undefined;
