@@ -4,14 +4,23 @@
 //  - 帧形状 = { payload: { kind:"snapshot", snapshot } | { kind:"deltas", deltas[] } }，
 //    snapshot.rows 是 rowsWindow（window 数组），增量是七个封闭操作；
 //  - createSession 命令（sessionId=null）的 ACK result 携带新 sessionId。
-// 完整投影/历史分页的复用是阶段 3 工作（specs/companion-gateway.md）。
+// 模式显示/切换读 snapshot.config.mode，经 setMode 服务调用（facade 白名单面）。
+// 完整投影/历史分页/模型切换是后续增量（模型选项面未开放，见 spec §9.1）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CompanionClient, CompanionRelayChannel } from "@zcode/companion/client";
-import type { ConversationTopicFrame } from "@zcode/shared/zcode-protocol-v4";
+import type { IServiceAccessor } from "@zcode/services";
 import {
   createAgentConversationTransport,
   type ConversationTransport,
 } from "@zcode/ui/v4-agent-transport";
+import {
+  INITIAL_STATE,
+  MODE_LABELS,
+  applyFrame,
+  type ConversationState,
+  type MobileInteraction,
+  type MobileRow,
+} from "./conversationState.js";
+import { agentServiceOf } from "./sessions.js";
 
 export interface ConversationTarget {
   node: string;
@@ -20,191 +29,60 @@ export interface ConversationTarget {
   title: string;
 }
 
-interface MobileRow {
-  rowId: number;
-  entityId: string;
-  kind: string;
-  text: string;
-}
-
-interface MobileInteraction {
-  interactionId: string;
-  kind: string;
-  prompt: string;
-  options: Array<{ optionId: string; label: string }>;
-  freeText: boolean;
-}
-
-function rowText(raw: Record<string, unknown>): string {
-  for (const key of ["text", "summary", "description", "title"]) {
-    const value = raw[key];
-    if (typeof value === "string" && value.trim() !== "") return value;
-  }
-  if (raw.payload && typeof raw.payload === "object") {
-    const payload = raw.payload as Record<string, unknown>;
-    for (const key of ["text", "summary", "description", "prompt"]) {
-      const value = payload[key];
-      if (typeof value === "string" && value.trim() !== "") return value;
-    }
-  }
-  return "";
-}
-
-function describeRow(raw: Record<string, unknown>): MobileRow {
-  return {
-    rowId: typeof raw.rowId === "number" ? raw.rowId : 0,
-    entityId: typeof raw.entityId === "string" ? raw.entityId : "",
-    kind: String(raw.kind ?? "row"),
-    text: rowText(raw),
-  };
-}
-
-function describeInteraction(raw: Record<string, unknown>): MobileInteraction | null {
-  const interactionId = typeof raw.interactionId === "string" ? raw.interactionId : "";
-  const kind = String(raw.kind ?? "");
-  const payload = (raw.payload ?? {}) as Record<string, unknown>;
-  if (interactionId === "") return null;
-  if (kind === "permission") {
-    const options = Array.isArray(payload.options) ? payload.options : [];
-    return {
-      interactionId,
-      kind,
-      prompt: typeof payload.summary === "string" ? payload.summary : "工具权限请求",
-      options: options
-        .filter((option): option is Record<string, unknown> => option !== null && typeof option === "object")
-        .map((option) => ({
-          optionId: String(option.optionId ?? ""),
-          label: String(option.label ?? option.optionId ?? ""),
-        }))
-        .filter((option) => option.optionId !== ""),
-      freeText: payload.freeText === true,
-    };
-  }
-  if (kind === "userInput") {
-    const options = Array.isArray(payload.options) ? payload.options : [];
-    return {
-      interactionId,
-      kind,
-      prompt: typeof payload.prompt === "string" ? payload.prompt : "Agent 提问",
-      options: options
-        .filter((option): option is Record<string, unknown> => option !== null && typeof option === "object")
-        .map((option) => ({
-          optionId: String(option.optionId ?? option.value ?? ""),
-          label: String(option.label ?? option.value ?? ""),
-        }))
-        .filter((option) => option.optionId !== ""),
-      freeText: payload.freeText === true,
-    };
-  }
-  // workspaceHookReview 等其余类型：v1 只展示，不提供手机侧按钮（命令面未开放）。
-  return { interactionId, kind, prompt: "待处理项（请在电脑端处理）", options: [], freeText: false };
-}
-
-interface ConversationState {
-  sessionId: string | null;
-  rows: MobileRow[];
-  interactions: MobileInteraction[];
-}
-
-function applyFrame(state: ConversationState, frame: ConversationTopicFrame): ConversationState {
-  const { payload } = frame;
-  if (payload.kind === "snapshot") {
-    const snapshot = payload.snapshot;
-    return {
-      sessionId: snapshot.sessionId,
-      rows: (snapshot.rows.window as unknown as Record<string, unknown>[]).map(describeRow),
-      interactions: snapshot.pendingInteractions
-        .map((interaction) => describeInteraction(interaction as unknown as Record<string, unknown>))
-        .filter((interaction): interaction is MobileInteraction => interaction !== null),
-    };
-  }
-  let { sessionId, rows, interactions } = state;
-  for (const delta of payload.deltas) {
-    if (delta.op === "row.appended") {
-      rows = [...rows, describeRow(delta.row as unknown as Record<string, unknown>)];
-      continue;
-    }
-    if (delta.op === "row.upserted") {
-      const row = describeRow(delta.row as unknown as Record<string, unknown>);
-      rows = rows.map((existing) => (existing.rowId === row.rowId ? row : existing));
-      continue;
-    }
-    if (delta.op === "row.removed") {
-      rows = rows.filter((row) => row.rowId < delta.fromRowId);
-      continue;
-    }
-    if (delta.op === "row.delta") {
-      if (delta.path === "text") {
-        rows = rows.map((row) =>
-          row.rowId === delta.rowId ? { ...row, text: row.text + delta.append } : row,
-        );
-      }
-      continue;
-    }
-    if (delta.op === "state.updated" && delta.patch.pendingInteractions !== undefined) {
-      interactions = delta.patch.pendingInteractions
-        .map((interaction) => describeInteraction(interaction as unknown as Record<string, unknown>))
-        .filter((interaction): interaction is MobileInteraction => interaction !== null);
-      continue;
-    }
-    // state.updated 其余键与 workflowRun.*：v1 渲染不消费。
-  }
-  return { sessionId, rows, interactions };
-}
+const MODE_OPTIONS = ["build", "edit", "plan", "yolo"] as const;
 
 export function ConversationView(props: {
   target: ConversationTarget;
-  ensureClient: () => Promise<CompanionClient>;
+  sessionId: string | null;
+  accessor: IServiceAccessor;
   onBack: () => void;
 }): React.ReactElement {
-  const { target: view } = props;
+  const { target: view, sessionId: initialSessionId } = props;
   const [transport, setTransport] = useState<ConversationTransport | null>(null);
-  const [state, setState] = useState<ConversationState>({ sessionId: null, rows: [], interactions: [] });
-  const [draft, setDraft] = useState("");
+  const [state, setState] = useState<ConversationState>(() => ({
+    ...INITIAL_STATE,
+    sessionId: initialSessionId,
+  }));
+  const [draft, setDraft] = useState(() => {
+    // 草稿按工作区身份持久；发送成功即清除。
+    return window.sessionStorage.getItem(`zcode-draft:${view.workspaceIdentity}`) ?? "";
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
   const subscriptionRef = useRef<string | null>(null);
-  const channelRef = useRef<CompanionRelayChannel | null>(null);
+
+  useEffect(() => {
+    window.sessionStorage.setItem(`zcode-draft:${view.workspaceIdentity}`, draft);
+  }, [draft, view.workspaceIdentity]);
 
   useEffect(() => {
     let disposed = false;
     let currentTransport: ConversationTransport | null = null;
+    const agentService = agentServiceOf(props.accessor);
     void (async () => {
       try {
-        const client = await props.ensureClient();
-        const attachRaw = window.sessionStorage.getItem("zcode-companion-attach");
-        if (!attachRaw) throw new Error("缺少 attach 结果");
-        const attachResult = JSON.parse(attachRaw) as {
-          attachmentId: string;
-          relayPath: string;
-          relayCapability: string;
-        };
-        window.sessionStorage.setItem("zcode-companion-attachment", attachResult.attachmentId);
-        const openedChannel = await client.openRelayChannel(attachResult);
-        if (disposed) {
-          openedChannel.close();
-          return;
-        }
-        channelRef.current = openedChannel;
-        const agentService = (
-          openedChannel.accessor as unknown as {
-            zcodeAgentService: Record<string, unknown>;
-          }
-        ).zcodeAgentService as unknown as Parameters<typeof createAgentConversationTransport>[0];
-        const newTransport = createAgentConversationTransport(agentService, {
+        const newTransport = createAgentConversationTransport(agentService as never, {
           workspacePath: view.workspacePath,
           workspaceIdentity: view.workspaceIdentity,
         });
         currentTransport = newTransport;
         if (disposed) {
           currentTransport = null;
-          openedChannel.close();
           return;
         }
         setTransport(newTransport);
         newTransport.onFrame((frame) => setState((previous) => applyFrame(previous, frame)));
+        // 既有会话：进入即订阅；新任务：等 createSession ACK 带回 sessionId。
+        if (initialSessionId !== null) {
+          const subscribeResult = await newTransport.subscribe({
+            topic: `conversation/${initialSessionId}`,
+            visibility: "foreground",
+          });
+          subscriptionRef.current = subscribeResult.ack.subscriptionId;
+          newTransport.activate(subscribeResult.ack.subscriptionId);
+        }
       } catch (conversationError) {
         if (!disposed) {
           setError(conversationError instanceof Error ? conversationError.message : String(conversationError));
@@ -219,26 +97,12 @@ export function ConversationView(props: {
         void currentTransport.unsubscribe(subscriptionId).catch(() => undefined);
       }
       currentTransport = null;
-      channelRef.current?.close();
-      channelRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 通道按目标建立一次；重建由返回目录触发
-  }, [view.workspaceIdentity]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 通道按目标建立一次；重建由返回列表触发
+  }, [view.workspaceIdentity, initialSessionId]);
 
   const newCommandId = useCallback(
     (): string => `mob-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-    [],
-  );
-
-  const subscribeConversation = useCallback(
-    async (activeTransport: ConversationTransport, sessionId: string): Promise<void> => {
-      const subscribeResult = await activeTransport.subscribe({
-        topic: `conversation/${sessionId}`,
-        visibility: "foreground",
-      });
-      subscriptionRef.current = subscribeResult.ack.subscriptionId;
-      activeTransport.activate(subscribeResult.ack.subscriptionId);
-    },
     [],
   );
 
@@ -249,7 +113,6 @@ export function ConversationView(props: {
     setBusy(true);
     setError(null);
     try {
-      setDraft("");
       const current = stateRef.current;
       if (current.sessionId === null) {
         // 首条输入：createSession（sessionId=null），ACK result 带回新会话 id。
@@ -275,8 +138,15 @@ export function ConversationView(props: {
           setError("会话创建结果缺少 sessionId");
           return;
         }
+        window.sessionStorage.removeItem(`zcode-draft:${view.workspaceIdentity}`);
+        setDraft("");
         setState((previous) => ({ ...previous, sessionId }));
-        await subscribeConversation(activeTransport, sessionId);
+        const subscribeResult = await activeTransport.subscribe({
+          topic: `conversation/${sessionId}`,
+          visibility: "foreground",
+        });
+        subscriptionRef.current = subscribeResult.ack.subscriptionId;
+        activeTransport.activate(subscribeResult.ack.subscriptionId);
         return;
       }
       const ack = await activeTransport.sendCommand({
@@ -289,13 +159,16 @@ export function ConversationView(props: {
       });
       if (ack.status !== "accepted") {
         setError(`输入未被接受：${ack.reasonCode ?? ack.status}`);
+        return;
       }
+      window.sessionStorage.removeItem(`zcode-draft:${view.workspaceIdentity}`);
+      setDraft("");
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : String(sendError));
     } finally {
       setBusy(false);
     }
-  }, [transport, draft, view.workspaceIdentity, newCommandId, subscribeConversation]);
+  }, [transport, draft, view.workspaceIdentity, newCommandId]);
 
   const stop = useCallback(async (): Promise<void> => {
     const activeTransport = transport;
@@ -340,6 +213,24 @@ export function ConversationView(props: {
     [transport, newCommandId],
   );
 
+  const switchMode = useCallback(
+    async (mode: string): Promise<void> => {
+      const current = stateRef.current;
+      if (current.sessionId === null) return;
+      try {
+        await agentServiceOf(props.accessor).setMode({
+          workspacePath: view.workspacePath,
+          workspaceIdentity: view.workspaceIdentity,
+          sessionId: current.sessionId,
+          mode: mode as never,
+        });
+      } catch (modeError) {
+        setError(modeError instanceof Error ? modeError.message : String(modeError));
+      }
+    },
+    [props.accessor, view.workspacePath, view.workspaceIdentity],
+  );
+
   const rendered = useMemo(() => state.rows.filter((row) => row.text !== ""), [state.rows]);
 
   return (
@@ -348,7 +239,7 @@ export function ConversationView(props: {
         <button className="button secondary" onClick={props.onBack}>
           ←
         </button>
-        <h1>{view.title}</h1>
+        <h1>{state.sessionId === null ? "新任务" : view.title}</h1>
         {state.sessionId !== null && (
           <button className="button danger" disabled={busy} onClick={() => void stop()}>
             停止
@@ -358,6 +249,27 @@ export function ConversationView(props: {
       {error !== null && <div className="error" style={{ padding: "0 16px" }}>{error}</div>}
       <div className="content">
         {transport === null && <p className="muted">正在建立数据通道…</p>}
+        {state.modelLabel !== null && (
+          <p className="muted" style={{ textAlign: "left", padding: "4px 0" }}>
+            模型 {state.modelLabel}
+            {state.mode !== null ? ` · 模式 ${MODE_LABELS[state.mode] ?? state.mode}` : ""}
+          </p>
+        )}
+        {state.sessionId !== null && (
+          <div className="answer" style={{ marginBottom: 8 }}>
+            {MODE_OPTIONS.map((mode) => (
+              <button
+                key={mode}
+                className={`button secondary`}
+                style={state.mode === mode ? { outline: "2px solid #4f7cff" } : undefined}
+                disabled={busy}
+                onClick={() => void switchMode(mode)}
+              >
+                {MODE_LABELS[mode]}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="rows">
           {rendered.map((row) => (
             <div

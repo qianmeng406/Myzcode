@@ -1,12 +1,12 @@
-// My zcode 手机端首版（阶段 1 最小闭环）：配置 → 工作区目录 → 会话列表 →
-// 会话查看/发送/停止/审批。会话数据面复用 @zcode/ui 的 v4 transport
-// （snapshot/delta 组装、命令对账语义与桌面一致）；渲染为手机单列布局。
+// My zcode 手机端入口：配置 → 工作区目录 → 工作区（会话列表/会话）。
+// 认证：access token 存 sessionStorage（浏览器会话级）；Android 壳后续替换为
+// 安全存储（交付说明中如实标注）。
 import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CompanionClient } from "@zcode/companion/client";
 import type { CompanionCatalogResult } from "@zcode/shared/companion-protocol";
 import "./app.css";
-import { ConversationView } from "./conversation.js";
+import { WorkspaceView } from "./workspace.js";
 
 interface CompanionConfig {
   baseUrl: string;
@@ -27,7 +27,13 @@ function loadConfig(): CompanionConfig | null {
 type View =
   | { name: "config" }
   | { name: "catalog" }
-  | { name: "conversation"; node: string; workspacePath: string; workspaceIdentity: string; title: string };
+  | {
+      name: "workspace";
+      node: string;
+      workspacePath: string;
+      workspaceIdentity: string;
+      title: string;
+    };
 
 function App(): React.ReactElement {
   const [view, setView] = useState<View>(() => (loadConfig() ? { name: "catalog" } : { name: "config" }));
@@ -87,33 +93,23 @@ function App(): React.ReactElement {
         {error !== null && <div className="error" style={{ padding: "0 16px" }}>{error}</div>}
         <CatalogView
           ensureClient={ensureClient}
-          onOpen={async (nodeId, workspacePath, workspaceIdentity, title) => {
-            try {
-              const client = await ensureClient();
-              const attachResult = await client.attach({ nodeId, workspacePath, workspaceIdentity });
-              setView({ name: "conversation", node: nodeId, workspacePath, workspaceIdentity, title });
-              // attach 结果经 props 链传入会话视图建立 relay 通道。
-              window.sessionStorage.setItem("zcode-companion-attach", JSON.stringify(attachResult));
-            } catch (attachError) {
-              setError(attachError instanceof Error ? attachError.message : String(attachError));
-            }
-          }}
+          onOpen={(node, workspacePath, workspaceIdentity, title) =>
+            setView({ name: "workspace", node, workspacePath, workspaceIdentity, title })
+          }
         />
       </div>
     );
   }
   return (
-    <ConversationView
-      target={view}
-      ensureClient={ensureClient}
-      onBack={() => {
-        void clientRef.current
-          ?.detach({
-            attachmentId: window.sessionStorage.getItem("zcode-companion-attachment") ?? "",
-          })
-          .catch(() => undefined);
-        setView({ name: "catalog" });
+    <WorkspaceView
+      target={{
+        node: view.node,
+        workspacePath: view.workspacePath,
+        workspaceIdentity: view.workspaceIdentity,
+        title: view.title,
       }}
+      ensureClient={ensureClient}
+      onBackToCatalog={() => setView({ name: "catalog" })}
     />
   );
 }
@@ -192,7 +188,7 @@ function ConfigView(props: {
 
 function CatalogView(props: {
   ensureClient: () => Promise<CompanionClient>;
-  onOpen: (nodeId: string, workspacePath: string, workspaceIdentity: string, title: string) => Promise<void>;
+  onOpen: (nodeId: string, workspacePath: string, workspaceIdentity: string, title: string) => void;
 }): React.ReactElement {
   const [catalog, setCatalog] = useState<CompanionCatalogResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -238,7 +234,7 @@ function CatalogView(props: {
               className="card"
               disabled={!node.online || !workspace.available}
               onClick={() =>
-                void props.onOpen(node.nodeId, workspace.workspacePath, workspace.workspaceIdentity, workspace.title)
+                props.onOpen(node.nodeId, workspace.workspacePath, workspace.workspaceIdentity, workspace.title)
               }
             >
               {workspace.title}

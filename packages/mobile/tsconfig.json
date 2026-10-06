@@ -13,6 +13,7 @@
   "include": ["src"],
   "references": [
     { "path": "../shared" },
-    { "path": "../companion" }
+    { "path": "../companion" },
+    { "path": "../services" }
   ]
 }
