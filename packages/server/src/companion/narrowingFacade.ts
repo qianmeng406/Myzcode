@@ -48,6 +48,17 @@ const ALLOWED_COMMAND_TYPES = new Set<string>([
   "resolveInteraction",
 ]);
 
+/**
+ * 连接级调用：入参不是 workspace 目标，绝不能注入 workspace 身份。
+ * helloConversationV4 无参；initializeConversationV4 的入参是 clientHello，
+ * 且 clientHelloSchema 为 `.strict()`——注入未知键会让整条握手解析失败
+ * （表现为 unrecognized_keys: ["workspacePath","workspaceIdentity"]）。
+ */
+const CONNECTION_LEVEL_CALLS = new Set<string>([
+  "helloConversationV4",
+  "initializeConversationV4",
+]);
+
 /** workspace 级事件面：会话/索引/工作区配置帧；telemetry 与 CUA 观察面不下发。 */
 const ALLOWED_LISTENS = new Set<string>([
   "onDynamicConversationFrame",
@@ -93,15 +104,20 @@ export function createNarrowingAgentFacade(options: NarrowingFacadeOptions): ISe
       }
       if (command === "sendConversationCommandV4") {
         const [first] = Array.isArray(arg) ? arg : [];
+        // ZCodeAgentConversationCommandParams = { ...workspace, envelope: CommandEnvelope }；
+        // 命令类型在 envelope 顶层（envelope.type），不在 envelope.command 下。
         const commandType =
           first && typeof first === "object"
-            ? (first as { command?: { type?: unknown } }).command?.type
+            ? (first as { envelope?: { type?: unknown } }).envelope?.type
             : undefined;
         if (typeof commandType !== "string" || !ALLOWED_COMMAND_TYPES.has(commandType)) {
           throw new Error(`companion facade: command type not allowed: ${String(commandType)}`);
         }
       }
-      const result = await upstream.call<T>(command, injectScope(arg, scope));
+      const result = await upstream.call<T>(
+        command,
+        CONNECTION_LEVEL_CALLS.has(command) ? arg : injectScope(arg, scope),
+      );
       return result;
     },
     listen<T>(ctx: unknown, event: string, arg?: unknown): Event<T> {

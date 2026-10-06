@@ -4,6 +4,7 @@
 //   1) 节点 hello → catalog 可见工作区
 //   2) 配对 → 设备 access token → attach → relay 建立通道
 //   3) v4 hello 从手机端经 gateway/connector 到 resident runtime 往返
+//   3b) clientHello 握手 + sessions-index 订阅（手机列表首屏路径，strict schema 回归门禁）
 //   4) 断开 relay（模拟手机断开）→ daemon 仍存活（任务不随连接消亡）
 // 运行：packages/server 下 `npx tsx scripts/companion-smoke.ts`（先构建 remote bundle）。
 import { spawn, execFileSync } from "node:child_process";
@@ -16,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { startCompanionGateway } from "@zcode/companion";
 import { CompanionClient } from "@zcode/companion/client";
 import { startCloudCompanionConnector } from "@zcode/server/companion";
+import { V4_WIRE_PROTOCOL_VERSION } from "@zcode/shared/zcode-protocol-v4";
 
 const root = mkdtempSync(join(tmpdir(), "zcode-companion-smoke-"));
 const workspaceDir = join(root, "workspace");
@@ -137,6 +139,47 @@ const run = async (): Promise<void> => {
   step(
     `v4 hello round-trip OK (deliveryProfile=${helloRecord.deliveryProfile}, protocolVersion=${(hello as unknown as { protocolVersion: number }).protocolVersion})`,
   );
+
+  // 6b. clientHello 握手 + sessions-index 订阅（手机会话列表首屏的真实路径）。
+  // clientHelloSchema 是 `.strict()`：facade 若往连接级入参注入 workspace 键，
+  // 这里会以 unrecognized_keys 失败——必须驻留为回归门禁。
+  const typed = agentService as unknown as {
+    initializeConversationV4: (clientHello: unknown) => Promise<void>;
+    subscribeSessionsIndexV4: (params: unknown) => Promise<{
+      ack: { subscriptionId: string };
+    }>;
+  };
+  await Promise.race([
+    typed.initializeConversationV4({
+      kind: "clientHello",
+      protocolVersion: V4_WIRE_PROTOCOL_VERSION,
+      clientId: "companion-smoke",
+      clientKind: "web",
+      appVersion: "unknown",
+      capabilities: { workspaceHookReviewUi: true },
+    }),
+    new Promise<never>((_resolve, reject) =>
+      setTimeout(() => reject(new Error("v4 clientHello round-trip timed out")), 30_000),
+    ),
+  ]);
+  step("v4 clientHello accepted (strict schema, no workspace injection)");
+
+  const subscribeResult = await Promise.race([
+    typed.subscribeSessionsIndexV4({
+      workspacePath: workspaceDir,
+      workspaceIdentity: workspaceDir,
+      // 与手机端一致：进入工作区即允许常驻端为该工作区拉起 agent。
+      runtimePolicy: "start-if-needed",
+      visibility: "foreground",
+    }),
+    new Promise<never>((_resolve, reject) =>
+      setTimeout(() => reject(new Error("sessions-index subscribe timed out")), 30_000),
+    ),
+  ]);
+  if (typeof subscribeResult?.ack?.subscriptionId !== "string") {
+    throw new Error(`unexpected sessions-index ack: ${JSON.stringify(subscribeResult)}`);
+  }
+  step(`sessions-index subscribe OK (subscriptionId=${subscribeResult.ack.subscriptionId})`);
 
   // 7. 断开 relay（模拟手机断开）→ daemon 必须仍存活
   channel.close();
