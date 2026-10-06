@@ -18,12 +18,16 @@ import { CompanionPairingService } from "../app/pairing.js";
 import { NodeSecretBox, systemClock } from "./secrets.js";
 import { SqliteControlStore } from "./sqliteControlStore.js";
 import { attachRelaySocket, createMobileLink, createNodeLink } from "./wsLinks.js";
+import { createPairRateLimiter, isSecureRequest, refreshCookieHeader } from "./httpGuards.js";
 
 const REFRESH_COOKIE = "zc_comp_rt";
 const FIRST_AUTH_TIMEOUT_MS = 10_000;
 /** CSRF 防线：跨站表单无法携带自定义头；POST 控制端点必须携带（spec §6）。 */
 const COMPANION_CSRF_HEADER = "x-zcode-companion";
 const COMPANION_CSRF_VALUE = "my-zcode";
+/** /companion/pair 默认限速：15 分钟窗口 10 次/来源，防配对码在线爆破。 */
+const PAIR_RATE_WINDOW_MS = 15 * 60 * 1000;
+const PAIR_RATE_MAX_ATTEMPTS = 10;
 
 function consoleLogger(level: "info" | "warn" | "error") {
   return (message: string, details?: Record<string, unknown>): void => {
@@ -40,10 +44,6 @@ function buildOriginChecker(allowedOrigins: string[]): (origin: string | undefin
     if (origin === undefined) return true; // 非浏览器客户端不携带 Origin
     return normalized.includes(origin.replace(/\/+$/, ""));
   };
-}
-
-function refreshCookieHeader(token: string, maxAgeSeconds: number, secure: boolean): string {
-  return `${REFRESH_COOKIE}=${encodeURIComponent(token)}; Path=/companion; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure ? "; Secure" : ""}`;
 }
 
 export async function startCompanionGatewayServer(
@@ -64,6 +64,11 @@ export async function startCompanionGatewayServer(
   const hub = new CompanionHub({ store, clock: systemClock, secrets, defaults, logger });
   const pairing = new CompanionPairingService({ store, secrets, clock: systemClock, logger });
   const originAllowed = buildOriginChecker(options.allowedOrigins ?? []);
+  const trustForwardedProto = options.trustForwardedProto === true;
+  const allowPairAttempt = createPairRateLimiter(
+    options.pairRateLimit?.windowMs ?? PAIR_RATE_WINDOW_MS,
+    options.pairRateLimit?.maxAttempts ?? PAIR_RATE_MAX_ATTEMPTS,
+  );
 
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
@@ -108,6 +113,14 @@ export async function startCompanionGatewayServer(
   );
 
   app.post("/companion/pair", requireCsrf, async (c) => {
+    // 限速在 CSRF 之后、业务之前：无有效 CSRF 的请求同样计数（都不该出现）。
+    // 来源键取 X-Forwarded-Proto 之外的第一跳客户端 IP（部署约定 nginx 必设
+    // X-Forwarded-For）；直连时回落 "direct" 单桶。
+    const sourceKey = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || "direct";
+    if (!allowPairAttempt(sourceKey, Date.now())) {
+      logger.warn("companion pair rate limited", { sourceKey });
+      return c.json({ error: { code: "rate_limited", message: "too many pairing attempts" } }, 429);
+    }
     const body = (await c.req.json().catch(() => null)) as
       | { deviceName?: unknown; code?: unknown }
       | null;
@@ -116,10 +129,9 @@ export async function startCompanionGatewayServer(
     }
     try {
       const result = await pairing.pairDevice(body.deviceName, body.code);
-      const secure = new URL(c.req.url).protocol === "https:";
       c.header(
         "Set-Cookie",
-        refreshCookieHeader(result.refreshToken, 365 * 24 * 60 * 60, secure),
+        refreshCookieHeader(result.refreshToken, 365 * 24 * 60 * 60, isSecureRequest(c, trustForwardedProto)),
       );
       return c.json({
         deviceId: result.device.deviceId,
@@ -145,8 +157,10 @@ export async function startCompanionGatewayServer(
     if (!result.ok) {
       return c.json({ error: { code: "unauthorized", message: "refresh rejected" } }, 401);
     }
-    const secure = new URL(c.req.url).protocol === "https:";
-    c.header("Set-Cookie", refreshCookieHeader(result.refreshToken, 365 * 24 * 60 * 60, secure));
+    c.header(
+      "Set-Cookie",
+      refreshCookieHeader(result.refreshToken, 365 * 24 * 60 * 60, isSecureRequest(c, trustForwardedProto)),
+    );
     return c.json({
       deviceId: result.deviceId,
       accessToken: result.accessToken,

@@ -12,6 +12,14 @@ export interface CompanionGatewayOptions {
   controlDbPath: string;
   /** 浏览器 Origin 白名单；空数组 = 拒绝所有浏览器 Origin（仅允许非浏览器客户端）。 */
   allowedOrigins?: string[];
+  /**
+   * TLS 反代模式：true 时按 `X-Forwarded-Proto: https` 决定 refresh cookie 的
+   * Secure 标志。默认 false（按直连 URL 协议判断）——部署在反代后必须开启，
+   * 否则反代回源是 http，cookie 永远不带 Secure。
+   */
+  trustForwardedProto?: boolean;
+  /** /companion/pair 每来源限速（默认 15 分钟窗口 10 次），防配对码在线爆破。 */
+  pairRateLimit?: { windowMs?: number; maxAttempts?: number };
   maxAttachments?: number;
   maxFrameBytes?: number;
   logger?: {

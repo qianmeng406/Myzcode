@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/contract.ts",
+    "./admin": "./src/admin.ts",
     "./client": "./src/client.ts"
   },
   "scripts": {
