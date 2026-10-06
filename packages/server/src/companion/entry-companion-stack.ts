@@ -200,12 +200,13 @@ async function runControlCommand(action: string): Promise<void> {
       return;
     }
     if (action === "register-node") {
-      // --id/--name 覆盖环境变量默认；nodeId 是 serve 侧 ZCODE_COMPANION_NODE_ID 的
+      // --id/--name/--kind 覆盖环境变量默认；nodeId 是 serve 侧 ZCODE_COMPANION_NODE_ID 的
       // 登记键，两者必须一致，否则 connector 的 token 指纹对不上节点行。
+      // kind 影响手机目录分组展示（云端/电脑），按登记对象如实填写。
       const issued = await admin.registerNode({
         nodeId: readArg("--id") ?? config.nodeId,
         displayName: readArg("--name") ?? config.nodeDisplayName,
-        kind: "cloud",
+        kind: readArg("--kind") === "desktop" ? "desktop" : "cloud",
       });
       console.log(`节点已登记: ${issued.nodeId}`);
       console.log(`nodeToken（只显示这一次，写入 serve 环境变量 ZCODE_COMPANION_NODE_TOKEN）:`);
