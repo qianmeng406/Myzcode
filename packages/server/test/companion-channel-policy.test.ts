@@ -28,9 +28,10 @@ test("T1 file：白名单内放行，写方法拒绝", async () => {
     channelName: "file",
     upstream,
     policy: policyForChannel("file"),
+    scope: { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
   });
 
-  const result = await channel.call("ctx", "readdir", { path: "/srv" });
+  const result = await channel.call("ctx", "readdir", { path: "/srv/ws/sub" });
   assert.deepEqual(result, { echoed: "readdir" });
   assert.equal(calls.length, 1);
 
@@ -53,6 +54,7 @@ test("T1 git：读放行，commit/push/discard 拒绝", async () => {
     channelName: "git",
     upstream,
     policy: policyForChannel("git"),
+    scope: { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
   });
 
   await channel.call("ctx", "getChanges", {});
@@ -71,11 +73,13 @@ test("T1 setting/system：只读白名单", async () => {
     channelName: "setting",
     upstream,
     policy: policyForChannel("setting"),
+    scope: { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
   });
   const system = createPolicyChannel({
     channelName: "system",
     upstream,
     policy: policyForChannel("system"),
+    scope: { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
   });
 
   await setting.call("ctx", "get", undefined);
@@ -98,6 +102,7 @@ test("T0 全拒：call 快速失败、listen 永不触发", async () => {
     channelName: ServiceChannels.Terminal,
     upstream,
     policy: policyForChannel(ServiceChannels.Terminal),
+    scope: { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
   });
 
   await assert.rejects(
@@ -133,7 +138,64 @@ test("T2/T1 事件监听放行（只读事实）", () => {
     channelName: "file",
     upstream,
     policy: policyForChannel("file"),
+    scope: { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
   });
   channel.listen("ctx", "onDidChange", undefined);
   assert.equal(listens.length, 1);
+});
+
+
+test("workspace 绑定：path 越界拒绝、workspacePath 强制覆写、paths 数组校验", async () => {
+  const { upstream, calls } = createRecordingUpstream();
+  const scope = { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" };
+  const channel = createPolicyChannel({
+    channelName: "file",
+    upstream,
+    policy: policyForChannel("file"),
+    scope,
+  });
+
+  // 越界 path 拒绝
+  await assert.rejects(
+    () => channel.call("ctx", "readdir", { path: "C:/Users/other" }),
+    (error: unknown) =>
+      error instanceof Error && error.message.includes("path escapes workspace"),
+  );
+  // 反斜杠/大小写归一后仍越界
+  await assert.rejects(
+    () => channel.call("ctx", "readdir", { path: "\srv\ws-evildir" }),
+    (error: unknown) => error instanceof Error && error.message.includes("escapes workspace"),
+  );
+  // paths 数组包含越界项 → 整体拒绝
+  await assert.rejects(
+    () => channel.call("ctx", "checkFilesExist", { paths: ["/srv/ws/a.txt", "/srv/other.txt"] }),
+    (error: unknown) => error instanceof Error && error.message.includes("escapes workspace"),
+  );
+
+  // 界内调用：workspacePath 被覆写为绑定值（客户端声明一律覆盖）
+  await channel.call("ctx", "searchWorkspaceFiles", {
+    workspacePath: "/somewhere/else",
+    workspaceIdentity: "fake",
+    query: "x",
+  });
+  assert.equal(calls.length, 1);
+  const forwarded = calls[0]!.arg as Record<string, unknown>;
+  assert.equal(forwarded.workspacePath, "/srv/ws");
+  assert.equal(forwarded.workspaceIdentity, "/srv/ws");
+});
+
+test("broadcast 调用侧拒绝（仅监听），事件放行", async () => {
+  const { upstream } = createRecordingUpstream();
+  const channel = createPolicyChannel({
+    channelName: "broadcast",
+    upstream,
+    policy: policyForChannel("broadcast"),
+    scope: { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
+  });
+  await assert.rejects(
+    () => channel.call("ctx", "publish", []),
+    (error: unknown) =>
+      error instanceof Error && error.message.includes("not allowed: broadcast.publish"),
+  );
+  channel.listen("ctx", "onMessage", undefined);
 });

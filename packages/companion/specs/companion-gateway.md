@@ -159,7 +159,7 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 | `zcode-agent` | T2 | 既有窄 facade（v4 面 + workspace 注入） |
 | `zcode-task` / `zcode-session` | T2 | 会话/任务事实与控制（停止等）——完整 UI 会话页依赖 |
 | `model-selection` | T2 | 接口仅 `getView`/`onDidChange`，天然只读 |
-| `broadcast` | T2 | UI 跨面板刷新事件总线 |
+| `broadcast` | T1（仅监听） | 跨面板刷新事件总线：事件放行；publish 是注入面（手机可向同 daemon 其他会话 UI 伪造事件），调用侧全拒 |
 | `file-watcher` | T2 | 监听事件（文件树新鲜度） |
 | `media-preview` | T2 | 预览渲染支撑 |
 | `file` | T1 | 允许：readdir/stat/checkFilesExist/searchWorkspaceFiles/readTextFile/readMediaPreview/readFileRange/readBinaryPreview/listWorkspaceFilesLength/listWorkspaceFilesRange/resolvePath；拒绝：任何写入/建目录（ensureConversationWorkspace/createDefaultWorkspace/createScratchWorkspace/writeWorkspaceFileSearchIgnore 等） |
@@ -184,7 +184,16 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 3. 每次提档在本表登记理由；`未登记频道 → T0` 是永久不变量。
 4. 回归覆盖：每档至少一条单测（T1 白名单内放行 + 白名单外拒绝；T0 全拒）。
 
-### 11.4 桌面与云端差异
+### 11.4 workspace 绑定（全频道强制）
+
+- T1/T2 频道的**每个入参**都按 attachment 绑定塑形（`shapeArgsWithScope`）：
+  顶层 `workspacePath`/`workspaceIdentity` 强制覆写为绑定值（客户端声明一律覆盖）；
+  顶层 `path`/`rootPath`/`paths[]` 必须落在绑定工作区之内，越界即拒绝
+  （`companion facade: path escapes workspace`），路径归一（反斜杠/大小写/尾斜杠）后比较。
+- 没有这层，file/git 等只读白名单会退化成宿主任意路径读取原语（审查发现并已封堵）。
+- zcode-agent 由既有窄 facade 注入，语义相同。
+
+### 11.5 桌面与云端差异
 
 - 桌面附着工作区：上游 Host 已暴露完整 remote ServiceCollection，relay 按本表逐频道裁决。
 - 云端 resident：`createStdioServices` 注册同一完整集合，处理方式相同。

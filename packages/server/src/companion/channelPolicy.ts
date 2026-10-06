@@ -48,7 +48,9 @@ export const COMPANION_CHANNEL_POLICIES: Readonly<Record<string, ChannelPolicy>>
   [ServiceChannels.ZCodeTask]: { kind: "passthrough" },
   [ServiceChannels.ZCodeSession]: { kind: "passthrough" },
   [ServiceChannels.ModelSelection]: { kind: "passthrough" },
-  [ServiceChannels.Broadcast]: { kind: "passthrough" },
+  // broadcast：仅监听（跨面板刷新事件总线）。publish 是注入面——手机可向
+  // 同 daemon 的其他会话 UI 伪造事件，调用侧一律拒绝。
+  [ServiceChannels.Broadcast]: { kind: "allow-calls", calls: new Set<string>([]) },
   [ServiceChannels.FileWatcher]: { kind: "passthrough" },
   [ServiceChannels.MediaPreview]: { kind: "passthrough" },
   // T1 方法白名单（只读）
@@ -104,6 +106,56 @@ export function policyForChannel(channelName: string): ChannelPolicy {
   return COMPANION_CHANNEL_POLICIES[channelName] ?? { kind: "deny" };
 }
 
+/** attachment 绑定的 workspace 身份（与 narrowingFacade 同语义）。 */
+export interface PolicyWorkspaceScope {
+  workspacePath: string;
+  workspaceIdentity: string;
+}
+
+function normalizePath(value: string): string {
+  const unified = value.replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? unified.toLowerCase() : unified;
+}
+
+function isUnderWorkspace(path: string, scope: PolicyWorkspaceScope): boolean {
+  const candidate = normalizePath(path);
+  const root = normalizePath(scope.workspacePath);
+  return candidate === root || candidate.startsWith(`${root}/`);
+}
+
+/**
+ * workspace 绑定塑形（specs §11.5）：T1/T2 频道的入参一律以 attachment 绑定为
+ * 准——顶层 workspacePath/workspaceIdentity 强制覆写；顶层 path/rootPath 与
+ * paths[] 必须落在工作区之内，越界即拒绝。没有这层，file/git 等只读白名单
+ * 会退化成宿主任意路径读取原语。
+ */
+export function shapeArgsWithScope(arg: unknown, scope: PolicyWorkspaceScope): unknown {
+  if (Array.isArray(arg)) {
+    const [first] = arg;
+    if (first && typeof first === "object" && !Array.isArray(first)) {
+      return [shapeArgsWithScope(first, scope), ...arg.slice(1)];
+    }
+    return arg;
+  }
+  if (!arg || typeof arg !== "object") return arg;
+  const source = arg as Record<string, unknown>;
+  const shaped: Record<string, unknown> = { ...source };
+  shaped.workspacePath = scope.workspacePath;
+  shaped.workspaceIdentity = scope.workspaceIdentity;
+  const assertInside = (key: string, value: unknown): void => {
+    if (typeof value !== "string" || value.length === 0) return;
+    if (!isUnderWorkspace(value, scope)) {
+      throw new Error(`companion facade: path escapes workspace (${key})`);
+    }
+  };
+  assertInside("path", shaped.path);
+  assertInside("rootPath", shaped.rootPath);
+  if (Array.isArray(shaped.paths)) {
+    for (const item of shaped.paths) assertInside("paths[]", item);
+  }
+  return shaped;
+}
+
 function neverEvent<T>(): Event<T> {
   return ((_listener: unknown) => ({ dispose: () => undefined })) as unknown as Event<T>;
 }
@@ -113,8 +165,9 @@ export function createPolicyChannel(options: {
   channelName: string;
   upstream: IChannel;
   policy: ChannelPolicy;
+  scope: PolicyWorkspaceScope;
 }): IServerChannel {
-  const { channelName, upstream, policy } = options;
+  const { channelName, upstream, policy, scope } = options;
   if (policy.kind === "deny") {
     return {
       async call(): Promise<never> {
@@ -130,11 +183,11 @@ export function createPolicyChannel(options: {
       if (policy.kind === "allow-calls" && !policy.calls.has(command)) {
         throw new Error(`companion facade: method not allowed: ${channelName}.${command}`);
       }
-      return upstream.call<T>(command, arg);
+      return upstream.call<T>(command, shapeArgsWithScope(arg, scope));
     },
     listen<T>(_ctx: unknown, event: string, arg?: unknown): Event<T> {
-      // T1 的事件是只读事实（onDidChange 等）；T2/T1 统一放行监听。
-      return upstream.listen<T>(event, arg);
+      // T1/T2 的事件是只读事实（onDidChange 等），监听参数同样过绑定塑形。
+      return upstream.listen<T>(event, shapeArgsWithScope(arg, scope));
     },
   };
 }

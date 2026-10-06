@@ -70,6 +70,7 @@ export async function openCompanionRelayAttachment(options: {
   );
   // 其余全部 ServiceChannels 按三分名单裁决（specs §11）：表内 T2/T1，表外 T0。
   // 全量注册保证 RemoteServiceAccess 对每个频道的请求都快速失败而不是挂起。
+  // 所有频道入参强制 attachment 的 workspace 绑定（specs §11.5）。
   for (const channelName of Object.values(ServiceChannels)) {
     if (channelName === IZCodeAgentService.channelName) continue;
     channelServer.registerChannel(
@@ -78,6 +79,7 @@ export async function openCompanionRelayAttachment(options: {
         channelName,
         upstream: upstream.channelClient.getChannel(channelName),
         policy: policyForChannel(channelName),
+        scope,
       }),
     );
   }
