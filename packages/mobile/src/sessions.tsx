@@ -1,7 +1,12 @@
-// 工作区会话列表：经既有 attachment 的 accessor 直接订阅 sessions-index 通道。
-// 形状依据 shared/zcode-protocol-v4/sessions-index.ts（snapshot + 两个增量操作）。
+// 工作区会话列表：复用 @zcode/ui 的 sessions-index 专用传输层。
+// 关键教训：wire 候选帧必须经 TopicWireDecoder 组装才是成品帧——直接读
+// `frame.payload` 会拿到 undefined（真机阶段 4 实测崩溃），所以这里不手写解析。
+// 幂等细节：subscribeSessionsIndexV4 带 runtimePolicy "existing-only"，
+// 只附着既有运行时，不为列表拉起新 Agent。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { IServiceAccessor } from "@zcode/services";
+import type { SessionsIndexTopicFrame } from "@zcode/shared/zcode-protocol-v4";
+import { createAgentSessionsIndexTransport, type SessionsIndexTransport } from "@zcode/ui/v4-sessions-index-transport";
 import type { ConversationTarget } from "./conversation.js";
 
 interface SessionSummary {
@@ -20,26 +25,22 @@ interface SessionsIndexState {
 
 function applySessionsFrame(
   state: SessionsIndexState,
-  frame: { payload: { kind: string; snapshot?: unknown; deltas?: unknown[] } },
+  frame: SessionsIndexTopicFrame,
 ): SessionsIndexState {
   const sessions = new Map(state.sessions);
-  if (frame.payload.kind === "snapshot") {
-    const snapshot = frame.payload.snapshot as { sessions?: Array<SessionSummary> } | undefined;
-    for (const session of snapshot?.sessions ?? []) {
+  const { payload } = frame;
+  if (payload.kind === "snapshot") {
+    for (const session of payload.snapshot.sessions) {
       sessions.set(session.sessionId, session);
     }
     return { sessions };
   }
-  for (const delta of (frame.payload.deltas ?? []) as Array<{
-    op: string;
-    session?: SessionSummary;
-    sessionId?: string;
-  }>) {
-    if (delta.op === "session.upserted" && delta.session) {
+  for (const delta of payload.deltas) {
+    if (delta.op === "session.upserted") {
       sessions.set(delta.session.sessionId, delta.session);
       continue;
     }
-    if (delta.op === "session.removed" && delta.sessionId) {
+    if (delta.op === "session.removed") {
       sessions.delete(delta.sessionId);
     }
   }
@@ -47,18 +48,18 @@ function applySessionsFrame(
 }
 
 interface AgentServiceLike {
-  subscribeSessionsIndexV4(params: {
-    workspacePath: string;
-    workspaceIdentity: string;
-  }): Promise<{ ack: { subscriptionId: string } }>;
-  unsubscribeSessionsIndexV4(params: {
-    workspaceIdentity: string;
-    subscriptionId: string;
-  }): Promise<void>;
-  onDynamicSessionsIndexFrame(params: {
-    workspacePath: string;
-    workspaceIdentity: string;
-  }): (listener: (frame: unknown) => void) => { dispose(): void };
+  // 传输层所需的 Pick 面；通过窄化 facade 代理时全部可用。
+  helloConversationV4(): Promise<unknown>;
+  initializeConversationV4(clientHello: unknown): Promise<void>;
+  subscribeSessionsIndexV4(params: Record<string, unknown>): Promise<{ ack: { subscriptionId: string } }>;
+  resyncSessionsIndexV4(params: Record<string, unknown>): Promise<unknown>;
+  unsubscribeSessionsIndexV4(params: Record<string, unknown>): Promise<void>;
+  onDynamicSessionsIndexFrame(params: Record<string, unknown>): (
+    listener: (frame: unknown) => void,
+  ) => { dispose(): void };
+  onAgentRuntimeLifecycle?(listener: (state: "available" | "unavailable") => void): {
+    dispose(): void;
+  };
   setMode(params: {
     workspacePath: string;
     workspaceIdentity: string;
@@ -78,29 +79,36 @@ export function SessionsListView(props: {
   onNewTask: () => void;
 }): React.ReactElement {
   const { target, accessor } = props;
+  const [transport, setTransport] = useState<SessionsIndexTransport | null>(null);
   const [state, setState] = useState<SessionsIndexState>({ sessions: new Map() });
   const [error, setError] = useState<string | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const subscriptionRef = useRef<string | null>(null);
 
   useEffect(() => {
     let disposed = false;
-    let unsubscribeFrame: (() => void) | null = null;
-    let subscriptionId: string | null = null;
+    let currentTransport: SessionsIndexTransport | null = null;
     const service = agentServiceOf(accessor);
-    const target_ = { workspacePath: target.workspacePath, workspaceIdentity: target.workspaceIdentity };
     void (async () => {
       try {
-        const unsubscribe = service.onDynamicSessionsIndexFrame(target_)((frame) => {
-          setState((previous) => applySessionsFrame(previous, frame as never));
+        const newTransport = createAgentSessionsIndexTransport(service as never, {
+          workspacePath: target.workspacePath,
+          workspaceIdentity: target.workspaceIdentity,
+          // 手机进入工作区＝用户主动打开：常驻端应为该工作区拉起 agent。
+          runtimePolicy: "start-if-needed",
         });
+        currentTransport = newTransport;
         if (disposed) {
-          unsubscribe.dispose();
+          currentTransport = null;
           return;
         }
-        unsubscribeFrame = () => unsubscribe.dispose();
-        const result = await service.subscribeSessionsIndexV4(target_);
-        subscriptionId = result.ack.subscriptionId;
+        setTransport(newTransport);
+        newTransport.onFrame((frame) => setState((previous) => applySessionsFrame(previous, frame)));
+        const result = await newTransport.subscribe({ visibility: "foreground" });
+        if (disposed) return;
+        subscriptionRef.current = result.ack.subscriptionId;
+        newTransport.activate(result.ack.subscriptionId);
       } catch (sessionsError) {
         if (!disposed) {
           setError(sessionsError instanceof Error ? sessionsError.message : String(sessionsError));
@@ -109,18 +117,17 @@ export function SessionsListView(props: {
     })();
     return () => {
       disposed = true;
-      unsubscribeFrame?.();
-      if (subscriptionId !== null) {
-        void service
-          .unsubscribeSessionsIndexV4({ workspaceIdentity: target.workspaceIdentity, subscriptionId })
-          .catch(() => undefined);
+      const subscriptionId = subscriptionRef.current;
+      subscriptionRef.current = null;
+      if (currentTransport !== null && subscriptionId !== null) {
+        void currentTransport.unsubscribe(subscriptionId).catch(() => undefined);
       }
+      currentTransport = null;
     };
   }, [accessor, target.workspacePath, target.workspaceIdentity]);
 
   const sorted = useMemo(
-    () =>
-      [...state.sessions.values()].sort((a, b) => b.lastActivityAt - a.lastActivityAt),
+    () => [...state.sessions.values()].sort((a, b) => b.lastActivityAt - a.lastActivityAt),
     [state.sessions],
   );
   const pendingCount = useCallback((session: SessionSummary): number => {
@@ -139,7 +146,10 @@ export function SessionsListView(props: {
       </header>
       {error !== null && <div className="error" style={{ padding: "0 16px" }}>{error}</div>}
       <div className="content">
-        {sorted.length === 0 && <p className="muted">暂无会话；点「新任务」开始。</p>}
+        {transport === null && <p className="muted">正在连接工作区…</p>}
+        {sorted.length === 0 && transport !== null && (
+          <p className="muted">暂无会话；点「新任务」开始。</p>
+        )}
         {sorted.map((session) => (
           <button
             key={session.sessionId}
@@ -149,9 +159,7 @@ export function SessionsListView(props: {
             {pendingCount(session) > 0 && <span className="dot warn" />}
             <span className={session.sessionEnded ? "muted-title" : undefined}>{session.title}</span>
             <div className="sub">
-              {pendingCount(session) > 0
-                ? `待处理 ${pendingCount(session)} 项 · `
-                : ""}
+              {pendingCount(session) > 0 ? `待处理 ${pendingCount(session)} 项 · ` : ""}
               {session.lastAssistantPreview ?? session.phase}
             </div>
           </button>
