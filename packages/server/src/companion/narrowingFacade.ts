@@ -4,7 +4,7 @@
 // subscribe/listen 全部经此转发；relay 断开只 dispose 本连接的 ChannelServer。
 import type { Event, IChannel, IServerChannel } from "@zcode/rpc";
 
-/** 首版手机操作面（spec §5）：v4 会话控制 + 只读面；其余一律拒绝。 */
+/** 首版手机操作面（spec §5）：v4 会话控制 + 只读面 + 会话级模型/模式设置；其余一律拒绝。 */
 const ALLOWED_CALLS = new Set<string>([
   // v4 握手（客户端 hello；setConnectionFlowStateV4 属 trusted relay，绝不暴露）
   "helloConversationV4",
@@ -22,6 +22,11 @@ const ALLOWED_CALLS = new Set<string>([
   // 命令与对账
   "sendConversationCommandV4",
   "queryConversationCommandsV4",
+  // 会话级模型/模式设置（入参经 workspace 注入；不在白名单的 provider 面
+  // 与密钥管理仍不可达）
+  "setModel",
+  "setMode",
+  "setThoughtLevel",
   // 只读面
   "conversationFileChangesV4",
   "conversationWorkflowRunEventsV4",
