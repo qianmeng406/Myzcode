@@ -151,7 +151,13 @@ export async function bootstrapCompanionApp(): Promise<void> {
     }
     workspace = {
       path: workspaceEntry.workspacePath,
-      identity: workspaceEntry.workspaceIdentity,
+      // 云端工作区 identity === path：省略 identity，避免被侧栏按
+      // “remoteSessionId 缺失的远程工作区”误判成断连（本地流走 path 语义）。
+      identity:
+        workspaceEntry.workspaceIdentity &&
+        workspaceEntry.workspaceIdentity !== workspaceEntry.workspacePath
+          ? workspaceEntry.workspaceIdentity
+          : undefined,
     };
 
     const attach = await client.attach({
