@@ -13,6 +13,9 @@ interface CompanionConfig {
   accessToken: string;
 }
 
+/** 个人自托管部署的默认接入服务（配对页免填；换环境时仍可手动覆盖）。 */
+const DEFAULT_GATEWAY_URL = "https://47.101.52.182";
+
 const CONFIG_KEY = "zcode-companion-config";
 
 function loadConfig(): CompanionConfig | null {
@@ -118,7 +121,9 @@ function ConfigView(props: {
   initial: CompanionConfig | null;
   onSaved: (config: CompanionConfig) => void;
 }): React.ReactElement {
-  const [baseUrl, setBaseUrl] = useState(props.initial?.baseUrl ?? "");
+  // 个人自托管：接入服务默认指向已部署的公网入口；字段保留用于换环境，
+  // 留空提交时也回落默认值——日常配对只需填 6 位配对码。
+  const [baseUrl, setBaseUrl] = useState(props.initial?.baseUrl ?? DEFAULT_GATEWAY_URL);
   const [deviceName, setDeviceName] = useState("My zcode 手机");
   const [pairingCode, setPairingCode] = useState("");
   const [pairing, setPairing] = useState(false);
@@ -134,7 +139,7 @@ function ConfigView(props: {
           <input
             value={baseUrl}
             onChange={(event) => setBaseUrl(event.target.value)}
-            placeholder="https://companion.example.com"
+            placeholder={DEFAULT_GATEWAY_URL}
             autoCapitalize="none"
           />
         </label>
@@ -143,31 +148,28 @@ function ConfigView(props: {
           <input value={deviceName} onChange={(event) => setDeviceName(event.target.value)} />
         </label>
         <label className="field">
-          <span>一次性配对码（在接入服务上生成）</span>
+          <span>配对码（6 位数字，一次性）</span>
           <input
             value={pairingCode}
             onChange={(event) => setPairingCode(event.target.value)}
+            inputMode="numeric"
             autoCapitalize="none"
           />
         </label>
         <button
           className="button"
-          disabled={
-            pairing ||
-            baseUrl.trim() === "" ||
-            deviceName.trim() === "" ||
-            pairingCode.trim() === ""
-          }
+          disabled={pairing || deviceName.trim() === "" || pairingCode.trim() === ""}
           onClick={() => {
             setPairing(true);
             setPairError(null);
+            const effectiveBaseUrl = baseUrl.trim() === "" ? DEFAULT_GATEWAY_URL : baseUrl.trim();
             CompanionClient.pair({
-              baseUrl: baseUrl.trim(),
+              baseUrl: effectiveBaseUrl,
               deviceName: deviceName.trim(),
               code: pairingCode.trim(),
             })
               .then((pairResult) => {
-                props.onSaved({ baseUrl: baseUrl.trim(), accessToken: pairResult.accessToken });
+                props.onSaved({ baseUrl: effectiveBaseUrl, accessToken: pairResult.accessToken });
               })
               .catch((pairFailure: unknown) => {
                 setPairError(

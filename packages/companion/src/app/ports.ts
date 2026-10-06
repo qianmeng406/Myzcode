@@ -16,6 +16,8 @@ export interface Clock {
 export interface SecretBox {
   /** 密码学随机 token（URL-safe base64）。 */
   randomToken(byteLength: number): string;
+  /** [0, maxExclusive) 内的密码学随机整数（配对码等小空间抽样）。 */
+  randomInt(maxExclusive: number): number;
   sha256Hex(value: string): string;
 }
 

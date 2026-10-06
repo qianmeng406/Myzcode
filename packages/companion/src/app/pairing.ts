@@ -13,6 +13,13 @@ import type { Clock, ControlStore, HubLogger, SecretBox } from "./ports.js";
 export const PAIRING_CODE_TTL_MS = 15 * 60 * 1000;
 export const ACCESS_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
 export const REFRESH_TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+/**
+ * 配对码位数（6 位数字）。安全依据：单次消费 + 15 分钟 TTL + /companion/pair
+ * 每来源限速（默认 15 分钟 10 次）——在线爆破上限 10/1,000,000 每窗口。
+ * 小空间碰撞由 INSERT OR REPLACE 天然覆盖（新码生效、旧码作废），
+ * 个人使用并发量下可忽略。
+ */
+export const PAIRING_CODE_DIGITS = 6;
 
 export interface IssuedPairingCode {
   code: string;
@@ -48,7 +55,10 @@ export class CompanionPairingService {
   ) {}
 
   async createPairingCode(): Promise<IssuedPairingCode> {
-    const code = this.deps.secrets.randomToken(24);
+    const code = String(this.deps.secrets.randomInt(10 ** PAIRING_CODE_DIGITS)).padStart(
+      PAIRING_CODE_DIGITS,
+      "0",
+    );
     const expiresAt = this.deps.clock.now() + PAIRING_CODE_TTL_MS;
     await this.deps.store.putPairingCode({
       hash: this.deps.secrets.sha256Hex(code),

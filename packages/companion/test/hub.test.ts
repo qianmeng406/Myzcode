@@ -30,6 +30,7 @@ function makeSecrets() {
   let counter = 0;
   return {
     randomToken: (byteLength: number) => `tok-${++counter}-${byteLength}`,
+    randomInt: (maxExclusive: number) => counter % maxExclusive,
     sha256Hex: (value: string) => `h(${value})`,
   };
 }

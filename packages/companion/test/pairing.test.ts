@@ -29,6 +29,8 @@ test("配对：码一次性消费 + 设备登记 + 凭证可鉴权", async () =>
   });
 
   const issued = await pairing.createPairingCode();
+  // 6 位数字码：人可抄录；安全依据 = 单次消费 + TTL + pair 端点限速。
+  assert.match(issued.code, /^\d{6}$/);
   const paired = await pairing.pairDevice("我的手机", issued.code);
   assert.equal(paired.device.deviceName, "我的手机");
 
