@@ -168,9 +168,15 @@ export function createPolicyChannel(options: {
   scope: PolicyWorkspaceScope;
 }): IServerChannel {
   const { channelName, upstream, policy, scope } = options;
+  // 拒绝留痕（只含频道/方法名，不含参数内容）：完整 UI bring-up 期用于定位
+  // 缺口/越权尝试，也是运行期审计线索。
+  const logReject = (message: string): void => {
+    console.warn(`[companion-facade] reject ${message}`);
+  };
   if (policy.kind === "deny") {
     return {
-      async call(): Promise<never> {
+      async call(_ctx, command): Promise<never> {
+        logReject(`channel not allowed: ${channelName}.${command}`);
         throw new Error(`companion facade: channel not allowed: ${channelName}`);
       },
       listen(): Event<never> {
@@ -181,13 +187,28 @@ export function createPolicyChannel(options: {
   return {
     async call<T>(_ctx: unknown, command: string, arg?: unknown): Promise<T> {
       if (policy.kind === "allow-calls" && !policy.calls.has(command)) {
+        logReject(`method not allowed: ${channelName}.${command}`);
         throw new Error(`companion facade: method not allowed: ${channelName}.${command}`);
       }
-      return upstream.call<T>(command, shapeArgsWithScope(arg, scope));
+      try {
+        return await upstream.call<T>(command, shapeArgsWithScope(arg, scope));
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("path escapes workspace")) {
+          logReject(`path escape: ${channelName}.${command}`);
+        }
+        throw error;
+      }
     },
     listen<T>(_ctx: unknown, event: string, arg?: unknown): Event<T> {
       // T1/T2 的事件是只读事实（onDidChange 等），监听参数同样过绑定塑形。
-      return upstream.listen<T>(event, shapeArgsWithScope(arg, scope));
+      try {
+        return upstream.listen<T>(event, shapeArgsWithScope(arg, scope));
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("path escapes workspace")) {
+          logReject(`path escape (listen): ${channelName}.${event}`);
+        }
+        throw error;
+      }
     },
   };
 }
