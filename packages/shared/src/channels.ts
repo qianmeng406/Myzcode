@@ -159,6 +159,10 @@ export type ServiceChannelName = (typeof ServiceChannels)[keyof typeof ServiceCh
 
 /** Electron IPC 频道名。仅在 preload ↔ main 之间使用。 */
 export const PlatformChannels = {
+  /** Renderer → Main：读取 My zcode 桌面直连配置（节点令牌不回传 renderer） */
+  CompanionGetConfig: "zcode:companion-get-config",
+  /** Renderer → Main：更新 My zcode 桌面直连配置（启用/网关/令牌/开放工作区白名单） */
+  CompanionSetConfig: "zcode:companion-set-config",
   /** 打开系统目录选择框 */
   SelectDirectory: "zcode:select-directory",
   /** 打开系统文件选择框 */

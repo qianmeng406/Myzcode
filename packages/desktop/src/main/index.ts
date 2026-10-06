@@ -37,6 +37,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  MessageChannelMain,
   nativeImage,
   net,
   protocol,
@@ -44,6 +45,7 @@ import {
   webContents,
 } from "electron";
 import type { UtilityProcess as ElectronUtilityProcess } from "electron";
+import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { join, resolve } from "node:path";
 import { homedir, hostname } from "node:os";
@@ -187,6 +189,16 @@ import {
   isWorkspaceOpenUrl,
 } from "./desktopDeepLinkUrl.js";
 import { createRemoteWorkspaceSessionManager } from "./desktopRemoteSessions.js";
+import {
+  startDesktopCompanionConnector,
+  type DesktopCompanionConnectorHandle,
+  type OpenWorkspaceEntry,
+} from "./companion/desktopConnector.js";
+import {
+  loadCompanionConfig,
+  saveCompanionConfig,
+  type DesktopCompanionConfig,
+} from "./companion/companionConfig.js";
 import {
   reportRemoteConnectionStateChangedToArms,
   reportRemoteDisconnectToArms,
@@ -787,6 +799,105 @@ const remoteSessionManager = createRemoteWorkspaceSessionManager({
   reportRemoteConnectionStateChanged: reportRemoteConnectionStateChangedToArms,
   reportRemoteDisconnect: reportRemoteDisconnectToArms,
 });
+
+// ── My zcode 桌面直连：手机控制电脑已打开工作区的既有 Host（不为手机新建执行者） ──
+let companionConnector: DesktopCompanionConnectorHandle | null = null;
+let companionConfigCache: DesktopCompanionConfig = {
+  enabled: false,
+  gatewayUrl: "",
+  nodeToken: "",
+  allowedWorkspaces: [],
+};
+
+function companionWorkspaceTitle(workspacePath: string): string {
+  return (
+    workspacePath.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || workspacePath
+  );
+}
+
+function listCompanionOpenWorkspaces(): OpenWorkspaceEntry[] {
+  const entries: OpenWorkspaceEntry[] = [];
+  for (const [windowId, paths] of windowWorkspaceMap) {
+    for (const workspacePath of paths) {
+      entries.push({
+        windowId,
+        workspacePath,
+        workspaceIdentity: workspacePath.trim(),
+        title: companionWorkspaceTitle(workspacePath),
+      });
+    }
+  }
+  for (const session of remoteSessionManager.listAttachableRemoteSessions()) {
+    entries.push({
+      windowId: session.windowId,
+      workspacePath: session.workspacePath,
+      workspaceIdentity: session.workspaceIdentity,
+      title: companionWorkspaceTitle(session.workspacePath),
+      remoteSessionId: session.remoteSessionId,
+    });
+  }
+  return entries;
+}
+
+async function applyCompanionConfig(next: DesktopCompanionConfig): Promise<void> {
+  companionConfigCache = next;
+  await companionConnector?.stop().catch(() => undefined);
+  companionConnector = null;
+  await saveCompanionConfig(app.getPath("userData"), next);
+  if (!next.enabled || next.gatewayUrl.trim() === "" || next.nodeToken.trim() === "") {
+    return;
+  }
+  companionConnector = await startDesktopCompanionConnector({
+    gatewayUrl: next.gatewayUrl.trim(),
+    nodeToken: next.nodeToken.trim(),
+    allowedWorkspaces: next.allowedWorkspaces,
+    onDisconnected: (reason) => {
+      logger.warn("[companion-desktop] control channel lost", { reason });
+      companionConnector = null;
+    },
+    deps: {
+      listOpenWorkspaces: listCompanionOpenWorkspaces,
+      resolveAttachmentPort: (entry, attachmentId) => {
+        if (entry.remoteSessionId !== undefined) {
+          // 远程工作区：复用既有远程连接的 attachment（不新建远程连接）。
+          return remoteSessionManager
+            .attachRemoteWorkspaceSessionHost({
+              windowId: entry.windowId,
+              remoteSessionId: entry.remoteSessionId,
+              workspacePath: entry.workspacePath,
+              workspaceIdentity: entry.workspaceIdentity,
+              workspaceKey: entry.workspaceIdentity,
+              clientMode: "web-remote-replayable",
+            })
+            .port;
+        }
+        // 本地工作区：窗口 Host 的 local attachment（Host 内等待现有启动准备，不启动第二个执行者）。
+        const { port1, port2 } = new MessageChannelMain();
+        const host = windowHostProcessMap.get(entry.windowId);
+        if (!host) {
+          port2.close();
+          port1.close();
+          throw Object.assign(new Error("window host is not running"), {
+            code: "workspace_unavailable",
+          });
+        }
+        host.postMessage(
+          {
+            type: HostMessageTypes.AttachServicePort,
+            requestId: randomUUID(),
+            attachmentId,
+            clientMode: "web-remote-replayable",
+            scope: { kind: "local" },
+          },
+          [port2],
+        );
+        return port1;
+      },
+      log: (message, details) => logger.info("[companion-desktop] " + message, details),
+    },
+  });
+}
+
 
 const deviceMid = ensureDesktopDeviceMidSync();
 // 帮助配置是公开读取，不能复用下面附带账号鉴权的灰度响应缓存。
@@ -1955,6 +2066,25 @@ app.whenReady().then(async () => {
     // 读取失败不影响启动，使用默认 homedir
   }
 
+  // My zcode 桌面直连：启用过则启动时自动重连 gateway（连接失败不阻塞启动）。
+  try {
+    const persistedCompanionConfig = await loadCompanionConfig(app.getPath("userData"));
+    companionConfigCache = persistedCompanionConfig;
+    if (
+      persistedCompanionConfig.enabled &&
+      persistedCompanionConfig.gatewayUrl.trim() !== "" &&
+      persistedCompanionConfig.nodeToken.trim() !== ""
+    ) {
+      void applyCompanionConfig(persistedCompanionConfig).catch((error: unknown) => {
+        logger.warn("[companion-desktop] startup connect failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+  } catch {
+    // 配置读取失败不影响启动。
+  }
+
   // scheduler 也会打开 tasks-index；等 Host 完成统一准备，避免在启动页出现前抢先迁移。
   configureDatabaseStartupQuit(() => {
     markExplicitQuit("database-startup-exit");
@@ -2059,6 +2189,28 @@ app.whenReady().then(async () => {
   registerPlatformIpcHandlers({
     fetchHelpConfig: readHelpConfig,
     logger,
+    companionHandlers: {
+      getConfig: async () => {
+        const config = await loadCompanionConfig(app.getPath("userData"));
+        companionConfigCache = config;
+        return {
+          enabled: config.enabled,
+          gatewayUrl: config.gatewayUrl,
+          hasNodeToken: config.nodeToken !== "",
+          allowedWorkspaces: config.allowedWorkspaces,
+        };
+      },
+      setConfig: async (input) => {
+        const current = await loadCompanionConfig(app.getPath("userData"));
+        await applyCompanionConfig({
+          enabled: input.enabled,
+          gatewayUrl: input.gatewayUrl,
+          // nodeToken 缺省 = 保留已存令牌（renderer 不回传秘密）。
+          nodeToken: input.nodeToken ?? current.nodeToken,
+          allowedWorkspaces: input.allowedWorkspaces,
+        });
+      },
+    },
     // CDP-on-guest pivot：renderer `<webview>` dom-ready 上报 guest webContentsId → attach。
     attachBrowserGuest: (key, webContentsId, options) => {
       const result = browserGuestManager.attachGuest(key, webContentsId, options);
@@ -2310,6 +2462,8 @@ app.on("browser-window-created", (_, win) => {
     browserGuestManager.closeWindow(win.id);
     windowWorkspaceMap.delete(win.id);
     windowTaskRealtimeHostIdMap.delete(win.id);
+    // 窗口关闭 = 其工作区对手机即时不可用：拆除该窗口的 attachment 并刷新目录。
+    companionConnector?.handleWindowClosed(win.id);
     if (windowUnreadCountMap.delete(win.id)) {
       syncApplicationUnreadBadge(windowUnreadCountMap);
     }

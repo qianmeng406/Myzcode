@@ -104,7 +104,54 @@ export function registerPlatformIpcHandlers(options: {
   reportBrowserScreenshotSurfaceReady?: ReportBrowserScreenshotSurfaceReady;
   /** Browser tab 关闭、挂起、恢复与跨重启 shell IPC。 */
   browserViewResidencyHandlers?: BrowserViewResidencyIpcHandlers;
+  /** My zcode 桌面直连：读取/更新配置（nodeToken 不回传 renderer，只回是否已配置）。 */
+  companionHandlers?: {
+    getConfig(): Promise<{
+      enabled: boolean;
+      gatewayUrl: string;
+      hasNodeToken: boolean;
+      allowedWorkspaces: string[];
+    }>;
+    setConfig(input: {
+      enabled: boolean;
+      gatewayUrl: string;
+      nodeToken?: string;
+      allowedWorkspaces: string[];
+    }): Promise<void>;
+  };
 }) {
+  ipcMain.handle(PlatformChannels.CompanionGetConfig, async () => {
+    if (!options.companionHandlers) {
+      return { enabled: false, gatewayUrl: "", hasNodeToken: false, allowedWorkspaces: [] };
+    }
+    return options.companionHandlers.getConfig();
+  });
+  ipcMain.handle(
+    PlatformChannels.CompanionSetConfig,
+    async (
+      _event: unknown,
+      input: {
+        enabled?: unknown;
+        gatewayUrl?: unknown;
+        nodeToken?: unknown;
+        allowedWorkspaces?: unknown;
+      },
+    ) => {
+      if (!options.companionHandlers) {
+        throw new Error("companion handlers unavailable");
+      }
+      const workspaces = Array.isArray(input.allowedWorkspaces)
+        ? input.allowedWorkspaces.filter((entry): entry is string => typeof entry === "string")
+        : [];
+      await options.companionHandlers.setConfig({
+        enabled: input.enabled === true,
+        gatewayUrl: typeof input.gatewayUrl === "string" ? input.gatewayUrl.trim() : "",
+        nodeToken: typeof input.nodeToken === "string" && input.nodeToken.trim() !== "" ? input.nodeToken.trim() : undefined,
+        allowedWorkspaces: workspaces,
+      });
+      return { ok: true };
+    },
+  );
   ipcMain.handle(PlatformChannels.SelectDirectory, async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openDirectory", "createDirectory"],
