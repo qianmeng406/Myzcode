@@ -16,7 +16,7 @@
 //   node scripts/pack-remote-assets-cdn.mjs --platforms linux-x64,darwin-arm64 --out <dir>
 // 产出目录可整体上传到托管根；把 ZCODE_CDN_BASE_URL 指向该根（或写进 .env.production 固化）。
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { create as createTarArchive } from "tar";
 
@@ -114,6 +114,9 @@ async function packPlatform({ platformArch, sourceDir, outDir }) {
   const releasesDir = join(outDir, "zcode", "electron", "releases");
   const outVersionDir = join(releasesDir, version);
   mkdirSync(outVersionDir, { recursive: true });
+  // 清掉本平台上一轮遗留的归档：文件名带内容哈希，内容一变旧归档就成孤儿，
+  // 只增不删会让发布树随构建次数累积（实测多出 7MB = 旧 server-bundle + 旧 glm）。
+  rmSync(join(releasesDir, "components", platformArch), { recursive: true, force: true });
 
   console.log(`==> ${platformArch}: ${sourceManifest.components.length} 个组件`);
   const components = await Promise.all(
