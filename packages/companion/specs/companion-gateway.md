@@ -168,10 +168,13 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 | `setting` | T1 | 允许 `get`；拒绝 update/updateDataBaseDir/ensureDefaultProject |
 | `system` | T1 | 允许 `info`；拒绝 probeIntranet/listIntegratedTerminalShells |
 | `provider-settings` | T1 | 允许 getView/refresh/resolveModelConfig（模型选择器只读）；拒绝任何 Personal Provider 写入与 testModelConnectivity |
+| `coding-plan-subscription` | T1 | 启动提档（Root 动态工作流加载器）：仅配置/预览 getter（batchPreview/getStaticProducts/getStaticTeamProducts/getStartPlanPreview/getOffPeakClientConfig/getDynamicWorkflowClientConfig/getModelContextBudgetStrategy/getForceUpdateConfig）；购买/签约/支付/绑卡永 T0 |
+| `bots` | T1 | 启动提档（Root 启动同步偏好 + 状态读取）：syncAppRuntimePreferences/getStatus/getConfig/listWorkspaceRefs/getUserConfigOptions/listBots/getBotStates；注册/保存/删除/测试/绑定/自动化处置永 T0 |
+| `onboarding-record` | T1 | 启动提档（被拒会让 Root 引导判定回退成“需要引导”拦住主界面）：仅只读判定面 shouldOnboard/getLatestEntry/getRecords/syncSettingsFromRecord；append/record/dismiss/clear 等写方法永 T0 |
 | `oauth` | T0→按启动实测提档 | 登录态读取若为启动必需，提 T1 只读并在此登记；登录/登出写操作永 T0 |
 | `terminal` / `credential` / `cua-permission` / `cua-pip-session` / `window-controller` / `provider-provisioning-target` | T0 | 高权限面，永不下发 |
 | `skills` / `skill-sync` / `mcp-sync` / `plugin-sync` / `plugins` / `plugin-management` / `subagents` / `commands` / `hooks` / `memory` / `settings-sync` / `off-peak-task` | T0 | 写宿主用户目录/插件/自动化面，首版不下发 |
-| `conversation-share` / `prompt-attachment-transfer` / `feedback` / `bots` / `usage-stats` / `coding-plan-subscription` / `client-config` / `client-scenes` / `onboarding-record` | T0→按启动实测提档 | 完整 UI 启动链若硬依赖其中只读面，逐个提 T1 只读并在此表登记 |
+| `conversation-share` / `prompt-attachment-transfer` / `feedback` / `usage-stats` / `client-config` / `client-scenes` | T0→按启动实测提档 | 完整 UI 启动链若硬依赖其中只读面，逐个提 T1 只读并在此表登记 |
 
 ### 11.3 提档规则
 

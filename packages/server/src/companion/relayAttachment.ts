@@ -1,7 +1,7 @@
 // relay attachment 通用装配：拨 gateway relay WS + ChannelServer(窄化 facade)。
 // 云端 connector（upstream=resident TCP）与桌面 connector（upstream=Host MessagePort）
 // 共用此模块，保证「窄化 + workspace 绑定注入」只有一处实现（specs §5）。
-import { ChannelServer, SocketProtocol, VSBuffer, type IChannel, type ISocket } from "@zcode/rpc";
+import { ChannelServer, SocketProtocol, VSBuffer, type IChannelClient, type ISocket } from "@zcode/rpc";
 import type { WebSocket } from "ws";
 import { WebSocket as NodeWebSocket } from "ws";
 import { IZCodeAgentService } from "@zcode/services";
@@ -17,7 +17,11 @@ export interface RelayAttachmentParams {
 }
 
 export interface RelayAttachmentUpstream {
-  channel: IChannel;
+  /**
+   * 完整 ChannelClient：zcode-agent 与各裁决频道各自 getChannel 取用——
+   * 单一 getChannel 绑死频道名会让其他频道的转发全部落到错误频道。
+   */
+  channelClient: IChannelClient;
   /** attachment 拆除时释放上游（TCP socket / MessagePort）。 */
   dispose(): void;
 }
@@ -59,7 +63,10 @@ export async function openCompanionRelayAttachment(options: {
   // zcode-agent：既有窄 facade（v4 白名单 + workspace 注入，specs §5）。
   channelServer.registerChannel(
     IZCodeAgentService.channelName,
-    createNarrowingAgentFacade({ upstream: upstream.channel, scope }),
+    createNarrowingAgentFacade({
+      upstream: upstream.channelClient.getChannel(IZCodeAgentService.channelName),
+      scope,
+    }),
   );
   // 其余全部 ServiceChannels 按三分名单裁决（specs §11）：表内 T2/T1，表外 T0。
   // 全量注册保证 RemoteServiceAccess 对每个频道的请求都快速失败而不是挂起。
@@ -69,7 +76,7 @@ export async function openCompanionRelayAttachment(options: {
       channelName,
       createPolicyChannel({
         channelName,
-        upstream: upstream.channel,
+        upstream: upstream.channelClient.getChannel(channelName),
         policy: policyForChannel(channelName),
       }),
     );

@@ -1342,6 +1342,9 @@ importers:
       '@zcode/client':
         specifier: workspace:*
         version: link:../client
+      '@zcode/companion':
+        specifier: workspace:*
+        version: link:../companion
       '@zcode/shared':
         specifier: workspace:*
         version: link:../shared

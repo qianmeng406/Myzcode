@@ -61,6 +61,43 @@ export const COMPANION_CHANNEL_POLICIES: Readonly<Record<string, ChannelPolicy>>
     kind: "allow-calls",
     calls: new Set(["getView", "refresh", "resolveModelConfig"]),
   },
+  // 启动链提档（specs §11.3）：Root 首屏依赖的只读面，逐方法白名单。
+  // coding-plan 只放配置/预览 getter；购买、签约、支付、绑卡等写方法永不下发。
+  [ServiceChannels.CodingPlanSubscription]: {
+    kind: "allow-calls",
+    calls: new Set([
+      "batchPreview",
+      "getStaticProducts",
+      "getStaticTeamProducts",
+      "getStartPlanPreview",
+      "getOffPeakClientConfig",
+      "getDynamicWorkflowClientConfig",
+      "getModelContextBudgetStrategy",
+      "getForceUpdateConfig",
+    ]),
+  },
+  // bots：状态/配置/列表读取 + 应用运行时偏好同步（Root 启动推送）；任何
+  // 注册/保存/删除/测试/绑定/自动化处置不入白名单。
+  [ServiceChannels.Bots]: {
+    kind: "allow-calls",
+    calls: new Set([
+      "syncAppRuntimePreferences",
+      "getStatus",
+      "getConfig",
+      "listWorkspaceRefs",
+      "getUserConfigOptions",
+      "listBots",
+      "getBotStates",
+    ]),
+  },
+  // onboarding-record：只读判定面（shouldOnboard/getLatestEntry/getRecords/
+  // syncSettingsFromRecord）。被拒会让 Root 的引导判定回退成“需要引导”，
+  // 把主界面拦在向导上。record/append/dismiss/clear 等写方法永 T0
+  // （宿主侧完成过一次引导后 shouldOnboard 即为 false，手机端不再触达写路径）。
+  [ServiceChannels.OnboardingRecord]: {
+    kind: "allow-calls",
+    calls: new Set(["shouldOnboard", "getLatestEntry", "getRecords", "syncSettingsFromRecord"]),
+  },
 };
 
 export function policyForChannel(channelName: string): ChannelPolicy {

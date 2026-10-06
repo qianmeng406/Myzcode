@@ -62,6 +62,15 @@ async function runStartCommand(): Promise<number> {
 }
 
 async function runServeCommand(): Promise<number> {
+  // daemon 持有任务事实：单点未捕获异常不能静默带走进程（任务对手机端表现为
+  // 全部挂起）。兜底只记日志并继续——连接级错误已在 ChannelServer 内就地回错，
+  // 走到这里的是真正未预见的路径，保活优于死亡。
+  process.on("uncaughtException", (error) => {
+    log("resident daemon uncaughtException (kept alive):", error);
+  });
+  process.on("unhandledRejection", (reason) => {
+    log("resident daemon unhandledRejection (kept alive):", reason);
+  });
   // 与 stdio 入口同序：先确保远端设备身份，再物化 provider 配置、创建服务。
   await ensureRemoteServerDeviceMid({ log });
   const zcodeBuiltinProviderConfigFilePath = await materializeBundledZCodeBuiltinProviderConfig({

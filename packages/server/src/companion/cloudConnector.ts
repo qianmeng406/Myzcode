@@ -177,7 +177,7 @@ async function openRelayAttachment(
       const upstreamSocket = await performClientHandshake(tcp);
       const client = new ChannelClient(new SocketProtocol(upstreamSocket));
       return {
-        channel: client.getChannel(IZCodeAgentService.channelName),
+        channelClient: client,
         dispose: () => tcp.destroy(),
       };
     },

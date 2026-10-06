@@ -43,7 +43,15 @@ const gateway = await startCompanionGateway({
   port: PORT,
   host: "0.0.0.0",
   controlDbPath: join(stackRoot, "control.db"),
-  allowedOrigins: ["http://localhost", "https://localhost", "http://localhost:5180"],
+  allowedOrigins: [
+    "http://localhost",
+    "https://localhost",
+    "http://localhost:5180",
+    // 完整 Web UI 浏览器验收：vite dev(5173) / preview(4173) / 静态服务(5190)
+    "http://localhost:5173",
+    "http://localhost:4173",
+    "http://localhost:5190",
+  ],
   logger: {
     info: (message, details) => console.log("[gateway]", message, details ?? ""),
     warn: (message, details) => console.warn("[gateway]", message, details ?? ""),

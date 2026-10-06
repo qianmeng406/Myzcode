@@ -66,9 +66,17 @@ export class ChannelServer<TContext = string> implements IChannelServer<TContext
   }
 
   private onRawMessage(message: VSBuffer): void {
-    const reader = new BufferReader(message);
-    const header = deserialize(reader);
-    const body = deserialize(reader);
+    let header: any[];
+    let body: any;
+    try {
+      const reader = new BufferReader(message);
+      header = deserialize(reader);
+      body = deserialize(reader);
+    } catch (error) {
+      // 畸形帧只丢弃该帧：一个坏消息不能拖垮整条连接上的其他服务。
+      console.error("ChannelServer: dropped malformed frame", error);
+      return;
+    }
     const type = header[0] as RequestType;
 
     switch (type) {
@@ -203,17 +211,26 @@ export class ChannelServer<TContext = string> implements IChannelServer<TContext
       return;
     }
 
-    const disposable = channel.listen(
-      this.ctx,
-      request.name,
-      request.arg,
-    )((data) => {
-      this.sendResponse({
-        id: request.id,
-        data,
-        type: ResponseType.EventFire,
+    let disposable: IDisposable;
+    try {
+      disposable = channel.listen(this.ctx, request.name, request.arg)((data) => {
+        this.sendResponse({
+          id: request.id,
+          data,
+          type: ResponseType.EventFire,
+        });
       });
-    });
+    } catch (error) {
+      // 未声明的事件（ProxyChannel "Event not found" 等）必须就地吞掉：
+      // 1) 同步 throw 会顺着 readMessages 逃逸成 uncaught 异常杀死宿主进程；
+      // 2) 事件协议没有错误帧——回任何响应都会被客户端当事件值 fire。
+      // 语义 = 永不触发的监听（与 T0 facade 的 listen 一致）。
+      console.error(
+        `ChannelServer: listen '${request.channelName}.${request.name}' rejected`,
+        error,
+      );
+      disposable = toDisposable(() => undefined);
+    }
     this.activeRequests.set(request.id, disposable);
   }
 

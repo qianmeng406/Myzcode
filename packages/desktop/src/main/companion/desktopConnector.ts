@@ -208,7 +208,7 @@ function createPortUpstream(port: CompanionPortLike): {
   const protocol = new MessagePortProtocol(port as unknown as import("@zcode/rpc").MessagePortLike);
   const client = new ChannelClient(protocol);
   return {
-    channel: client.getChannel(IZCodeAgentService.channelName),
+    channelClient: client,
     dispose: () => {
       client.dispose();
       port.close();
