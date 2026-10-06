@@ -64,11 +64,22 @@ export class CompanionClient {
     code: string;
   }): Promise<CompanionPairResult> {
     const base = options.baseUrl.replace(/\/+$/, "");
-    const response = await fetch(`${base}/companion/pair`, {
-      method: "POST",
-      headers: CSRF_HEADERS,
-      body: JSON.stringify({ deviceName: options.deviceName, code: options.code }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${base}/companion/pair`, {
+        method: "POST",
+        headers: CSRF_HEADERS,
+        body: JSON.stringify({ deviceName: options.deviceName, code: options.code }),
+      });
+    } catch (networkError) {
+      // fetch 网络层失败（DNS/拒连/超时/混合内容拦截）统一给出可操作提示。
+      const hint = options.baseUrl.startsWith("http://")
+        ? "检查：手机与电脑是否同一 Wi-Fi、电脑防火墙是否放行该端口、地址是否写对"
+        : "检查：接入服务地址是否正确、HTTPS 证书是否有效";
+      throw new Error(
+        `无法连接接入服务（${networkError instanceof Error ? networkError.message : String(networkError)}）。${hint}`,
+      );
+    }
     const body = (await response.json().catch(() => null)) as
       | CompanionPairResult
       | { error?: { message?: string } }

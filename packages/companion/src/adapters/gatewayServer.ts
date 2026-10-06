@@ -2,6 +2,7 @@
 // 三类 WS 升级（mobile/node/relay）与 owner 管理端口。
 // 生产部署要求置于 TLS 反代之后；此处只保证应用层鉴权与帧限制。
 import { Hono, type Context } from "hono";
+import { cors } from "hono/cors";
 import { serve, type ServerType } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type { WebSocket } from "ws";
@@ -11,6 +12,7 @@ import type {
   CompanionOwnerPort,
 } from "../contract.js";
 import { COMPANION_GATEWAY_DEFAULTS } from "../app/ports.js";
+import { COMPANION_PROTOCOL_VERSION } from "@zcode/shared/companion-protocol";
 import { CompanionHub } from "../app/hub.js";
 import { CompanionPairingService } from "../app/pairing.js";
 import { NodeSecretBox, systemClock } from "./secrets.js";
@@ -66,6 +68,21 @@ export async function startCompanionGatewayServer(
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
+  // CORS：手机 WebView/浏览器是跨源客户端，POST JSON 会先发 OPTIONS 预检。
+  // 只给白名单来源回 CORS 头；非浏览器客户端（无 Origin）不受影响。
+  // 注意：预检请求必须在 API 层 origin 403 中间件之前被 cors() 消化。
+  app.use(
+    "/companion/*",
+    cors({
+      origin: (origin) =>
+        origin !== undefined && originAllowed(origin) ? origin : null,
+      allowMethods: ["GET", "POST", "OPTIONS"],
+      allowHeaders: ["content-type", COMPANION_CSRF_HEADER],
+      credentials: true,
+      maxAge: 86_400,
+    }),
+  );
+
   app.use("/companion/*", async (c, next) => {
     if (!originAllowed(c.req.header("origin"))) {
       return c.json({ error: { code: "unauthorized", message: "origin not allowed" } }, 403);
@@ -84,6 +101,11 @@ export async function startCompanionGatewayServer(
     await next();
     return undefined;
   };
+
+  // 健康检查：手机浏览器可直接打开，用于区分「网络不通」与「App 问题」。
+  app.get("/companion/health", (c) =>
+    c.json({ ok: true, version: COMPANION_PROTOCOL_VERSION, time: Date.now() }),
+  );
 
   app.post("/companion/pair", requireCsrf, async (c) => {
     const body = (await c.req.json().catch(() => null)) as
