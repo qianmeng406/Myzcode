@@ -51,6 +51,7 @@ import {
   nextOracleReviewSeq,
   oracleReviewRecordToRestoredResult,
   seedOracleReviewHistory,
+  selectRestorableOracleReviewRecord,
   setOracleReviewState,
   subscribeOracleReviewState,
 } from "../src/v4/oracleReview/oracleReviewStore.js";
@@ -1287,4 +1288,46 @@ test("工作区 diff 兜底：目录条目、依赖与内部目录被过滤，�
   );
   assert.equal(result.fileCount, 2);
   assert.equal(result.excluded, 4);
+});
+
+// ── 「已确认」审查不再恢复成卡片（重启后不重复弹出）──
+function reviewRecord(reviewId: string, completedAt: number, acknowledgedAt?: number) {
+  return {
+    reviewId,
+    sessionId: "sess-1",
+    depth: "standard" as const,
+    mode: "manual" as const,
+    target: { rowId: 1, entityId: "e1" },
+    verdict: "warn" as const,
+    summary: "有注意事项",
+    findings: "- 问题 1",
+    modelLabel: "m",
+    createdAt: completedAt - 1,
+    completedAt,
+    ...(acknowledgedAt !== undefined ? { acknowledgedAt } : {}),
+  };
+}
+
+test("恢复选择：跳过已确认记录，取最新的未确认一条", () => {
+  const picked = selectRestorableOracleReviewRecord([
+    reviewRecord("r3", 300, 1_700_000_000_000), // 最新但已确认（✕ 关闭过）
+    reviewRecord("r2", 200), // 未确认 → 应被选中
+    reviewRecord("r1", 100),
+  ]);
+  assert.equal(picked?.reviewId, "r2");
+});
+
+test("恢复选择：全部已确认或历史为空时不恢复任何卡片", () => {
+  assert.equal(
+    selectRestorableOracleReviewRecord([reviewRecord("r1", 100, 1_700_000_000_000)]),
+    undefined,
+  );
+  assert.equal(selectRestorableOracleReviewRecord([]), undefined);
+});
+
+test("恢复结果卡片：未确认记录恢复时标记 restored，并保留深度", () => {
+  const restored = oracleReviewRecordToRestoredResult(reviewRecord("r1", 100));
+  assert.equal(restored.status, "result");
+  assert.equal(restored.status === "result" && restored.restored, true);
+  assert.equal(restored.status === "result" && restored.depth, "standard");
 });

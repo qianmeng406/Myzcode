@@ -2189,6 +2189,11 @@ export const zcodeOracleReviewRecordSchema = z
     modelLabel: nonEmptyString,
     createdAt: z.number().int().positive(),
     completedAt: z.number().int().positive(),
+    /**
+     * 用户已确认这条审查（✕ 关闭 / 按建议处理）。会话加载时只恢复未确认的最新记录，
+     * 否则被关掉的卡片会在每次重启后重新弹出（restored 卡片）。
+     */
+    acknowledgedAt: z.number().int().positive().optional(),
   })
   .strict();
 export type ZCodeOracleReviewRecord = z.infer<typeof zcodeOracleReviewRecordSchema>;
@@ -2221,6 +2226,25 @@ export const zcodeOracleReviewListRecordsResultSchema = z
   .strict();
 export type ZCodeOracleReviewListRecordsResult = z.infer<
   typeof zcodeOracleReviewListRecordsResultSchema
+>;
+
+export const zcodeOracleReviewAcknowledgeRecordParamsSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    sessionId: nonEmptyString,
+    reviewId: nonEmptyString,
+    /** 缺省由 CLI 取当前时间；显式传入仅用于测试与重放。 */
+    acknowledgedAt: z.number().int().positive().optional(),
+  })
+  .strict();
+export const zcodeOracleReviewAcknowledgeRecordResultSchema = z
+  .object({
+    /** 未命中该 reviewId 的存储记录（或存储面缺席）时为 false，不视为错误。 */
+    acknowledged: z.boolean(),
+  })
+  .strict();
+export type ZCodeOracleReviewAcknowledgeRecordResult = z.infer<
+  typeof zcodeOracleReviewAcknowledgeRecordResultSchema
 >;
 
 export const zcodeProviderTestModelConnectivityParamsSchema = z
@@ -3709,6 +3733,7 @@ export const zcodeProtocolMethods = {
   // Oracle 审查记录持久化：会话附属（session entry），冷恢复后卡片/历史可复原。
   oracleReviewSaveRecord: "oracleReview/saveRecord",
   oracleReviewListRecords: "oracleReview/listRecords",
+  oracleReviewAcknowledgeRecord: "oracleReview/acknowledgeRecord",
   providerTestModelConnectivity: "provider/testModelConnectivity",
   mcpList: "mcp/list",
   pluginsList: "plugins/list",

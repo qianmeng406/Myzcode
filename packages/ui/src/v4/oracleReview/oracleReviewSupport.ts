@@ -348,6 +348,11 @@ export interface OracleReviewController {
   /** 按原请求重试（同目标/同深度/同模式），错误与中断卡片共用；无请求时退化为手动审查。 */
   retryReview: () => void;
   dismiss: () => void;
+  /**
+   * 落盘「这条审查用户已确认」（✕ 关闭 / 按建议处理）。持久化后会话重启不再把它
+   * 恢复成卡片；best-effort，失败只记日志不影响界面。
+   */
+  acknowledge: () => void;
   /** 把关模型偏好（localStorage 全局）；下拉的受控值。 */
   model: ModelSelection | null;
   onSelectModel: (selection: ModelSelection | null) => void;

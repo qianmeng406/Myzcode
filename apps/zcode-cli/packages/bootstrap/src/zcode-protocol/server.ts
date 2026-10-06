@@ -27,6 +27,7 @@ import {
   cancelBackgroundTask,
   closeSession,
   compactSession,
+  acknowledgeOracleReviewRecord,
   createSession,
   forkSession,
   generateWorkspaceText,
@@ -569,6 +570,8 @@ export class ZCodeProtocolAgentServer {
         return await saveOracleReviewRecord(this.context, request.params);
       case zcodeProtocolMethods.oracleReviewListRecords:
         return await listOracleReviewRecords(this.context, request.params);
+      case zcodeProtocolMethods.oracleReviewAcknowledgeRecord:
+        return await acknowledgeOracleReviewRecord(this.context, request.params);
       case V4_METHODS.command:
         return this.requireV4Gateway().handleCommand(request.params);
       case V4_METHODS.commandsQuery:

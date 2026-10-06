@@ -4412,6 +4412,7 @@ export function SessionPane({
         reviewTurnHeaderDeep: oracleReview.reviewTurnHeaderDeep,
         retryReview: oracleReview.retryReview,
         dismiss: oracleReview.dismiss,
+        acknowledge: oracleReview.acknowledge,
         model: oracleModel,
         onSelectModel: handleSelectOracleModel,
       }}

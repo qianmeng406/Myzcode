@@ -1803,6 +1803,8 @@ function ConversationComposerImpl({
       if (!fixPrompt || pendingRef.current) {
         return;
       }
+      // 「按建议处理」= 用户已确认这条审查：与 ✕ 一样落盘，避免处理完重启又弹回来。
+      oracleReview?.acknowledge();
       inputApiRef.current?.setText(fixPrompt);
       updateText(fixPrompt);
       // Lexical 的 onChange 在 replaceEditorText 之后异步回吐一次 updateText，会把
@@ -1813,7 +1815,7 @@ function ConversationComposerImpl({
         void submit();
       }, 0);
     },
-    [submit, updateText],
+    [oracleReview, submit, updateText],
   );
 
   useEffect(() => {

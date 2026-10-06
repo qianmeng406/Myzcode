@@ -46,6 +46,7 @@ import {
   zcodeProtocolErrorCodes,
   zcodeProtocolMethods,
   zcodeProtocolNotifications,
+  zcodeOracleReviewAcknowledgeRecordParamsSchema,
   zcodeOracleReviewListRecordsParamsSchema,
   zcodeOracleReviewRecordSchema,
   zcodeOracleReviewSaveRecordParamsSchema,
@@ -4180,6 +4181,11 @@ function emitStateUpdated(
 const ORACLE_REVIEW_ENTRY_TYPE = "oracle/conversation_review";
 const ORACLE_REVIEW_LIST_DEFAULT_LIMIT = 20;
 
+/** 记录 entry id 的唯一构造口径：save 与 acknowledge 必须一致，否则确认写不到同一条。 */
+function buildOracleReviewEntryId(sessionId: string, reviewId: string): string {
+  return `oracle-review:${sessionId}:${reviewId}`;
+}
+
 export async function saveOracleReviewRecord(
   context: ZCodeProtocolAgentServerContext,
   rawParams: unknown,
@@ -4192,7 +4198,7 @@ export async function saveOracleReviewRecord(
   const now = Date.now();
   try {
     await sessionStore.saveSessionEntry({
-      id: `oracle-review:${params.sessionId}:${params.record.reviewId}`,
+      id: buildOracleReviewEntryId(params.sessionId, params.record.reviewId),
       sessionID: params.sessionId as SessionId,
       type: ORACLE_REVIEW_ENTRY_TYPE,
       touchSession: false,
@@ -4209,6 +4215,45 @@ export async function saveOracleReviewRecord(
     });
     return { saved: false };
   }
+}
+
+/**
+ * 标记某条审查已被用户确认（✕ 关闭 / 按建议处理）。写回同一条 session entry：
+ * entry id 由 sessionId+reviewId 决定，因此是覆盖更新，不会产生重复记录。
+ * 未命中已存记录时返回 false（不报错）：UI 的 ack 是 best-effort 的后台动作。
+ */
+export async function acknowledgeOracleReviewRecord(
+  context: ZCodeProtocolAgentServerContext,
+  rawParams: unknown,
+): Promise<{ acknowledged: boolean }> {
+  const params = parseParams(zcodeOracleReviewAcknowledgeRecordParamsSchema, rawParams);
+  const sessionStore = context.deps.sessionStore;
+  if (!sessionStore?.saveSessionEntry || !sessionStore.sessionEntries) {
+    return { acknowledged: false };
+  }
+  const entryId = buildOracleReviewEntryId(params.sessionId, params.reviewId);
+  const entries = await sessionStore.sessionEntries({
+    sessionID: params.sessionId as SessionId,
+    type: ORACLE_REVIEW_ENTRY_TYPE,
+  });
+  const entry = entries.find((candidate) => candidate.id === entryId);
+  if (!entry) {
+    return { acknowledged: false };
+  }
+  const parsed = zcodeOracleReviewRecordSchema.safeParse(entry.data);
+  if (!parsed.success) {
+    return { acknowledged: false };
+  }
+  const now = Date.now();
+  await sessionStore.saveSessionEntry({
+    id: entryId,
+    sessionID: params.sessionId as SessionId,
+    type: ORACLE_REVIEW_ENTRY_TYPE,
+    touchSession: false,
+    time: { created: now, updated: now },
+    data: { ...parsed.data, acknowledgedAt: params.acknowledgedAt ?? now },
+  });
+  return { acknowledged: true };
 }
 
 export async function listOracleReviewRecords(

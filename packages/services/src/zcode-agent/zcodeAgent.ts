@@ -725,6 +725,10 @@ export interface IZCodeAgentService {
   listOracleReviewRecords(
     params: ZCodeAgentWorkspaceTarget & { sessionId: string; limit?: number },
   ): Promise<import("@zcode/shared").ZCodeOracleReviewListRecordsResult>;
+  /** 标记审查记录已确认（✕ 关闭 / 按建议处理）；写回同一条记录，供重启后跳过恢复。 */
+  acknowledgeOracleReviewRecord(
+    params: ZCodeAgentWorkspaceTarget & { sessionId: string; reviewId: string },
+  ): Promise<import("@zcode/shared").ZCodeOracleReviewAcknowledgeRecordResult>;
   testModelConnectivity(
     params: ZCodeAgentTestModelConnectivityParams,
   ): Promise<ZCodeProviderTestModelConnectivityResult>;

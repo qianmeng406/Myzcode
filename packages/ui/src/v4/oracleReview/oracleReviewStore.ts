@@ -140,6 +140,17 @@ export function hasOracleReviewHistoryBeenSeeded(sessionId: string): boolean {
   return seededSessions.has(sessionId);
 }
 
+/**
+ * 会话加载时挑「可恢复」的记录：最新一条**未被用户确认**的。
+ * 已确认（✕ 关闭 / 按建议处理落盘 acknowledgedAt）的记录不再恢复，否则被关掉的卡片
+ * 每次重启都会重新弹出；records 由 CLI 按 completedAt 降序返回。
+ */
+export function selectRestorableOracleReviewRecord(
+  records: readonly ZCodeOracleReviewRecord[],
+): ZCodeOracleReviewRecord | undefined {
+  return records.find((record) => record.acknowledgedAt === undefined);
+}
+
 /** 持久记录 → 「已恢复」结果卡片状态（仅 result 记录可恢复；error/pending 不落盘）。 */
 export function oracleReviewRecordToRestoredResult(
   record: ZCodeOracleReviewRecord,

@@ -18,6 +18,7 @@ import {
   hasOracleReviewHistoryBeenSeeded,
   invalidateOracleReviewSeq,
   oracleReviewRecordToRestoredResult,
+  selectRestorableOracleReviewRecord,
   seedOracleReviewHistory,
   setOracleReviewState,
   subscribeOracleReviewState,
@@ -167,8 +168,11 @@ export function useOracleReview(params: {
         if (disposed) return;
         const records = result.unavailable ? [] : result.records;
         seedOracleReviewHistory(sessionId, records);
-        if (records.length > 0 && getOracleReviewState(sessionId).status === "idle") {
-          setOracleReviewState(sessionId, oracleReviewRecordToRestoredResult(records[0]!));
+        // 只恢复**未确认**的最新记录：用户 ✕ 关闭或按建议处理过的审查已经落盘确认，
+        // 无条件恢复会让被关掉的卡片每次重启都重新弹出。
+        const restorable = selectRestorableOracleReviewRecord(records);
+        if (restorable && getOracleReviewState(sessionId).status === "idle") {
+          setOracleReviewState(sessionId, oracleReviewRecordToRestoredResult(restorable));
         }
       } catch (error) {
         if (disposed) return;
@@ -220,12 +224,46 @@ export function useOracleReview(params: {
     startReview({ mode: "manual", depth: "standard" });
   }, [startReview, sessionId]);
 
+  const acknowledge = useCallback(() => {
+    if (sessionId === null) {
+      return;
+    }
+    const current = getOracleReviewState(sessionId);
+    const reviewId = "reviewId" in current ? current.reviewId : undefined;
+    if (!reviewId) {
+      return;
+    }
+    const agentService = servicesRef.current?.zcodeAgentService;
+    if (!agentService?.acknowledgeOracleReviewRecord || !params.workspacePath) {
+      return;
+    }
+    void agentService
+      .acknowledgeOracleReviewRecord({
+        workspacePath: params.workspacePath,
+        ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
+        ...(params.remoteSessionId ? { remoteSessionId: params.remoteSessionId } : {}),
+        sessionId,
+        reviewId,
+      })
+      .catch((error: unknown) => {
+        // best-effort：落盘失败最多导致下次重启再弹一次，不该打断关闭/修复动作。
+        logger.warn("[OracleReview] 审查确认落盘失败", {
+          sessionId,
+          reviewId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  }, [sessionId, params.workspacePath, params.workspaceIdentity, params.remoteSessionId]);
+
   const dismiss = useCallback(() => {
     // 只清当前查看会话的卡片；其他会话的存量卡片（含进行中的审查）不受影响。
     if (sessionId === null) {
       return;
     }
     const current = getOracleReviewState(sessionId);
+    // ✕ = 用户明确确认这条审查（不需要/已看过）并落盘，否则重启后会被当成
+    // 「未确认的恢复候选」再弹一次。
+    acknowledge();
     // 作废该会话在飞请求的写回：dismiss 即用户明确不想要这张卡片，
     // 进行中的审查完成后不再把卡片顶回来（代次被推高，applyIfCurrent 失效）。
     invalidateOracleReviewSeq(sessionId);
@@ -269,7 +307,13 @@ export function useOracleReview(params: {
     // 没有在飞请求。这里刻意**不做**按 querySource 的模糊取消——那种取消会命中
     // 同 workspace 另一会话的同键请求（串杀）；精确取消必须带 operationId。
     logger.debug(undefined, "[OracleReview] dismiss 无 reviewId，跳过取消", { sessionId });
-  }, [sessionId, params.workspacePath, params.workspaceIdentity, params.remoteSessionId]);
+  }, [
+    sessionId,
+    params.workspacePath,
+    params.workspaceIdentity,
+    params.remoteSessionId,
+    acknowledge,
+  ]);
 
   return {
     state,
@@ -282,6 +326,7 @@ export function useOracleReview(params: {
     reviewTurnHeaderDeep,
     retryReview,
     dismiss,
+    acknowledge,
   };
 }
 

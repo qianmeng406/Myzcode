@@ -93,6 +93,8 @@ import {
   zcodeStateUpdatedNotificationSchema,
   zcodeUserInputRequestParamsSchema,
   zcodeWorkspacePresentationSchema,
+  zcodeOracleReviewAcknowledgeRecordParamsSchema,
+  zcodeOracleReviewAcknowledgeRecordResultSchema,
   zcodeOracleReviewListRecordsParamsSchema,
   zcodeOracleReviewListRecordsResultSchema,
   zcodeOracleReviewSaveRecordParamsSchema,
@@ -4585,6 +4587,21 @@ export function createZCodeAgentService(
         zcodeProtocolMethods.oracleReviewListRecords,
         wireParams,
         zcodeOracleReviewListRecordsResultSchema,
+        { timeoutMs: 10_000 },
+      );
+    },
+
+    async acknowledgeOracleReviewRecord(params) {
+      const client = await getClient(params);
+      const wireParams = zcodeOracleReviewAcknowledgeRecordParamsSchema.parse({
+        workspace: buildWorkspaceRef(params),
+        sessionId: params.sessionId,
+        reviewId: params.reviewId,
+      });
+      return client.request(
+        zcodeProtocolMethods.oracleReviewAcknowledgeRecord,
+        wireParams,
+        zcodeOracleReviewAcknowledgeRecordResultSchema,
         { timeoutMs: 10_000 },
       );
     },
