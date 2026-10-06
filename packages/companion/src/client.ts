@@ -1,0 +1,290 @@
+// 浏览器安全的 companion 客户端传输（公开入口，禁止 import adapters）。
+// 控制面：JSON 帧（首帧 auth + 显式回执）+ 请求/响应关联 + 事件订阅。
+// 数据面：attach 返回的 relay WS 上跑既有 SocketProtocol/ChannelClient，
+// 手机侧因此能直接复用 packages/ui 的 v4 会话数据层与恢复语义。
+import { ChannelClient, SocketProtocol } from "@zcode/rpc";
+import {
+  companionAttachResultSchema,
+  companionCatalogResultSchema,
+  type CompanionAttachParams,
+  type CompanionAttachResult,
+  type CompanionCatalogResult,
+  type CompanionDetachParams,
+  type CompanionEvent,
+} from "@zcode/shared/companion-protocol";
+import { RemoteServiceAccess, wrapBrowserWebSocket } from "@zcode/client";
+import type { IServiceAccessor } from "@zcode/services";
+
+export interface CompanionClientOptions {
+  /** gateway 基地址，如 https://companion.example.com */
+  baseUrl: string;
+  /** 短时 access token（内存持有）；由 /companion/pair 或 /companion/refresh 获得。 */
+  accessToken: string;
+  onEvent?: (event: CompanionEvent) => void;
+  onClose?: (event: { code: number; reason: string }) => void;
+  requestTimeoutMs?: number;
+}
+
+export interface CompanionRelayChannel {
+  attachmentId: string;
+  /** 既有 v4 会话数据层入口（IZCodeAgentService 代理所在 accessor）。 */
+  accessor: IServiceAccessor;
+  close(): void;
+}
+
+interface PendingRequest {
+  resolve: (value: { ok: true; result?: unknown } | { ok: false; code: string; message: string }) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+/** POST 控制端点必须携带的自定义头（跨站表单无法伪造，spec §6 CSRF 防线）。 */
+const CSRF_HEADERS = {
+  "content-type": "application/json",
+  "X-ZCode-Companion": "my-zcode",
+} as const;
+
+export interface CompanionPairResult {
+  deviceId: string;
+  deviceName: string;
+  accessToken: string;
+  accessExpiresAt: number;
+}
+
+export interface CompanionRefreshResult {
+  deviceId: string;
+  accessToken: string;
+  accessExpiresAt: number;
+}
+
+export class CompanionClient {
+  /** 手机配对：一次性配对码 + 设备名 → 设备凭证（静态方法，不要求已连接）。 */
+  static async pair(options: {
+    baseUrl: string;
+    deviceName: string;
+    code: string;
+  }): Promise<CompanionPairResult> {
+    const base = options.baseUrl.replace(/\/+$/, "");
+    const response = await fetch(`${base}/companion/pair`, {
+      method: "POST",
+      headers: CSRF_HEADERS,
+      body: JSON.stringify({ deviceName: options.deviceName, code: options.code }),
+    });
+    const body = (await response.json().catch(() => null)) as
+      | CompanionPairResult
+      | { error?: { message?: string } }
+      | null;
+    if (!response.ok) {
+      const message =
+        body !== null && typeof body === "object" && "error" in body
+          ? (body.error?.message ?? `pair failed (${response.status})`)
+          : `pair failed (${response.status})`;
+      throw new Error(message);
+    }
+    if (body === null || typeof body !== "object" || !("accessToken" in body)) {
+      throw new Error("pair response malformed");
+    }
+    return body;
+  }
+
+  /** 刷新短时 access（浏览器走 HttpOnly refresh Cookie；非浏览器显式传 refreshToken）。 */
+  static async refresh(options: {
+    baseUrl: string;
+    refreshToken?: string;
+  }): Promise<CompanionRefreshResult> {
+    const base = options.baseUrl.replace(/\/+$/, "");
+    const response = await fetch(`${base}/companion/refresh`, {
+      method: "POST",
+      headers: CSRF_HEADERS,
+      credentials: "include",
+      ...(options.refreshToken !== undefined
+        ? { body: JSON.stringify({ refreshToken: options.refreshToken }) }
+        : {}),
+    });
+    const body = (await response.json().catch(() => null)) as
+      | CompanionRefreshResult
+      | { error?: { message?: string } }
+      | null;
+    if (!response.ok || body === null || typeof body !== "object" || !("accessToken" in body)) {
+      throw new Error("refresh rejected");
+    }
+    return body;
+  }
+
+  private ws: WebSocket | null = null;
+  private nextRequestId = 0;
+  private readonly pending = new Map<string, PendingRequest>();
+  private readonly eventListeners = new Set<(event: CompanionEvent) => void>();
+  private closedByServer = false;
+
+  constructor(private readonly options: CompanionClientOptions) {}
+
+  /** 建立控制面连接并等待 auth 回执；重复调用会先关闭旧连接。 */
+  connect(): Promise<void> {
+    this.close();
+    const base = this.options.baseUrl.replace(/\/+$/, "");
+    const wsUrl = `${base.replace(/^http/, "ws")}/companion/ws`;
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      this.ws = ws;
+      let settled = false;
+      const fail = (error: Error): void => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
+      ws.addEventListener("open", () => {
+        ws.send(JSON.stringify({ v: 1, id: "auth", op: "auth", params: { accessToken: this.options.accessToken } }));
+      });
+      ws.addEventListener("message", (event) => {
+        let value: unknown;
+        try {
+          value = JSON.parse(String(event.data));
+        } catch {
+          return;
+        }
+        const record = value as { id?: unknown; ok?: unknown; event?: unknown };
+        if (typeof record.event === "string") {
+          const companionEvent = value as CompanionEvent;
+          for (const listener of this.eventListeners) listener(companionEvent);
+          this.options.onEvent?.(companionEvent);
+          return;
+        }
+        if (record.id === "auth") {
+          if (record.ok === true) {
+            settled = true;
+            resolve();
+          } else {
+            fail(new Error("companion auth rejected"));
+            ws.close();
+          }
+          return;
+        }
+        if (typeof record.id !== "string" || typeof record.ok !== "boolean") return;
+        const entry = this.pending.get(record.id);
+        if (!entry) return;
+        clearTimeout(entry.timer);
+        this.pending.delete(record.id);
+        entry.resolve(
+          record.ok
+            ? { ok: true, result: (value as { result?: unknown }).result }
+            : {
+                ok: false,
+                code: (value as { error?: { code?: string } }).error?.code ?? "internal",
+                message: (value as { error?: { message?: string } }).error?.message ?? "request failed",
+              },
+        );
+      });
+      ws.addEventListener("close", (event) => {
+        this.ws = null;
+        for (const entry of this.pending.values()) clearTimeout(entry.timer);
+        this.pending.clear();
+        if (!this.closedByServer) {
+          this.closedByServer = true;
+          this.options.onClose?.({ code: event.code, reason: event.reason });
+        }
+        fail(new Error(`companion control channel closed before ready (${event.code})`));
+      });
+      ws.addEventListener("error", () => fail(new Error(`companion control channel failed: ${wsUrl}`)));
+    });
+  }
+
+  isOpen(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  onEvent(listener: (event: CompanionEvent) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
+  }
+
+  async catalog(): Promise<CompanionCatalogResult> {
+    const result = await this.request("catalog", undefined);
+    if (!result.ok) {
+      throw new Error(`companion catalog failed: ${result.code}`);
+    }
+    const parsed = companionCatalogResultSchema.safeParse(result.result);
+    if (!parsed.success) {
+      throw new Error("companion catalog response malformed");
+    }
+    return parsed.data;
+  }
+
+  async attach(params: CompanionAttachParams): Promise<CompanionAttachResult> {
+    const result = await this.request("attach", params);
+    if (!result.ok) {
+      throw new Error(`companion attach failed: ${result.code} ${result.message}`);
+    }
+    const parsed = companionAttachResultSchema.safeParse(result.result);
+    if (!parsed.success) {
+      throw new Error("companion attach response malformed");
+    }
+    return parsed.data;
+  }
+
+  async detach(params: CompanionDetachParams): Promise<void> {
+    await this.request("detach", params);
+  }
+
+  /**
+   * 打开数据面 relay 并返回 v4 会话数据层入口。
+   * 首个文本帧 = relayCapability（一次性，网关消费后进入字节透传）。
+   * channel 协议不期待服务端先发言，capability 发出即可组装客户端侧。
+   */
+  openRelayChannel(attachResult: CompanionAttachResult): Promise<CompanionRelayChannel> {
+    const base = this.options.baseUrl.replace(/\/+$/, "");
+    const relayUrl = `${base.replace(/^http/, "ws")}${attachResult.relayPath}`;
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(relayUrl);
+      ws.binaryType = "arraybuffer";
+      let settled = false;
+      ws.addEventListener("open", () => {
+        ws.send(attachResult.relayCapability);
+        settled = true;
+        const socket = wrapBrowserWebSocket(ws);
+        const accessor = new RemoteServiceAccess(new ChannelClient(new SocketProtocol(socket)));
+        resolve({ attachmentId: attachResult.attachmentId, accessor, close: () => ws.close() });
+      });
+      ws.addEventListener("close", (event) => {
+        if (!settled) {
+          settled = true;
+          reject(new Error(`companion relay closed before ready (${event.code})`));
+        }
+      });
+      ws.addEventListener("error", () => {
+        if (!settled) {
+          settled = true;
+          reject(new Error(`companion relay failed: ${relayUrl}`));
+        }
+      });
+    });
+  }
+
+  close(): void {
+    if (this.ws) {
+      this.closedByServer = true; // 主动关闭不触发 onClose 语义
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+
+  private request(
+    op: string,
+    params?: unknown,
+    timeoutMs = 15_000,
+  ): Promise<{ ok: true; result?: unknown } | { ok: false; code: string; message: string }> {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return Promise.resolve({ ok: false, code: "bad_request", message: "control channel not open" });
+    }
+    const id = `req-${++this.nextRequestId}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.pending.delete(id)) {
+          resolve({ ok: false, code: "internal", message: `request timed out: ${op}` });
+        }
+      }, timeoutMs);
+      this.pending.set(id, { resolve, timer });
+      ws.send(JSON.stringify({ v: 1, id, op, ...(params !== undefined ? { params } : {}) }));
+    });
+  }
+}
