@@ -223,6 +223,17 @@ function CatalogView(props: {
   return (
     <div className="content">
       {error !== null && <div className="error">{error}</div>}
+      <button
+        className="card"
+        style={{ marginBottom: 12, textAlign: "left" }}
+        onClick={() => {
+          // 完整 Web UI（同 WebView 子路径，sessionStorage 配置直接交接）。
+          window.location.href = "webui/index.html?companion=1";
+        }}
+      >
+        打开完整界面
+        <div className="sub">桌面级完整 UI（工作区/差异/文件树），经同一接入服务</div>
+      </button>
       {catalog === null && <p className="muted">正在加载工作区…</p>}
       {catalog?.nodes.map((node) => (
         <div key={node.nodeId}>
