@@ -96,6 +96,12 @@ export const COMPANION_CHANNEL_POLICIES: Readonly<Record<string, ChannelPolicy>>
   // syncSettingsFromRecord）。被拒会让 Root 的引导判定回退成“需要引导”，
   // 把主界面拦在向导上。record/append/dismiss/clear 等写方法永 T0
   // （宿主侧完成过一次引导后 shouldOnboard 即为 false，手机端不再触达写路径）。
+  // settings-sync：首启提示的读 + 已读记账写（纯 UI 簿记，写入内容只有
+  // “提示已处理”标记；被拒会让欢迎提示每次启动循环出现）。其余同步写方法永 T0。
+  [ServiceChannels.SettingsSync]: {
+    kind: "allow-calls",
+    calls: new Set(["getFirstRunPromptState", "markFirstRunPromptHandled"]),
+  },
   [ServiceChannels.OnboardingRecord]: {
     kind: "allow-calls",
     calls: new Set(["shouldOnboard", "getLatestEntry", "getRecords", "syncSettingsFromRecord"]),

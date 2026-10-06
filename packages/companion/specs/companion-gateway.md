@@ -173,7 +173,8 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 | `onboarding-record` | T1 | 启动提档（被拒会让 Root 引导判定回退成“需要引导”拦住主界面）：仅只读判定面 shouldOnboard/getLatestEntry/getRecords/syncSettingsFromRecord；append/record/dismiss/clear 等写方法永 T0 |
 | `oauth` | T0→按启动实测提档 | 登录态读取若为启动必需，提 T1 只读并在此登记；登录/登出写操作永 T0 |
 | `terminal` / `credential` / `cua-permission` / `cua-pip-session` / `window-controller` / `provider-provisioning-target` | T0 | 高权限面，永不下发 |
-| `skills` / `skill-sync` / `mcp-sync` / `plugin-sync` / `plugins` / `plugin-management` / `subagents` / `commands` / `hooks` / `memory` / `settings-sync` / `off-peak-task` | T0 | 写宿主用户目录/插件/自动化面，首版不下发 |
+| `settings-sync` | T1 | 启动提档（被拒会让首启提示每次启动循环出现）：仅 getFirstRunPromptState（读）与 markFirstRunPromptHandled（“提示已读”UI 簿记写，写入内容不含用户数据）；其余同步写方法永 T0 |
+| `skills` / `skill-sync` / `mcp-sync` / `plugin-sync` / `plugins` / `plugin-management` / `subagents` / `commands` / `hooks` / `memory` / `off-peak-task` | T0 | 写宿主用户目录/插件/自动化面，首版不下发 |
 | `conversation-share` / `prompt-attachment-transfer` / `feedback` / `usage-stats` / `client-config` / `client-scenes` | T0→按启动实测提档 | 完整 UI 启动链若硬依赖其中只读面，逐个提 T1 只读并在此表登记 |
 
 ### 11.3 提档规则

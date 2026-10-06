@@ -30,6 +30,8 @@ export interface CompanionRelayChannel {
   /** 既有 v4 会话数据层入口（IZCodeAgentService 代理所在 accessor）。 */
   accessor: IServiceAccessor;
   close(): void;
+  /** relay WS 断开（网关重启/网络问题/attachment 拆除）时回调一次；宿主据此提示恢复。 */
+  onClosed(listener: () => void): void;
 }
 
 interface PendingRequest {
@@ -69,6 +71,9 @@ export class CompanionClient {
       response = await fetch(`${base}/companion/pair`, {
         method: "POST",
         headers: CSRF_HEADERS,
+        // 长期凭证走 HttpOnly refresh Cookie（WebView 持久化，JS 不可读），
+        // 跨源必须显式带 credentials，否则 App 重启后无法无感恢复。
+        credentials: "include",
         body: JSON.stringify({ deviceName: options.deviceName, code: options.code }),
       });
     } catch (networkError) {
@@ -253,7 +258,14 @@ export class CompanionClient {
         settled = true;
         const socket = wrapBrowserWebSocket(ws);
         const accessor = new RemoteServiceAccess(new ChannelClient(new SocketProtocol(socket)));
-        resolve({ attachmentId: attachResult.attachmentId, accessor, close: () => ws.close() });
+        resolve({
+          attachmentId: attachResult.attachmentId,
+          accessor,
+          close: () => ws.close(),
+          onClosed: (listener) => {
+            ws.addEventListener("close", () => listener());
+          },
+        });
       });
       ws.addEventListener("close", (event) => {
         if (!settled) {

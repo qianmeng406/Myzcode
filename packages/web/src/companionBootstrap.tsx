@@ -166,6 +166,15 @@ export async function bootstrapCompanionApp(): Promise<void> {
       workspaceIdentity: workspaceEntry.workspaceIdentity,
     });
     relay = await client.openRelayChannel(attach);
+    // relay 断开（网关重启/网络问题/attachment 拆除）→ 明确提示而非静默挂死。
+    relay.onClosed(() => {
+      renderCompanionStatus(
+        isChineseLocale() ? "与接入服务的连接已断开" : "Companion connection lost",
+        isChineseLocale()
+          ? "工作区任务不受影响仍在执行；点击重试将重新 attach 并恢复界面。"
+          : "Workspace tasks keep running on the host. Retry to re-attach and restore the UI.",
+      );
+    });
   } catch (error) {
     renderCompanionStatus(
       isChineseLocale() ? "接入服务连接失败" : "Companion connection failed",
