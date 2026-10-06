@@ -203,43 +203,45 @@ async function handleDaemonConnection(options: DaemonConnectionOptions): Promise
   });
   try {
     writeResidentHello(socket);
-    const { remaining } = await waitResidentHelloAck(socket);
+    const { ack, remaining } = await waitResidentHelloAck(socket);
     if (remaining && remaining.length > 0) {
       // RPC 首帧可能紧随 ack；推回流，保证 SocketProtocol 不丢首帧。
       socket.unshift(remaining);
     }
+    const protocol = new SocketProtocol(wrapNetSocket(socket));
+    const channelServer = new ChannelServer(protocol, `resident-${index}`);
+    const agentService = services.getOptional(IZCodeAgentService);
+    // ack 可选声明的 clientMode 决定 v4 投递档（companion connector 为手机请求
+    // web-remote-replayable；旧 bridge 不带该字段 → 维持 desktop-continuous）。
+    const clientMode = ack.clientMode ?? "desktop-continuous";
+    const connectionScope = agentService
+      ? createZCodeAgentConnectionScope(agentService, {
+          connectionId: `server-resident-${randomUUID()}`,
+          clientMode,
+          role: "trusted-host-relay",
+        })
+      : undefined;
+    services.exposeOnChannelServer(
+      channelServer,
+      connectionScope
+        ? new Map([[IZCodeAgentService.channelName, connectionScope.service]])
+        : new Map(),
+    );
+    log(`resident connection #${index} established (clientMode=${clientMode})`);
+    const teardown = (): void => {
+      channelServer.dispose();
+      // scope.dispose 只退订本连接的 V4 订阅；Agent runtime 与任务继续由 daemon 持有。
+      void connectionScope?.dispose().catch((error: unknown) => {
+        log(`resident connection #${index} scope dispose failed: ${describeError(error)}`);
+      });
+    };
+    socket.once("close", teardown);
+    socket.once("error", teardown);
   } catch (error) {
     log(`resident connection #${index} handshake failed: ${describeError(error)}`);
     socket.destroy();
     return;
   }
-
-  const protocol = new SocketProtocol(wrapNetSocket(socket));
-  const channelServer = new ChannelServer(protocol, `resident-${index}`);
-  const agentService = services.getOptional(IZCodeAgentService);
-  const connectionScope = agentService
-    ? createZCodeAgentConnectionScope(agentService, {
-        connectionId: `server-resident-${randomUUID()}`,
-        clientMode: "desktop-continuous",
-        role: "trusted-host-relay",
-      })
-    : undefined;
-  services.exposeOnChannelServer(
-    channelServer,
-    connectionScope
-      ? new Map([[IZCodeAgentService.channelName, connectionScope.service]])
-      : new Map(),
-  );
-  log(`resident connection #${index} established`);
-  const teardown = (): void => {
-    channelServer.dispose();
-    // scope.dispose 只退订本连接的 V4 订阅；Agent runtime 与任务继续由 daemon 持有。
-    void connectionScope?.dispose().catch((error: unknown) => {
-      log(`resident connection #${index} scope dispose failed: ${describeError(error)}`);
-    });
-  };
-  socket.once("close", teardown);
-  socket.once("error", teardown);
 }
 
 /** 读状态 → SIGTERM → 宽限后 SIGKILL → 删状态文件。供显式「停止远端运行时」使用。 */
