@@ -8,6 +8,9 @@ export {
   useAssistantCodeCommentFeatureEnabled,
 } from "./AssistantCodeCommentFeatureProvider.js";
 export { Root } from "./Root.js";
+// My zcode 手机端复用 v4 会话数据层的最小公开面（transport 工厂 + 类型）。
+export { createAgentConversationTransport } from "./v4/agentConversationTransport.js";
+export type { ConversationTransport } from "./v4/transport.js";
 export { UpdateStatusWindowRoot } from "./UpdateStatusWindowRoot.js";
 export { ConfirmDialogHost } from "./ConfirmDialog.js";
 export { Terminal } from "./Terminal.js";
@@ -23,6 +26,7 @@ export type {
   GitGraphRefKind,
 } from "./git-graph/layout.js";
 export { SSHDialog, RemoteConnectionDialog } from "./SSHDialog.js";
+export { CompanionSettingsDialog } from "./CompanionSettingsDialog.js";
 export { useTheme } from "./useTheme.js";
 export type { Theme } from "./useTheme.js";
 export { useTestActions } from "./test-actions.js";
