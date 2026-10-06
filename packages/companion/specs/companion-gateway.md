@@ -134,8 +134,55 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 ## 10. 模块边界
 
 - `packages/shared`：companion-protocol（信封、DTO、错误码 Zod schema）。
-- `packages/companion`（managed）：gateway hub、ControlStore、pairing、中继；`contract.ts` 为嵌入入口，`client.ts` 为浏览器安全客户端传输（不得引用 Node 适配层）。
+- `packages/companion`（managed）：gateway hub、ControlStore、pairing、中继；`contract.ts` 为嵌入入口，`admin.ts` 为控制面运维入口（pair-code/register-node 等短命 CLI 与 serve 进程共享同一 control SQLite），`client.ts` 为浏览器安全客户端传输（不得引用 Node 适配层）。
 - `packages/server`：cloud connector（复用 resident 协议与 daemon.json 发现），导出嵌入入口与轻量 CLI。
 - `packages/desktop`（阶段 2）：desktop connector、配对/开放工作区 UI、本地 attachment broker。
 - `packages/mobile`：手机 React 壳（Vite + Capacitor），只 import companion 公开入口与共享 UI 公开导出。
 - 测试：domain/app 纯逻辑单测 + hub/connector 集成测试（内存 WS 对接）；验收必须连真实 resident。
+
+## 11. 完整 UI 服务面三分名单（阶段 B）
+
+手机壳装载完整 Web UI 后，relay 必须为 `RemoteServiceAccess` 请求的每个频道给出明确裁决。
+原则：**默认拒绝**；三档分级；每档可被回归单测覆盖；提档必须写明理由。
+
+### 11.1 分档
+
+- **T2 直通**：原样转发（zcode-agent 仍走既有窄 facade，保持 workspace 注入与 v4 白名单）。
+- **T1 方法白名单**：白名单内的调用转发，其余拒绝（`companion facade: method not allowed: <channel>.<method>`）。
+- **T0 拒绝**：任何 call/listen 一律拒绝。relay 对未登记频道自动注册 T0 facade——
+  保证 `RemoteServiceAccess` 的 `getChannel` 快速失败而不是挂起。
+
+### 11.2 频道裁决表
+
+| 频道 | 档 | 说明 |
+| --- | --- | --- |
+| `zcode-agent` | T2 | 既有窄 facade（v4 面 + workspace 注入） |
+| `zcode-task` / `zcode-session` | T2 | 会话/任务事实与控制（停止等）——完整 UI 会话页依赖 |
+| `model-selection` | T2 | 接口仅 `getView`/`onDidChange`，天然只读 |
+| `broadcast` | T2 | UI 跨面板刷新事件总线 |
+| `file-watcher` | T2 | 监听事件（文件树新鲜度） |
+| `media-preview` | T2 | 预览渲染支撑 |
+| `file` | T1 | 允许：readdir/stat/checkFilesExist/searchWorkspaceFiles/readTextFile/readMediaPreview/readFileRange/readBinaryPreview/listWorkspaceFilesLength/listWorkspaceFilesRange/resolvePath；拒绝：任何写入/建目录（ensureConversationWorkspace/createDefaultWorkspace/createScratchWorkspace/writeWorkspaceFileSearchIgnore 等） |
+| `git` | T1 | 允许：getRepositorySummary/getWorkspaceRepositoryInfo/getLocalBranches/getCommitGraph/getChanges/getIgnoredPaths/getDiff/getBranchComparison/getIdentity/refresh；拒绝：switchBranch/createBranchAndSwitch/stagePaths/unstagePaths/discardPaths/commit/push/generateCommitMessage |
+| `git-checkpoint` | T1 | 允许 diffCheckpoints；拒绝 createCheckpoint/restoreBetweenCheckpoints |
+| `setting` | T1 | 允许 `get`；拒绝 update/updateDataBaseDir/ensureDefaultProject |
+| `system` | T1 | 允许 `info`；拒绝 probeIntranet/listIntegratedTerminalShells |
+| `provider-settings` | T1 | 允许 getView/refresh/resolveModelConfig（模型选择器只读）；拒绝任何 Personal Provider 写入与 testModelConnectivity |
+| `oauth` | T0→按启动实测提档 | 登录态读取若为启动必需，提 T1 只读并在此登记；登录/登出写操作永 T0 |
+| `terminal` / `credential` / `cua-permission` / `cua-pip-session` / `window-controller` / `provider-provisioning-target` | T0 | 高权限面，永不下发 |
+| `skills` / `skill-sync` / `mcp-sync` / `plugin-sync` / `plugins` / `plugin-management` / `subagents` / `commands` / `hooks` / `memory` / `settings-sync` / `off-peak-task` | T0 | 写宿主用户目录/插件/自动化面，首版不下发 |
+| `conversation-share` / `prompt-attachment-transfer` / `feedback` / `bots` / `usage-stats` / `coding-plan-subscription` / `client-config` / `client-scenes` / `onboarding-record` | T0→按启动实测提档 | 完整 UI 启动链若硬依赖其中只读面，逐个提 T1 只读并在此表登记 |
+
+### 11.3 提档规则
+
+1. T0 → T1 只需给出方法白名单，禁止整频道直通。
+2. 任何**写方法**（产生宿主副作用：落盘、网络提交、凭据、自动化）不进手机白名单；
+   写需求走 v4 命令通道（createSession/sendText/stop/resolveInteraction）。
+3. 每次提档在本表登记理由；`未登记频道 → T0` 是永久不变量。
+4. 回归覆盖：每档至少一条单测（T1 白名单内放行 + 白名单外拒绝；T0 全拒）。
+
+### 11.4 桌面与云端差异
+
+- 桌面附着工作区：上游 Host 已暴露完整 remote ServiceCollection，relay 按本表逐频道裁决。
+- 云端 resident：`createStdioServices` 注册同一完整集合，处理方式相同。
+- 上游本就没有的频道：T0 facade 同样快速失败，行为一致。

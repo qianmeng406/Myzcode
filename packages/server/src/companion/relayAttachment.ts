@@ -5,7 +5,9 @@ import { ChannelServer, SocketProtocol, VSBuffer, type IChannel, type ISocket } 
 import type { WebSocket } from "ws";
 import { WebSocket as NodeWebSocket } from "ws";
 import { IZCodeAgentService } from "@zcode/services";
+import { ServiceChannels } from "@zcode/shared";
 import { createNarrowingAgentFacade } from "./narrowingFacade.js";
+import { createPolicyChannel, policyForChannel } from "./channelPolicy.js";
 
 export interface RelayAttachmentParams {
   attachmentId: string;
@@ -54,10 +56,24 @@ export async function openCompanionRelayAttachment(options: {
     new SocketProtocol(wrapNodeWebSocket(relay)),
     `companion-${params.attachmentId}`,
   );
+  // zcode-agent：既有窄 facade（v4 白名单 + workspace 注入，specs §5）。
   channelServer.registerChannel(
     IZCodeAgentService.channelName,
     createNarrowingAgentFacade({ upstream: upstream.channel, scope }),
   );
+  // 其余全部 ServiceChannels 按三分名单裁决（specs §11）：表内 T2/T1，表外 T0。
+  // 全量注册保证 RemoteServiceAccess 对每个频道的请求都快速失败而不是挂起。
+  for (const channelName of Object.values(ServiceChannels)) {
+    if (channelName === IZCodeAgentService.channelName) continue;
+    channelServer.registerChannel(
+      channelName,
+      createPolicyChannel({
+        channelName,
+        upstream: upstream.channel,
+        policy: policyForChannel(channelName),
+      }),
+    );
+  }
   log("relay attachment established", { attachmentId: params.attachmentId });
 
   const teardown = async (): Promise<void> => {
