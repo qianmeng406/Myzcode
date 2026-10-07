@@ -1,6 +1,6 @@
-// My zcode 手机端入口：配置 → 工作区目录 → 工作区（会话列表/会话）。
-// 认证：access token 存 sessionStorage（浏览器会话级）；Android 壳后续替换为
-// 安全存储（交付说明中如实标注）。
+// Myzcode 手机端入口：配置 → 工作区目录 → 工作区（会话列表/会话）。
+// 认证：access token 优先存 sessionStorage（会话级），另以 12h 短时 token 落
+// localStorage 作恢复回退（服务端可即时撤销）；长期 refresh 只走 HttpOnly Cookie。
 import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CompanionClient } from "@zcode/companion/client";
@@ -58,6 +58,9 @@ async function tryRecoverSession(): Promise<CompanionConfig | null> {
       const result = await CompanionClient.refresh({ baseUrl });
       const config: CompanionConfig = { baseUrl, accessToken: result.accessToken };
       window.sessionStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+      // 同步刷新持久回退：否则 Cookie 再次丢失时会退回更旧的（可能已过期的）
+      // token，白白多走一次配对。
+      window.localStorage.setItem(PERSIST_KEY, JSON.stringify(config));
       return config;
     } catch {
       // Cookie 不在（force-stop 丢失/过期）→ 回退持久 token。
@@ -97,6 +100,7 @@ function App(): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<CompanionClient | null>(null);
   const configRef = useRef<CompanionConfig | null>(loadConfig());
+  const ensureInFlightRef = useRef<Promise<CompanionClient> | null>(null);
 
   // Cookie 会话恢复：access 缺失但 endpoint 已记住时，静默刷新一轮；
   // 成功直接进目录页（配对跨 App 重启持久），失败留在配对页。
@@ -105,7 +109,8 @@ function App(): React.ReactElement {
     if (configRef.current || recovered) return;
     void (async () => {
       const config = await tryRecoverSession();
-      if (config) {
+      // 恢复在途时用户可能已完成手动配对：不得用旧 token 覆盖新配置。
+      if (config && configRef.current === null) {
         configRef.current = config;
         setView({ name: "catalog" });
       }
@@ -122,15 +127,23 @@ function App(): React.ReactElement {
     if (clientRef.current?.isOpen()) {
       return clientRef.current;
     }
-    clientRef.current?.close();
-    const client = new CompanionClient({
-      baseUrl: config.baseUrl,
-      accessToken: config.accessToken,
-      onClose: () => setError("与接入服务的连接已断开"),
+    // 并发去重：两个调用方同时 ensure 会各建一条控制连接，先建者变孤儿链路。
+    if (ensureInFlightRef.current) return ensureInFlightRef.current;
+    const attempt = (async (): Promise<CompanionClient> => {
+      clientRef.current?.close();
+      const client = new CompanionClient({
+        baseUrl: config.baseUrl,
+        accessToken: config.accessToken,
+        onClose: () => setError("与接入服务的连接已断开"),
+      });
+      await client.connect();
+      clientRef.current = client;
+      return client;
+    })();
+    ensureInFlightRef.current = attempt.finally(() => {
+      if (ensureInFlightRef.current === attempt) ensureInFlightRef.current = null;
     });
-    await client.connect();
-    clientRef.current = client;
-    return client;
+    return ensureInFlightRef.current;
   }, []);
 
   if (view.name === "config") {

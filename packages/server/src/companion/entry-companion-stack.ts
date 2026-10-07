@@ -132,28 +132,44 @@ async function runServe(config: StackConfig): Promise<void> {
   let stopping = false;
   let connector: { stop(): Promise<void> } | null = null;
   let backoffMs = 2_000;
+  // 重启单飞：断线可能触发多次（close/error 去重后仍可能因旧连接迟到回调），
+  // 并发重启链会互相把对方刚建好的连接踢下线（振荡）。in-flight 守卫保证
+  // 同一时刻至多一条重启链。
+  let restarting = false;
+  const scheduleRestart = (): void => {
+    if (stopping || restarting) return;
+    restarting = true;
+    void (async () => {
+      try {
+        await connector?.stop().catch(() => undefined);
+        connector = null;
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        backoffMs = Math.min(backoffMs * 2, 30_000);
+        await startConnector();
+      } finally {
+        restarting = false;
+      }
+    })();
+  };
   const startConnector = async (): Promise<void> => {
     while (!stopping) {
       try {
-        connector = await startCloudCompanionConnector({
+        const instance = await startCloudCompanionConnector({
           gatewayUrl: config.gatewayUrl,
           nodeToken: config.nodeToken,
           runtimeRoot: config.runtimeRoot,
           workspaces: config.workspaces,
           onDisconnected: (reason) => {
             if (stopping) return;
+            // 只处理"当前登记实例"的断线：被网关踢掉的旧连接迟到回调
+            // 不得停掉幸存的新连接（否则永久振荡）。
+            if (connector !== instance) return;
             errorLog(`connector disconnected: ${reason}; retrying in ${backoffMs}ms`);
-            void (async () => {
-              await connector?.stop().catch(() => undefined);
-              connector = null;
-              await new Promise((resolve) => setTimeout(resolve, backoffMs));
-              backoffMs = Math.min(backoffMs * 2, 30_000);
-              // 独立重入而非 await：避免断线链条无限增长。
-              void startConnector();
-            })();
+            scheduleRestart();
           },
           logger: (message, details) => log(`[connector] ${message}`, details),
         });
+        connector = instance;
         backoffMs = 2_000;
         log("connector started", {
           gateway: config.gatewayUrl,

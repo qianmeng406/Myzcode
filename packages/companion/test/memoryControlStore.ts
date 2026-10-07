@@ -63,6 +63,13 @@ export class MemoryControlStore implements ControlStore {
     this.secrets.delete(`${deviceId}:${kind}:${hash}`);
   }
 
+  async consumeSecret(deviceId: string, kind: DeviceSecretKind, hash: string): Promise<boolean> {
+    const key = `${deviceId}:${kind}:${hash}`;
+    const existed = this.secrets.has(key);
+    this.secrets.delete(key);
+    return existed;
+  }
+
   async deleteSecrets(deviceId: string): Promise<void> {
     for (const [key, secret] of [...this.secrets.entries()]) {
       if (secret.deviceId === deviceId) this.secrets.delete(key);

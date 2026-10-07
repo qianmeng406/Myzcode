@@ -79,7 +79,9 @@ location ^~ /companion/ {
     proxy_set_header Connection "upgrade";
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    # 限速来源键取 X-Real-IP（覆盖式）。XFF 用追加语义时第一跳客户端可伪造，
+    # 会绕过 /companion/pair 限速——若改用 XFF 取源，网关侧必须取最后一跳。
+    proxy_set_header X-Forwarded-For $remote_addr;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_read_timeout 86400s;
     proxy_send_timeout 86400s;
@@ -93,8 +95,8 @@ location ^~ /companion/ {
 
 ## 6. 客户端接入
 
-- **手机**：App「接入设置」填 `https://<服务器IP>` + 一次性配对码（服务器上 `pair-code` 生成）。外网可用，不要求与服务器同网。
-- **电脑（桌面连接器）**：设置里把接入服务地址填 `wss://<服务器IP>`，节点令牌走桌面端配对流程登记 `desktop` 类型节点。
+- **手机**：App「配对码」输入 6 位一次性码（桌面弹窗生成，或服务器 CLI `pair-code`）。外网可用，不要求与服务器同网。
+- **电脑（桌面连接器）**：先在服务器登记 desktop 节点并保存令牌（`node zcode-companion.cjs register-node --id desktop-main --name 家里电脑 --kind desktop`；`--kind` 缺省 cloud），桌面「Myzcode 桌面直连」高级设置填 `wss://<服务器IP>` + 令牌并保存启用；此后日常配对直接在弹窗点「生成配对码」（用已存令牌向网关索取，令牌无需再动）。
 
 ## 7. 安全边界（如实）
 

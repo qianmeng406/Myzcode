@@ -1,7 +1,9 @@
 // companion relay 引导（手机壳/浏览器）：不连同源 /ws，改为
 // CompanionClient（已配对 accessToken）→ catalog → attach → relay accessor。
-// 配置来源（优先级）：URL 参数（开发联调）→ localStorage → sessionStorage
-// （轻量 App 配对后的 sessionStorage 键，同 WebView 同源可直接交接）。
+// 配置来源（优先级）：URL 参数（开发联调，仅本次会话且读取后清 URL）→
+// sessionStorage（轻量 App 配对后的会话键，同 WebView 同源可直接交接）→
+// localStorage（历史遗留回退）。session 必须先于持久存储，否则历史联调
+// 遗留的旧配置会遮蔽轻量页刚写入的新配置。
 import { CompanionClient, type CompanionRelayChannel } from "@zcode/companion/client";
 import { AppErrorBoundary, Root, ZCodeIntlProvider } from "@zcode/ui";
 import { createRoot } from "react-dom/client";
@@ -15,7 +17,7 @@ interface CompanionWebConfig {
 }
 
 function readStoredConfig(): CompanionWebConfig | null {
-  for (const storage of [window.localStorage, window.sessionStorage]) {
+  for (const storage of [window.sessionStorage, window.localStorage]) {
     const raw = storage.getItem(CONFIG_KEY);
     if (!raw) continue;
     try {
@@ -35,16 +37,30 @@ function resolveCompanionConfig(): CompanionWebConfig | null {
   const gateway = params.get("companionGateway");
   const token = params.get("companionToken");
   if (gateway && token) {
-    // 开发联调用 URL 直传；持久化让刷新不丢（token 本就存于本机存储）。
+    // 开发联调用 URL 直传：只写 sessionStorage（会话级）且立刻从地址栏清除
+    // 参数——带 token 的 URL 进浏览器历史/同步会变成可长期重放的注入面，
+    // 持久化进 localStorage 还会让后续访问被固定到该网关（网关注入）。
     const config = { baseUrl: gateway, accessToken: token };
-    window.localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+    window.sessionStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+    params.delete("companionGateway");
+    params.delete("companionToken");
+    const query = params.toString();
+    const cleaned = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+    window.history.replaceState(null, "", cleaned);
     return config;
   }
   return readStoredConfig();
 }
 
+let companionRoot: ReturnType<typeof createRoot> | null = null;
+
 function renderCompanionTree(tree: React.ReactNode): void {
-  createRoot(document.getElementById("root")!).render(tree);
+  // 同一容器二次 createRoot 会泄漏旧树（effect/监听不清、React 报错）；
+  // 状态屏与完整 UI 都复用同一个 root，render 前旧树会被正确卸载。
+  if (!companionRoot) {
+    companionRoot = createRoot(document.getElementById("root")!);
+  }
+  companionRoot.render(tree);
 }
 
 function isChineseLocale(): boolean {
@@ -136,12 +152,14 @@ export async function bootstrapCompanionApp(): Promise<void> {
   }
 
   let relay: CompanionRelayChannel | null = null;
+  let bootClient: CompanionClient | null = null;
   let workspace: { path: string; identity?: string } | null = null;
   try {
     const client = new CompanionClient({
       baseUrl: config.baseUrl,
       accessToken: config.accessToken,
     });
+    bootClient = client;
     await client.connect();
     const catalog = await client.catalog();
     const node = catalog.nodes.find((entry) => entry.online && entry.workspaces[0]?.available);
@@ -176,6 +194,8 @@ export async function bootstrapCompanionApp(): Promise<void> {
       );
     });
   } catch (error) {
+    // 引导失败时关闭控制面连接（relay 若已建立会自行触发 onClosed 状态屏）。
+    if (!relay) bootClient?.close();
     renderCompanionStatus(
       isChineseLocale() ? "接入服务连接失败" : "Companion connection failed",
       error instanceof Error ? error.message : String(error),

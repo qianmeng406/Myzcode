@@ -1,6 +1,6 @@
 // 桌面 companion 配置持久化（userData/companion.json，0600）。
 // 只存连接配置与开放工作区白名单；节点令牌为 gateway 签发的本机身份凭证。
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export interface DesktopCompanionConfig {
@@ -40,7 +40,11 @@ export async function loadCompanionConfig(userDataDir: string): Promise<DesktopC
         : [],
     };
   } catch {
-    // 坏文件按未配置处理，不在启动路径上抛错。
+    // 坏文件按未配置处理，不在启动路径上抛错；但保留现场（.broken）供诊断，
+    // 否则截断文件会被下一次保存静默覆盖成空 token，节点令牌永久丢失。
+    await rename(companionConfigPath(userDataDir), `${companionConfigPath(userDataDir)}.broken`).catch(
+      () => undefined,
+    );
     return { ...EMPTY_CONFIG };
   }
 }
@@ -51,5 +55,9 @@ export async function saveCompanionConfig(
 ): Promise<void> {
   const path = companionConfigPath(userDataDir);
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  // 临时文件 + 原子替换：进程崩溃/断电不会留下截断的 JSON（截断文件下次加载
+  // 会被当成未配置，随后的保存就把节点令牌清空了）。
+  const tmpPath = `${path}.tmp`;
+  await writeFile(tmpPath, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await rename(tmpPath, path);
 }

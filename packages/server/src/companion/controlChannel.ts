@@ -106,16 +106,24 @@ export function connectControlChannel(
         })();
       }
     });
+    // ws 库对异常断连保证 error 后必跟 close：不防抖会把 onDisconnected
+    // 触发两次，监督层若据此各起一条重启链就会互相踢连接（振荡）。
+    let disconnectReported = false;
+    const reportDisconnected = (reason: string): void => {
+      if (disconnectReported) return;
+      disconnectReported = true;
+      onDisconnected(reason);
+    };
     ws.on("close", () => {
       if (established) {
-        onDisconnected("gateway control channel closed");
+        reportDisconnected("gateway control channel closed");
         return;
       }
       reject(new Error("gateway control channel closed before ready"));
     });
     ws.on("error", (error) => {
       if (established) {
-        onDisconnected(`gateway control channel error: ${error.message}`);
+        reportDisconnected(`gateway control channel error: ${error.message}`);
         return;
       }
       reject(new Error(`gateway control channel failed: ${error.message}`));

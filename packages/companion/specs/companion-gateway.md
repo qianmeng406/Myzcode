@@ -79,9 +79,10 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 
 ## 6. 配对与认证
 
-- 初始化：gateway 首次启动生成 owner 设置码（服务器本机文件，0600）；管理操作（登记节点、生成配对码、撤销设备）要求 owner 凭据或本机管理端口。
-- 配对：owner 生成一次性短时配对码 → 手机提交（扫码/手输）+ 设备名 → owner 或自动策略确认 → 签发设备凭证（长期 refresh + 短时 access）。配对码 15 分钟有效、单次使用。
-- 手机凭证：浏览器 HttpOnly Cookie（`Path=/companion`，SameSite=Lax，Secure 生产强制）；Capacitor WebView 用 Bearer（access 短时轮换）。长期秘密存 Keystore（Android）/不做 localStorage 持久化（Web）。
+- 管理边界（如实）：管理操作（登记节点、生成配对码、撤销设备/节点）以 control.db 所在主机的文件系统访问权为信任边界——通过捆绑 CLI（与 serve 共库）执行；无独立 owner 凭据/管理端口。
+- 配对码签发（三条途径）：① 服务器 CLI `pair-code`；② serve 进程内 owner port；③ `POST /companion/nodes/pair-code`（Bearer 节点令牌鉴权 + CSRF 头）——桌面连接器用已登记令牌为本机索取配对码，**持有节点令牌即拥有该节点的配对码签发权，撤销节点即收回**。
+- 配对：一次性短时配对码 → 手机手输 6 位码 + 设备名 → 签发设备凭证（长期 refresh + 短时 access）。配对码 15 分钟有效、单次使用；`/companion/pair` 每来源限速（15 分钟 10 次），来源键取覆盖式 `X-Real-IP`（nginx 必须以 `$remote_addr` 覆盖写入，禁止 `$proxy_add_x_forwarded_for` 追加语义——XFF 第一跳客户端可伪造）。
+- 手机凭证：浏览器 HttpOnly Cookie（`Path=/companion`，SameSite=Lax，Secure 生产强制）；Capacitor WebView 用 Bearer（access 短时轮换）。长期 refresh 不落 JS 可读存储（Cookie 承载）；Capacitor 端 12h access token 允许落 localStorage 作恢复回退（已接受的折中，服务端可即时撤销）。
 - 校验顺序（每个连接与每个请求）：设备凭证有效性 → 设备未撤销 → 目标节点/工作区在该设备授权范围内 → attachment 代次匹配。
 - 撤销：删除设备记录 + 使其 access/refresh 失效 + 主动关闭其在线连接；已接受的任务不受影响。
 - 传输：生产强制 HTTPS/WSS 与正常证书校验；不做全局 TLS 豁免。Origin 校验（浏览器）；CSRF：控制面要求 `X-ZCode-Companion` 自定义头（跨站表单无法携带）。token 不进 URL 查询参数。
@@ -169,7 +170,7 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 | `system` | T1 | 允许 `info`；拒绝 probeIntranet/listIntegratedTerminalShells |
 | `provider-settings` | T1 | 允许 getView/refresh/resolveModelConfig（模型选择器只读）；拒绝任何 Personal Provider 写入与 testModelConnectivity |
 | `coding-plan-subscription` | T1 | 启动提档（Root 动态工作流加载器）：仅配置/预览 getter（batchPreview/getStaticProducts/getStaticTeamProducts/getStartPlanPreview/getOffPeakClientConfig/getDynamicWorkflowClientConfig/getModelContextBudgetStrategy/getForceUpdateConfig）；购买/签约/支付/绑卡永 T0 |
-| `bots` | T1 | 启动提档（Root 启动同步偏好 + 状态读取）：syncAppRuntimePreferences/getStatus/getConfig/listWorkspaceRefs/getUserConfigOptions/listBots/getBotStates；注册/保存/删除/测试/绑定/自动化处置永 T0 |
+| `bots` | T1 | 启动提档（状态读取）：getStatus/getConfig/listWorkspaceRefs/getUserConfigOptions/listBots/getBotStates；syncAppRuntimePreferences 是写方法且作用面为全部 Bot 远端 runtime，永 T0；注册/保存/删除/测试/绑定/自动化处置永 T0 |
 | `onboarding-record` | T1 | 启动提档（被拒会让 Root 引导判定回退成“需要引导”拦住主界面）：仅只读判定面 shouldOnboard/getLatestEntry/getRecords/syncSettingsFromRecord；append/record/dismiss/clear 等写方法永 T0 |
 | `oauth` | T0→按启动实测提档 | 登录态读取若为启动必需，提 T1 只读并在此登记；登录/登出写操作永 T0 |
 | `terminal` / `credential` / `cua-permission` / `cua-pip-session` / `window-controller` / `provider-provisioning-target` | T0 | 高权限面，永不下发 |

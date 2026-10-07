@@ -803,6 +803,49 @@ const remoteSessionManager = createRemoteWorkspaceSessionManager({
 
 // ── My zcode 桌面直连：手机控制电脑已打开工作区的既有 Host（不为手机新建执行者） ──
 let companionConnector: DesktopCompanionConnectorHandle | null = null;
+// 桌面连接器断线自愈：指数退避重连（2s→30s）。网关重启/网络抖动后无需重启 App。
+const COMPANION_RECONNECT_MIN_MS = 2_000;
+const COMPANION_RECONNECT_MAX_MS = 30_000;
+let companionReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let companionReconnectBackoffMs = COMPANION_RECONNECT_MIN_MS;
+let companionReconnectInFlight = false;
+let companionConfigRef: DesktopCompanionConfig | null = null;
+
+function cancelCompanionReconnect(): void {
+  if (companionReconnectTimer !== null) {
+    clearTimeout(companionReconnectTimer);
+    companionReconnectTimer = null;
+  }
+  companionReconnectInFlight = false;
+  companionReconnectBackoffMs = COMPANION_RECONNECT_MIN_MS;
+}
+
+function scheduleCompanionReconnect(reason: string): void {
+  if (companionReconnectInFlight) return;
+  const config = companionConfigRef;
+  if (!config?.enabled || config.gatewayUrl.trim() === "" || config.nodeToken.trim() === "") return;
+  companionReconnectInFlight = true;
+  const delay = companionReconnectBackoffMs;
+  companionReconnectBackoffMs = Math.min(companionReconnectBackoffMs * 2, COMPANION_RECONNECT_MAX_MS);
+  logger.info("[companion-desktop] reconnect scheduled", { reason, delayMs: delay });
+  companionReconnectTimer = setTimeout(() => {
+    companionReconnectTimer = null;
+    void (async () => {
+      try {
+        await applyCompanionConfig(companionConfigRef!);
+      } catch (restartError) {
+        logger.warn("[companion-desktop] reconnect attempt failed", {
+          error: restartError instanceof Error ? restartError.message : String(restartError),
+        });
+      } finally {
+        companionReconnectInFlight = false;
+        // 若 applyCompanionConfig 走到 startDesktopCompanionConnector 成功路径，
+        // 它内部会重置退避；失败时保持当前退避继续由下一次 onDisconnected 触发。
+      }
+    })();
+  }, delay);
+  companionReconnectTimer.unref?.();
+}
 let companionConfigCache: DesktopCompanionConfig = {
   enabled: false,
   gatewayUrl: "",
@@ -842,19 +885,24 @@ function listCompanionOpenWorkspaces(): OpenWorkspaceEntry[] {
 
 async function applyCompanionConfig(next: DesktopCompanionConfig): Promise<void> {
   companionConfigCache = next;
+  cancelCompanionReconnect();
   await companionConnector?.stop().catch(() => undefined);
   companionConnector = null;
   await saveCompanionConfig(app.getPath("userData"), next);
+  companionConfigRef = next;
   if (!next.enabled || next.gatewayUrl.trim() === "" || next.nodeToken.trim() === "") {
     return;
   }
-  companionConnector = await startDesktopCompanionConnector({
+  const instance = await startDesktopCompanionConnector({
     gatewayUrl: next.gatewayUrl.trim(),
     nodeToken: next.nodeToken.trim(),
     allowedWorkspaces: next.allowedWorkspaces,
     onDisconnected: (reason) => {
+      // 旧连接的迟到断线回调不得重启刚接管的新连接器。
+      if (companionConnector !== instance) return;
       logger.warn("[companion-desktop] control channel lost", { reason });
       companionConnector = null;
+      scheduleCompanionReconnect(reason);
     },
     deps: {
       listOpenWorkspaces: listCompanionOpenWorkspaces,
@@ -897,6 +945,7 @@ async function applyCompanionConfig(next: DesktopCompanionConfig): Promise<void>
       log: (message, details) => logger.info("[companion-desktop] " + message, details),
     },
   });
+  companionConnector = instance;
 }
 
 

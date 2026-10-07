@@ -167,7 +167,15 @@ export class AttachmentRegistry {
       if (attachment.nodeId === nodeId) this.teardown(attachment.attachmentId, reason);
     }
     for (const pending of Array.from(this.pending.values())) {
-      if (pending.nodeId === nodeId) this.takePending(pending.attachmentId);
+      if (pending.nodeId !== nodeId) continue;
+      // 先回手机再取走 pending：节点离线是即时、可判定的失败，
+      // 不该让 attach 挂到 15s 超时兜底。
+      pending.mobileLink.respond(pending.requestId, {
+        ok: false,
+        code: "node_offline",
+        message: "node went offline during attach",
+      });
+      this.takePending(pending.attachmentId);
     }
   }
 

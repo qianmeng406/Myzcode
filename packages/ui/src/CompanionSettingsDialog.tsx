@@ -32,6 +32,7 @@ interface CompanionConfigView {
 interface PairingCodeView {
   code: string;
   expiresAt: number;
+  displayName: string;
 }
 
 /** 配对码剩余秒数；已过期归零。 */
@@ -151,7 +152,7 @@ export const CompanionSettingsDialog = memo(function CompanionSettingsDialogComp
       .requestCompanionPairingCode()
       .then((issued) => {
         setNow(Date.now());
-        setPairing({ code: issued.code, expiresAt: issued.expiresAt });
+        setPairing({ code: issued.code, expiresAt: issued.expiresAt, displayName: issued.displayName });
       })
       .catch((pairError: unknown) => {
         setPairingError(pairError instanceof Error ? pairError.message : String(pairError));
@@ -160,7 +161,15 @@ export const CompanionSettingsDialog = memo(function CompanionSettingsDialogComp
   };
 
   const secondsLeft = pairing === null ? 0 : pairingSecondsLeft(pairing.expiresAt, now);
-  const configured = (config?.gatewayUrl.trim() ?? "") !== "" && config?.hasNodeToken === true;
+  // 生成配对码要求：已配置（网关+令牌）且已启用——未启用时配对成功也看不到节点。
+  const configured =
+    (config?.gatewayUrl.trim() ?? "") !== "" &&
+    config?.hasNodeToken === true &&
+    config?.enabled === true;
+  // 高级设置表单有未保存修改时禁止取码：主进程只会用已保存配置请求，
+  // 否则用户拿到的是"旧网关"的配对码（对手机无效），排查链路极长。
+  const formDirty =
+    gatewayUrl.trim() !== (config?.gatewayUrl ?? "").trim() || nodeToken.trim() !== "";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -217,10 +226,15 @@ export const CompanionSettingsDialog = memo(function CompanionSettingsDialogComp
                         ? intl.formatMessage({ id: "companionDirect.pairingIdle" })
                         : intl.formatMessage({ id: "companionDirect.notConfigured" })}
                     </p>
+                    {formDirty && (
+                      <p className="text-ui-sm text-foreground-subtle">
+                        {intl.formatMessage({ id: "companionDirect.saveFirst" })}
+                      </p>
+                    )}
                     <Button
                       type="button"
                       variant="outline"
-                      disabled={pairingLoading || !configured}
+                      disabled={pairingLoading || !configured || formDirty}
                       onClick={generatePairingCode}
                     >
                       {pairingLoading ? (
@@ -245,6 +259,14 @@ export const CompanionSettingsDialog = memo(function CompanionSettingsDialogComp
                         </span>
                       ))}
                     </div>
+                    {pairing.displayName !== "" && (
+                      <p className="text-ui-sm text-foreground-subtle">
+                        {intl.formatMessage(
+                          { id: "companionDirect.pairingNode" },
+                          { name: pairing.displayName },
+                        )}
+                      </p>
+                    )}
                     <p className="text-ui-sm/relaxed text-foreground-subtle">
                       {intl.formatMessage(
                         { id: "companionDirect.pairingHint" },

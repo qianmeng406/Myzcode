@@ -55,13 +55,15 @@ export class ChannelServer<TContext = string> implements IChannelServer<TContext
   }
 
   private send(header: any, body: any = undefined): void {
-    const writer = new BufferWriter();
-    serialize(writer, header);
-    serialize(writer, body);
+    // 序列化也要兜住：BigInt/循环引用会让 JSON.stringify 同步 throw，
+    // 在 PromiseSuccess 的 .then 里抛出会变成 unhandledRejection（serve 进程默认崩溃）。
     try {
+      const writer = new BufferWriter();
+      serialize(writer, header);
+      serialize(writer, body);
       this.protocol.send(writer.buffer);
-    } catch {
-      /* noop */
+    } catch (error) {
+      console.error("[rpc] serialize/send failed, frame dropped", error);
     }
   }
 

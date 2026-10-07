@@ -100,13 +100,51 @@ export class CompanionHub {
     this.broadcastNodeStatus(nodeId, true);
   }
 
-  handleNodeClosed(nodeId: string): void {
-    if (!this.nodeLinks.has(nodeId)) return;
+  /** 迟到的旧连接 close 不得误杀已接管的新链路：按链路身份比对。 */
+  handleNodeClosed(nodeId: string, link: NodeLink): void {
+    if (this.nodeLinks.get(nodeId) !== link) return;
     this.nodeLinks.delete(nodeId);
     this.nodeWorkspaces.delete(nodeId);
     this.deps.logger.warn("companion node disconnected", { nodeId });
     this.broadcastNodeStatus(nodeId, false);
     this.registry.teardownAllForNode(nodeId, "node_offline");
+  }
+
+  /** owner 撤销节点：关闭其在线控制链路并拆除全部 attachment。 */
+  closeNodeConnections(nodeId: string): void {
+    this.registry.teardownAllForNode(nodeId, "node_revoked");
+    const link = this.nodeLinks.get(nodeId);
+    if (link) {
+      link.close();
+      this.handleNodeClosed(nodeId, link);
+    }
+  }
+
+  /** 周期性吊销复查：关闭已撤销设备/节点的在线链路（CLI 撤销跨进程生效）。 */
+  async revalidateRevocations(): Promise<void> {
+    if (this.stopped) return;
+    try {
+      const devices = await this.deps.store.listDevices();
+      const revokedDevices = new Set(
+        devices.filter((device) => device.revokedAt !== undefined).map((device) => device.deviceId),
+      );
+      for (const link of Array.from(this.mobileLinks)) {
+        if (revokedDevices.has(link.deviceId)) {
+          this.closeDeviceConnections(link.deviceId);
+        }
+      }
+      const nodes = await this.deps.store.listNodes();
+      for (const record of nodes) {
+        if (record.revokedAt !== undefined && this.nodeLinks.has(record.nodeId)) {
+          this.deps.logger.warn("companion node revoked while online", { nodeId: record.nodeId });
+          this.closeNodeConnections(record.nodeId);
+        }
+      }
+    } catch (error) {
+      this.deps.logger.warn("revocation sweep failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   // ── 手机侧 ──
@@ -201,6 +239,12 @@ export class CompanionHub {
     const nodeLink = this.nodeLinks.get(params.nodeId);
     if (!nodeLink) {
       link.respond(id, { ok: false, code: "node_offline", message: "node is offline" });
+      return;
+    }
+    // 在线 ≠ 仍被授权：被撤销但尚未断开的节点不接受新 attach（存量连接由吊销复查关闭）。
+    const nodeRecord = await this.deps.store.getNode(params.nodeId);
+    if (!nodeRecord || nodeRecord.revokedAt !== undefined) {
+      link.respond(id, { ok: false, code: "unauthorized", message: "node is revoked" });
       return;
     }
     const entry = this.nodeWorkspaces

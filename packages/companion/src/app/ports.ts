@@ -54,8 +54,10 @@ export interface ControlStore {
 
   listSecrets(deviceId: string, kind: DeviceSecretKind): Promise<DeviceSecretRecord[]>;
   putSecret(record: DeviceSecretRecord): Promise<void>;
-  /** 精确删除一条秘密（refresh 轮换用）；deleteSecrets 撤销时级联清空。 */
+  /** 精确删除一条秘密（撤销/清理用）；deleteSecrets 撤销时级联清空。 */
   deleteSecret(deviceId: string, kind: DeviceSecretKind, hash: string): Promise<void>;
+  /** 原子单次消费：删除成功（changes===1）才返回 true；refresh 轮换防并发重放。 */
+  consumeSecret(deviceId: string, kind: DeviceSecretKind, hash: string): Promise<boolean>;
   deleteSecrets(deviceId: string): Promise<void>;
 
   putPairingCode(record: PairingCodeRecord): Promise<void>;

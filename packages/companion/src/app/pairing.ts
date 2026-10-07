@@ -116,8 +116,10 @@ export class CompanionPairingService {
       if (hit.expiresAt <= this.deps.clock.now()) {
         return { ok: false };
       }
-      // 轮换：只失效被使用的这条 refresh（同设备其他表面积不受影响），签发新对。
-      await this.deps.store.deleteSecret(device.deviceId, "refresh", hash);
+      // 轮换：原子单次消费被使用的这条 refresh（并发重放只有一个赢家），
+      // 消费成功才签发新对；同设备其他表面积不受影响。
+      const consumed = await this.deps.store.consumeSecret(device.deviceId, "refresh", hash);
+      if (!consumed) return { ok: false };
       const issued = await this.issueSecrets(device.deviceId);
       return { ok: true, deviceId: device.deviceId, ...issued };
     }

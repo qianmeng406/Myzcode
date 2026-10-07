@@ -45,16 +45,28 @@ export async function openCompanionRelayAttachment(options: {
   const { gatewayUrl, params, scope, createUpstream, log } = options;
   const upstream = await createUpstream();
 
-  const relay = await new Promise<WebSocket>((resolve, reject) => {
-    const ws = new NodeWebSocket(`${gatewayUrl}/companion/relay/${params.attachmentId}`);
-    ws.binaryType = "nodebuffer";
-    ws.on("open", () => {
-      ws.send(params.relayCapability);
-      resolve(ws);
+  let relay: WebSocket;
+  try {
+    relay = await new Promise<WebSocket>((resolve, reject) => {
+      const ws = new NodeWebSocket(`${gatewayUrl}/companion/relay/${params.attachmentId}`);
+      ws.binaryType = "nodebuffer";
+      ws.on("open", () => {
+        ws.send(params.relayCapability);
+        resolve(ws);
+      });
+      ws.on("close", (code) => reject(new Error(`relay closed before ready (${code})`)));
+      ws.on("error", (error) => reject(new Error(`relay failed: ${error.message}`)));
     });
-    ws.on("close", (code) => reject(new Error(`relay closed before ready (${code})`)));
-    ws.on("error", (error) => reject(new Error(`relay failed: ${error.message}`)));
-  });
+  } catch (dialError) {
+    // 拨号失败必须释放已建 upstream（daemon TCP / Host MessagePort），否则每次
+    // attach 失败都泄漏一条连接与 v4 订阅。
+    try {
+      upstream.dispose();
+    } catch {
+      // 释放失败不掩盖拨号错误。
+    }
+    throw dialError;
+  }
 
   const channelServer = new ChannelServer(
     new SocketProtocol(wrapNodeWebSocket(relay)),

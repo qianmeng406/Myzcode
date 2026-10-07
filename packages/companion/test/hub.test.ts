@@ -303,7 +303,7 @@ test("节点断开 → attachment 关闭并通知手机", async () => {
   const nodeLink = await attachOnlineNode(hub);
   const { mobile, mobileRelay, connectorRelay } = await attachAndJoin(hub);
 
-  hub.handleNodeClosed("cloud-1");
+  hub.handleNodeClosed("cloud-1", nodeLink);
   // hub 不反向 close 节点链路（ws 已死亡由适配器清理），但 attachment 必须拆除。
   assert.notEqual(mobileRelay.closedCode, null);
   assert.notEqual(connectorRelay.closedCode, null);

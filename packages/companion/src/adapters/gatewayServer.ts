@@ -12,19 +12,31 @@ import type {
   CompanionOwnerPort,
 } from "../contract.js";
 import { COMPANION_GATEWAY_DEFAULTS } from "../app/ports.js";
-import { COMPANION_PROTOCOL_VERSION } from "@zcode/shared/companion-protocol";
+import {
+  COMPANION_CSRF_HEADER,
+  COMPANION_CSRF_VALUE,
+  COMPANION_PROTOCOL_VERSION,
+} from "@zcode/shared/companion-protocol";
 import { CompanionHub } from "../app/hub.js";
 import { CompanionPairingService } from "../app/pairing.js";
 import { NodeSecretBox, systemClock } from "./secrets.js";
 import { SqliteControlStore } from "./sqliteControlStore.js";
 import { attachRelaySocket, createMobileLink, createNodeLink } from "./wsLinks.js";
-import { createPairRateLimiter, isSecureRequest, refreshCookieHeader } from "./httpGuards.js";
+import {
+  CONTROL_FRAME_MAX_BYTES,
+  createPairRateLimiter,
+  isSecureRequest,
+  buildOriginChecker,
+  readAuthAccessToken,
+  readCookie,
+  readNodeToken,
+  refreshCookieHeader,
+  resolveClientSourceKey,
+} from "./httpGuards.js";
 
 const REFRESH_COOKIE = "zc_comp_rt";
 const FIRST_AUTH_TIMEOUT_MS = 10_000;
 /** CSRF 防线：跨站表单无法携带自定义头；POST 控制端点必须携带（spec §6）。 */
-const COMPANION_CSRF_HEADER = "x-zcode-companion";
-const COMPANION_CSRF_VALUE = "my-zcode";
 /** /companion/pair 默认限速：15 分钟窗口 10 次/来源，防配对码在线爆破。 */
 const PAIR_RATE_WINDOW_MS = 15 * 60 * 1000;
 const PAIR_RATE_MAX_ATTEMPTS = 10;
@@ -35,14 +47,6 @@ function consoleLogger(level: "info" | "warn" | "error") {
     if (level === "error") console.error(`[companion] ${line}`);
     else if (level === "warn") console.warn(`[companion] ${line}`);
     else console.log(`[companion] ${line}`);
-  };
-}
-
-function buildOriginChecker(allowedOrigins: string[]): (origin: string | undefined) => boolean {
-  const normalized = allowedOrigins.map((origin) => origin.replace(/\/+$/, ""));
-  return (origin) => {
-    if (origin === undefined) return true; // 非浏览器客户端不携带 Origin
-    return normalized.includes(origin.replace(/\/+$/, ""));
   };
 }
 
@@ -114,9 +118,10 @@ export async function startCompanionGatewayServer(
 
   app.post("/companion/pair", requireCsrf, async (c) => {
     // 限速在 CSRF 之后、业务之前：无有效 CSRF 的请求同样计数（都不该出现）。
-    // 来源键取 X-Forwarded-Proto 之外的第一跳客户端 IP（部署约定 nginx 必设
-    // X-Forwarded-For）；直连时回落 "direct" 单桶。
-    const sourceKey = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || "direct";
+    // 来源键取可信代理写入的覆盖式头（X-Real-IP 由 nginx 用 $remote_addr 覆盖，
+    // 客户端伪造无效）；退化链：XFF 最后一跳（追加语义下右端最可信）→ socket
+    // 对端地址。绝不能取 XFF 第一跳——那是客户端可随意伪造的值，会让限速失效。
+    const sourceKey = resolveClientSourceKey(c);
     if (!allowPairAttempt(sourceKey, Date.now())) {
       logger.warn("companion pair rate limited", { sourceKey });
       return c.json({ error: { code: "rate_limited", message: "too many pairing attempts" } }, 429);
@@ -271,7 +276,8 @@ export async function startCompanionGatewayServer(
   );
 
   const server: ServerType = serve(
-    { fetch: app.fetch, port: options.port ?? 0, hostname: options.host ?? "0.0.0.0" },
+    // 库级默认只绑回环：对外暴露必须显式传 host，忘传时不能全网卡裸奔。
+    { fetch: app.fetch, port: options.port ?? 0, hostname: options.host ?? "127.0.0.1" },
     () => undefined,
   );
   injectWebSocket(server);
@@ -314,43 +320,27 @@ export async function startCompanionGatewayServer(
       const record = await store.getNode(nodeId);
       if (!record || record.revokedAt !== undefined) return false;
       await store.saveNode({ ...record, revokedAt: systemClock.now() });
+      // 撤销即时生效：关闭在线链路并拆除其全部 attachment。
+      hub.closeNodeConnections(nodeId);
       return true;
     },
   };
+
+  // CLI（独立进程）撤销的跨进程兜底：周期复查 device/node 的 revokedAt，
+  // 关闭已被撤销但链路仍存活的连接（attach 路径已同步复查，这里管存量）。
+  const revocationSweep = setInterval(() => void hub.revalidateRevocations(), 60_000);
+  revocationSweep.unref?.();
 
   return {
     port,
     owner,
     stop: async () => {
+      clearInterval(revocationSweep);
       hub.stop();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await store.close();
     },
   };
-}
-
-function readCookie(header: string | undefined, name: string): string | null {
-  if (!header) return null;
-  for (const part of header.split(";")) {
-    const separator = part.indexOf("=");
-    if (separator < 0) continue;
-    if (part.slice(0, separator).trim() === name) {
-      return decodeURIComponent(part.slice(separator + 1).trim());
-    }
-  }
-  return null;
-}
-
-type AuthParams = unknown;
-
-function readAuthAccessToken(params: AuthParams): string | null {
-  const token = (params as { accessToken?: unknown } | null)?.accessToken;
-  return typeof token === "string" && token.length > 0 ? token : null;
-}
-
-function readNodeToken(params: AuthParams): string | null {
-  const token = (params as { nodeToken?: unknown } | null)?.nodeToken;
-  return typeof token === "string" && token.length > 0 ? token : null;
 }
 
 /** 首帧鉴权通用形态：等第一条文本帧 {op:"auth"}，成功回 {id,ok:true} 显式回执；
@@ -381,6 +371,12 @@ function wireFirstFrameAuth(
     };
     const onMessage = (data: unknown, isBinary: boolean): void => {
       if (isBinary) return;
+      const buffer = data as { byteLength?: number };
+      if (typeof buffer.byteLength === "number" && buffer.byteLength > CONTROL_FRAME_MAX_BYTES) {
+        try { ws.close(1009, "frame too large"); } catch { /* no-op */ }
+        finish(null);
+        return;
+      }
       const text = String(data);
       let parsed: unknown;
       try {

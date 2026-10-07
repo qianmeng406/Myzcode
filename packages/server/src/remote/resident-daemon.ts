@@ -70,8 +70,15 @@ export async function ensureResidentDaemonRunning(
 
   const existing = await readResidentDaemonStatus(statusPath);
   if (existing && (await isResidentDaemonAlive(existing, probe))) {
-    log(`resident daemon already running (pid=${existing.pid} port=${existing.port})`);
-    return existing;
+    if (existing.version !== ZCODE_VERSION) {
+      // 版本不一致的旧 daemon 不能复用：它会带着旧代码/旧环境变量继续服务
+      // （PM2 重启后 env 不生效一类问题的复发通道），停掉后按新版本重拉。
+      log(`resident daemon version mismatch (running=${existing.version} expected=${ZCODE_VERSION}); restarting`);
+      await stopResidentDaemon({ runtimeRoot, log }).catch(() => undefined);
+    } else {
+      log(`resident daemon already running (pid=${existing.pid} port=${existing.port})`);
+      return existing;
+    }
   }
   if (existing) {
     log(`resident daemon status is stale (pid=${existing.pid}); restarting`);

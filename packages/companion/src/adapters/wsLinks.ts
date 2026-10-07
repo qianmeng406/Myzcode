@@ -17,8 +17,12 @@ import type {
   RelayJoin,
 } from "../app/ports.js";
 
-export const CONTROL_FRAME_MAX_BYTES = 256 * 1024;
+import { CONTROL_FRAME_MAX_BYTES } from "./httpGuards.js";
+
+export { CONTROL_FRAME_MAX_BYTES };
 export const RELAY_BUFFER_LIMIT = 64;
+/** relay bind 前缓冲按字节限总量（帧数限制挡不住 64×大帧的内存堆积）。 */
+export const RELAY_BUFFER_MAX_BYTES = 2 * 1024 * 1024;
 
 type ControlFrame =
   | { kind: "request"; id: string; op: string; params?: unknown }
@@ -90,6 +94,11 @@ export function createMobileLink(options: MobileLinkOptions): MobileLink {
   };
   ws.on("message", (data, isBinary) => {
     if (isBinary) return; // 控制面只收文本帧
+    // 帧上限在此兜底（ws 库默认 maxPayload 100MiB，过大帧直接断开，防未鉴权解析面）。
+    if (frameByteLength(data) > CONTROL_FRAME_MAX_BYTES) {
+      try { ws.close(1009, "frame too large"); } catch { /* no-op */ }
+      return;
+    }
     const frame = parseControlFrame(data.toString("utf8"));
     if (!frame || frame.kind !== "request") return;
     void hub.handleMobileRequest(link, frame.id, frame.op, frame.params);
@@ -148,6 +157,10 @@ export function createNodeLink(options: NodeLinkOptions): NodeLink {
 
   ws.on("message", (data, isBinary) => {
     if (isBinary) return;
+    if (frameByteLength(data) > CONTROL_FRAME_MAX_BYTES) {
+      try { ws.close(1009, "frame too large"); } catch { /* no-op */ }
+      return;
+    }
     const frame = parseControlFrame(data.toString("utf8"));
     if (!frame) return;
     if (frame.kind === "response") {
@@ -180,7 +193,7 @@ export function createNodeLink(options: NodeLinkOptions): NodeLink {
       entry.resolve({ ok: false, code: "node_offline", message: "node connection closed" });
     }
     pending.clear();
-    hub.handleNodeClosed(nodeId);
+    hub.handleNodeClosed(nodeId, link);
   });
   ws.on("error", (error) => {
     logger.warn("companion node link error", {
@@ -204,6 +217,7 @@ interface RelaySocketOptions {
 export function attachRelaySocket(options: RelaySocketOptions): void {
   const { ws, attachmentId, hub } = options;
   let authenticated = false;
+  let bufferedBytes = 0;
   const buffered: Uint8Array[] = [];
   const binaryListeners = new Set<(data: Uint8Array) => void>();
   const closedListeners = new Set<() => void>();
@@ -252,8 +266,9 @@ export function attachRelaySocket(options: RelaySocketOptions): void {
     if (isBinary) {
       const bytes = new Uint8Array(data as ArrayBuffer);
       if (binaryListeners.size === 0) {
-        if (buffered.length < RELAY_BUFFER_LIMIT) {
+        if (buffered.length < RELAY_BUFFER_LIMIT && bufferedBytes + bytes.byteLength <= RELAY_BUFFER_MAX_BYTES) {
           buffered.push(bytes);
+          bufferedBytes += bytes.byteLength;
         } else {
           join.close(1008, "relay buffer overflow");
         }
@@ -273,6 +288,15 @@ export function attachRelaySocket(options: RelaySocketOptions): void {
     closed = true;
     for (const listener of closedListeners) listener();
   });
+}
+
+/** ws RawData = Buffer | Buffer[]；统一取字节长度。 */
+function frameByteLength(data: unknown): number {
+  if (Array.isArray(data)) {
+    return data.reduce((sum, item) => sum + (typeof item.byteLength === "number" ? item.byteLength : 0), 0);
+  }
+  const buffer = data as { byteLength?: number };
+  return typeof buffer.byteLength === "number" ? buffer.byteLength : 0;
 }
 
 function sendJson(ws: WebSocket, payload: unknown): void {

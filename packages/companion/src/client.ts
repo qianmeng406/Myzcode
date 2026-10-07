@@ -10,7 +10,7 @@ import {
   type CompanionAttachResult,
   type CompanionCatalogResult,
   type CompanionDetachParams,
-  type CompanionEvent,
+  type CompanionEvent,  COMPANION_CSRF_HEADERS,
 } from "@zcode/shared/companion-protocol";
 import { RemoteServiceAccess, wrapBrowserWebSocket } from "@zcode/client";
 import type { IServiceAccessor } from "@zcode/services";
@@ -39,11 +39,6 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>;
 }
 
-/** POST 控制端点必须携带的自定义头（跨站表单无法伪造，spec §6 CSRF 防线）。 */
-const CSRF_HEADERS = {
-  "content-type": "application/json",
-  "X-ZCode-Companion": "my-zcode",
-} as const;
 
 export interface CompanionPairResult {
   deviceId: string;
@@ -70,7 +65,7 @@ export class CompanionClient {
     try {
       response = await fetch(`${base}/companion/pair`, {
         method: "POST",
-        headers: CSRF_HEADERS,
+        headers: { ...COMPANION_CSRF_HEADERS, "content-type": "application/json" },
         // 长期凭证走 HttpOnly refresh Cookie（WebView 持久化，JS 不可读），
         // 跨源必须显式带 credentials，否则 App 重启后无法无感恢复。
         credentials: "include",
@@ -110,7 +105,7 @@ export class CompanionClient {
     const base = options.baseUrl.replace(/\/+$/, "");
     const response = await fetch(`${base}/companion/refresh`, {
       method: "POST",
-      headers: CSRF_HEADERS,
+      headers: { ...COMPANION_CSRF_HEADERS, "content-type": "application/json" },
       credentials: "include",
       ...(options.refreshToken !== undefined
         ? { body: JSON.stringify({ refreshToken: options.refreshToken }) }
@@ -137,6 +132,8 @@ export class CompanionClient {
   /** 建立控制面连接并等待 auth 回执；重复调用会先关闭旧连接。 */
   connect(): Promise<void> {
     this.close();
+    // 实例复用 connect() 时复位断线语义（否则重连后 onClose 永不再触发）。
+    this.closedByServer = false;
     const base = this.options.baseUrl.replace(/\/+$/, "");
     const wsUrl = `${base.replace(/^http/, "ws")}/companion/ws`;
     return new Promise((resolve, reject) => {
@@ -148,6 +145,11 @@ export class CompanionClient {
         settled = true;
         reject(error);
       };
+      // auth 回执整体超时：网关半死（TCP 建连后不回包）时不能无限挂起。
+      const authTimer = setTimeout(() => {
+        fail(new Error("companion auth timeout"));
+        try { ws.close(); } catch { /* no-op */ }
+      }, 10_000);
       ws.addEventListener("open", () => {
         ws.send(JSON.stringify({ v: 1, id: "auth", op: "auth", params: { accessToken: this.options.accessToken } }));
       });
@@ -166,6 +168,7 @@ export class CompanionClient {
           return;
         }
         if (record.id === "auth") {
+          clearTimeout(authTimer);
           if (record.ok === true) {
             settled = true;
             resolve();
@@ -192,7 +195,11 @@ export class CompanionClient {
       });
       ws.addEventListener("close", (event) => {
         this.ws = null;
-        for (const entry of this.pending.values()) clearTimeout(entry.timer);
+        // 在途请求必须结算：只清 timer 会让 Promise 永挂（调用方 await 卡死）。
+        for (const entry of this.pending.values()) {
+          clearTimeout(entry.timer);
+          entry.resolve({ ok: false, code: "closed", message: "control channel closed" });
+        }
         this.pending.clear();
         if (!this.closedByServer) {
           this.closedByServer = true;

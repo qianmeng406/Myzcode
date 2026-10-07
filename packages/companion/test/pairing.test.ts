@@ -124,3 +124,28 @@ test("系统时钟与随机 token 基础性质", () => {
   assert.match(secrets.sha256Hex("abc"), /^[0-9a-f]{64}$/);
   assert.ok(systemClock.now() > 0);
 });
+
+test("refresh 并发重放：原子轮换下只有一个赢家", async () => {
+  const store = new MemoryControlStore();
+  const secrets = new NodeSecretBox();
+  const clock = { now: () => 1_000_000 };
+  const pairing = new CompanionPairingService({ store, secrets, clock, logger: noopLogger });
+  await store.saveNode({ nodeId: "cloud-1", kind: "cloud", displayName: "本机云端", tokenFingerprint: "fp", createdAt: 1 });
+  const codeIssued = await pairing.createPairingCode();
+  const paired = await pairing.pairDevice("dev", codeIssued.code);
+
+  // 同一 refresh 并发刷新：旧实现先查后删可双双成功；原子消费后恰一个赢家。
+  const [first, second] = await Promise.all([
+    pairing.refreshAccess(paired.refreshToken),
+    pairing.refreshAccess(paired.refreshToken),
+  ]);
+  const winners = [first, second].filter((result) => result.ok);
+  assert.equal(winners.length, 1);
+  // 赢家签发的新 refresh 可继续轮换，输家的旧 token 已失效。
+  const winner = winners[0]!;
+  if (winner.ok) {
+    const next = await pairing.refreshAccess(winner.refreshToken);
+    assert.ok(next.ok);
+  }
+  assert.equal((await pairing.refreshAccess(paired.refreshToken)).ok, false);
+});

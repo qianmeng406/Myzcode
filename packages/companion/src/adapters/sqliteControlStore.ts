@@ -187,6 +187,15 @@ export class SqliteControlStore implements ControlStore {
       .run(deviceId, kind, hash);
   }
 
+  async consumeSecret(deviceId: string, kind: DeviceSecretKind, hash: string): Promise<boolean> {
+    // 原子单次消费：DELETE 带 WHERE 条件，changes===1 才算本次调用者消费成功。
+    // 并发重放同一 refresh 时只有一个请求删得掉，其余按失效处理。
+    const result = this.db
+      .prepare("DELETE FROM device_secrets WHERE device_id = ? AND kind = ? AND hash = ?")
+      .run(deviceId, kind, hash);
+    return Number(result.changes) === 1;
+  }
+
   async deleteSecrets(deviceId: string): Promise<void> {
     this.db.prepare("DELETE FROM device_secrets WHERE device_id = ?").run(deviceId);
   }

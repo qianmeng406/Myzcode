@@ -5,6 +5,13 @@ import { z } from "zod";
 
 export const COMPANION_PROTOCOL_VERSION = 1 as const;
 
+/** 控制面 POST 的 CSRF 头（跨站表单带不了自定义头）。唯一权威定义，两端共用。 */
+export const COMPANION_CSRF_HEADER = "x-zcode-companion";
+export const COMPANION_CSRF_VALUE = "my-zcode";
+export const COMPANION_CSRF_HEADERS: Readonly<Record<string, string>> = {
+  [COMPANION_CSRF_HEADER]: COMPANION_CSRF_VALUE,
+};
+
 /** 执行节点类型：desktop = 电脑上已打开工作区的 ZCode；cloud = 独立 resident 运行时。 */
 export const companionNodeKindSchema = z.enum(["desktop", "cloud"]);
 export type CompanionNodeKind = z.infer<typeof companionNodeKindSchema>;

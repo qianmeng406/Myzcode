@@ -126,7 +126,8 @@ test("未登记频道默认 T0；裁决表覆盖既定频道", () => {
   assert.equal(policyForChannel("window-controller").kind, "deny");
   assert.equal(policyForChannel("skills").kind, "deny");
   assert.equal(policyForChannel("nonexistent-channel").kind, "deny");
-  assert.equal(policyForChannel("zcode-task").kind, "passthrough");
+  assert.equal(policyForChannel("zcode-task").kind, "task-scoped");
+  assert.equal(policyForChannel("bots").kind, "allow-calls");
   assert.equal(policyForChannel("model-selection").kind, "passthrough");
   assert.equal(policyForChannel("file").kind, "allow-calls");
   assert.equal(policyForChannel("git-checkpoint").kind, "allow-calls");
@@ -198,4 +199,125 @@ test("broadcast 调用侧拒绝（仅监听），事件放行", async () => {
       error instanceof Error && error.message.includes("not allowed: broadcast.publish"),
   );
   channel.listen("ctx", "onMessage", undefined);
+});
+
+// ── 审查修复回归：`..` 消解 / 嵌套 scopes / taskId 归属 / 秘钥脱敏 ──
+
+test("路径围栏：`..` 段必须消解后比对（防词法前缀绕过）", async () => {
+  const { upstream, calls } = createRecordingUpstream();
+  const scope = { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" };
+  const channel = createPolicyChannel({
+    channelName: "file",
+    upstream,
+    policy: policyForChannel("file"),
+    scope,
+  });
+
+  // 词法上以 root 前缀开头、实际越界 → 必须拒绝
+  await assert.rejects(
+    () => channel.call("ctx", "readTextFile", { path: "/srv/ws/../../etc/passwd" }),
+    (error: unknown) => error instanceof Error && error.message.includes("escapes workspace"),
+  );
+  await assert.rejects(
+    () => channel.call("ctx", "readTextFile", { path: "/srv/ws/sub/../../../etc/shadow" }),
+    (error: unknown) => error instanceof Error && error.message.includes("escapes workspace"),
+  );
+  // Windows 盘符相对与反斜杠混合的 `..` 同样拦截
+  await assert.rejects(
+    () => channel.call("ctx", "readTextFile", { path: "C:\\srv\\ws\\..\\..\\Users\\x\\id_rsa" }),
+    (error: unknown) => error instanceof Error && error.message.includes("escapes workspace"),
+  );
+  // 界内 `..`（消解后仍在工作区内）放行
+  await channel.call("ctx", "readdir", { path: "/srv/ws/sub/../pkg" });
+  assert.equal(calls.length, 1);
+  assert.equal((calls[0]!.arg as Record<string, unknown>).path, "/srv/ws/sub/../pkg");
+});
+
+test("zcode-task：嵌套 workspaceScopes 逐项覆写为绑定工作区", async () => {
+  const { upstream, calls } = createRecordingUpstream();
+  const scope = { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" };
+  const channel = createPolicyChannel({
+    channelName: "zcode-task",
+    upstream,
+    policy: { kind: "task-scoped" },
+    scope,
+  });
+  await channel.call("ctx", "listTaskList", {
+    workspaceScopes: [
+      { workspacePath: "/etc", workspaceIdentity: "/etc" },
+      { workspacePath: "/home/other", workspaceIdentity: "/home/other" },
+    ],
+  });
+  const forwarded = calls[0]!.arg as { workspaceScopes: Array<{ workspacePath: string }> };
+  assert.equal(forwarded.workspaceScopes.length, 2);
+  for (const entry of forwarded.workspaceScopes) {
+    assert.equal(entry.workspacePath, "/srv/ws");
+  }
+});
+
+test("zcode-task：taskId 必须先经列表学习（跨工作区注入拒绝）", async () => {
+  const calls: Array<{ command: string; arg: unknown }> = [];
+  let listReturned = false;
+  const upstream: IChannel = {
+    async call<T>(command: string, arg?: unknown): Promise<T> {
+      calls.push({ command, arg });
+      if (command === "listTaskList") {
+        listReturned = true;
+        return {
+          items: [
+            { taskId: "task-in-ws", workspacePath: "/srv/ws", title: "hello" },
+          ],
+        } as T;
+      }
+      return {} as T;
+    },
+    listen() {
+      return { dispose: () => undefined } as never;
+    },
+  };
+  const scope = { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" };
+  const channel = createPolicyChannel({
+    channelName: "zcode-task",
+    upstream,
+    policy: { kind: "task-scoped" },
+    scope,
+  });
+
+  // 未学习直接按 taskId 操作 → 拒绝
+  await assert.rejects(
+    () => channel.call("ctx", "sendPrompt", { taskId: "task-foreign", prompt: "hi" }),
+    (error: unknown) => error instanceof Error && error.message.includes("task not in attached workspace"),
+  );
+  // 列表（被强制绑定到挂载工作区）学习到 task → 放行
+  await channel.call("ctx", "listTaskList", { workspaceScopes: [] });
+  assert.ok(listReturned);
+  await channel.call("ctx", "sendPrompt", { taskId: "task-in-ws", prompt: "hi" });
+  assert.equal(calls[calls.length - 1]!.command, "sendPrompt");
+});
+
+test("provider-settings：响应中的明文 apiKey 脱敏后下发", async () => {
+  const upstream: IChannel = {
+    async call<T>(): Promise<T> {
+      return {
+        personalConfig: { access: { apiKey: "sk-live-secret", baseUrl: "https://api" } },
+        effectiveConfig: { apiKey: "sk-live-2" },
+      } as T;
+    },
+    listen() {
+      return { dispose: () => undefined } as never;
+    },
+  };
+  const channel = createPolicyChannel({
+    channelName: "provider-settings",
+    upstream,
+    policy: policyForChannel("provider-settings"),
+    scope: { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
+  });
+  const view = await channel.call<Record<string, { access?: { apiKey?: string }; apiKey?: string }>>(
+    "ctx",
+    "getView",
+  );
+  assert.equal(view.personalConfig?.access?.apiKey, "••••••••");
+  assert.equal(view.effectiveConfig?.apiKey, "••••••••");
+  assert.equal(view.personalConfig?.access?.baseUrl, "https://api");
 });

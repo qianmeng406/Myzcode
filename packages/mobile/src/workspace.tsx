@@ -43,6 +43,11 @@ export function WorkspaceView(props: {
           channel.close();
           return;
         }
+        // relay 断开必须显式呈现：否则在途 RPC 永挂、事件静默失效，界面卡死无提示。
+        channel.onClosed(() => {
+          if (disposed) return;
+          setError("与工作区的连接已断开，请返回目录后重试");
+        });
         const record: Attachment = {
           attachResult,
           accessor: channel.accessor,
@@ -86,7 +91,7 @@ export function WorkspaceView(props: {
     return (
       <div className="app">
         <header className="topbar">
-          <button className="button secondary" onClick={props.onBackToCatalog}>
+          <button className="button secondary" onClick={backToCatalog}>
             ←
           </button>
           <h1>{target.title}</h1>

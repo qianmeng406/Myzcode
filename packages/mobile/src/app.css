@@ -165,3 +165,8 @@ body {
 }
 .empty-state p { margin: 4px 0; font-size: 14px; color: #9a9ab0; }
 .empty-state .empty-sub { font-size: 12.5px; color: #5f5f70; }
+/* 可访问性修复（审查 P3）：提升小字号对比度至 WCAG AA。 */
+.section-meta { color: #8a8a9e; }
+.ws-path { color: #8a8a9e; }
+.hint-line { color: #8a8a9e; }
+.answer .button { min-height: 44px; }

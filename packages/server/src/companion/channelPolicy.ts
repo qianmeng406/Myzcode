@@ -8,6 +8,7 @@ import { ServiceChannels } from "@zcode/shared";
 export type ChannelPolicy =
   | { kind: "passthrough" }
   | { kind: "allow-calls"; calls: ReadonlySet<string> }
+  | { kind: "task-scoped" }
   | { kind: "deny" };
 
 /** file 只读面（specs §11.2）：文件树/差异/预览所需的全部读方法；写方法不入表。 */
@@ -44,8 +45,8 @@ const GIT_READS: readonly string[] = [
  * zcode-agent 不在此表——它由既有窄 facade（narrowingFacade.ts）单独注册。
  */
 export const COMPANION_CHANNEL_POLICIES: Readonly<Record<string, ChannelPolicy>> = {
-  // T2 直通
-  [ServiceChannels.ZCodeTask]: { kind: "passthrough" },
+  // T2 直通（zcode-task 例外：task 调用面按 attachment 学到的归属校验，见 task-scoped）
+  [ServiceChannels.ZCodeTask]: { kind: "task-scoped" },
   [ServiceChannels.ZCodeSession]: { kind: "passthrough" },
   [ServiceChannels.ModelSelection]: { kind: "passthrough" },
   // broadcast：仅监听（跨面板刷新事件总线）。publish 是注入面——手机可向
@@ -59,6 +60,8 @@ export const COMPANION_CHANNEL_POLICIES: Readonly<Record<string, ChannelPolicy>>
   [ServiceChannels.GitCheckpoint]: { kind: "allow-calls", calls: new Set(["diffCheckpoints"]) },
   [ServiceChannels.Setting]: { kind: "allow-calls", calls: new Set(["get"]) },
   [ServiceChannels.System]: { kind: "allow-calls", calls: new Set(["info"]) },
+  // provider-settings：名义只读，但视图承载个人 Provider 的 access.apiKey——
+  // 响应统一脱敏后再下发手机（秘钥不出宿主进程）。
   [ServiceChannels.ProviderSettings]: {
     kind: "allow-calls",
     calls: new Set(["getView", "refresh", "resolveModelConfig"]),
@@ -78,12 +81,11 @@ export const COMPANION_CHANNEL_POLICIES: Readonly<Record<string, ChannelPolicy>>
       "getForceUpdateConfig",
     ]),
   },
-  // bots：状态/配置/列表读取 + 应用运行时偏好同步（Root 启动推送）；任何
-  // 注册/保存/删除/测试/绑定/自动化处置不入白名单。
+  // bots：状态/配置/列表读取（Root 首屏依赖）。syncAppRuntimePreferences 是
+  // 写方法且作用面为全部 Bot 远端 runtime，永不下发手机（specs §11.3 规则 2）。
   [ServiceChannels.Bots]: {
     kind: "allow-calls",
     calls: new Set([
-      "syncAppRuntimePreferences",
       "getStatus",
       "getConfig",
       "listWorkspaceRefs",
@@ -118,9 +120,35 @@ export interface PolicyWorkspaceScope {
   workspaceIdentity: string;
 }
 
+/**
+ * 消解 `.`/`..` 路段后再比对——纯词法前缀匹配会被 `<workspace>/../../etc`
+ * 绕过（fs 侧做的是裸路径操作，无二次围栏）。越出根的 `..` 按绝对路径钳制。
+ */
+function resolveDotSegments(unified: string): string {
+  const absolute = unified.startsWith("/");
+  const segments = unified.split("/");
+  const stack: string[] = [];
+  for (const segment of segments) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      if (stack.length > 0 && stack[stack.length - 1] !== "..") {
+        stack.pop();
+      } else if (!absolute) {
+        stack.push("..");
+      }
+      continue;
+    }
+    stack.push(segment);
+  }
+  const joined = stack.join("/");
+  if (absolute) return `/${joined}`;
+  return joined;
+}
+
 function normalizePath(value: string): string {
   const unified = value.replace(/\\/g, "/").replace(/\/+$/, "");
-  return process.platform === "win32" ? unified.toLowerCase() : unified;
+  const resolved = resolveDotSegments(unified);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
 function isUnderWorkspace(path: string, scope: PolicyWorkspaceScope): boolean {
@@ -129,11 +157,42 @@ function isUnderWorkspace(path: string, scope: PolicyWorkspaceScope): boolean {
   return candidate === root || candidate.startsWith(`${root}/`);
 }
 
+/** 深度遍历 JSON 值，命中即回调（深度受限，防止大响应全树遍历的开销失控）。 */
+function walkJson(value: unknown, visit: (node: Record<string, unknown>) => void, depth = 0): void {
+  if (depth > 8 || !value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const item of value) walkJson(item, visit, depth + 1);
+    return;
+  }
+  const node = value as Record<string, unknown>;
+  visit(node);
+  for (const key of Object.keys(node)) walkJson(node[key], visit, depth + 1);
+}
+
+/** 秘钥脱敏：个人 Provider 视图里的明文 apiKey 不得出宿主进程。 */
+const SECRET_KEY_PATTERN = /^(apiKey|api_key)$/;
+
+function maskSecrets(value: unknown, depth = 0): unknown {
+  if (depth > 8 || !value || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((item) => maskSecrets(item, depth + 1));
+  const source = value as Record<string, unknown>;
+  const masked: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(source)) {
+    if (SECRET_KEY_PATTERN.test(key) && typeof item === "string" && item !== "") {
+      masked[key] = "••••••••";
+    } else {
+      masked[key] = maskSecrets(item, depth + 1);
+    }
+  }
+  return masked;
+}
+
 /**
  * workspace 绑定塑形（specs §11.5）：T1/T2 频道的入参一律以 attachment 绑定为
- * 准——顶层 workspacePath/workspaceIdentity 强制覆写；顶层 path/rootPath 与
- * paths[] 必须落在工作区之内，越界即拒绝。没有这层，file/git 等只读白名单
- * 会退化成宿主任意路径读取原语。
+ * 准——顶层 workspacePath/workspaceIdentity 强制覆写；嵌套 workspaceScopes[]
+ * （zcode-task 列表/分组视图）逐项覆写；顶层 path/rootPath 与 paths[] 必须
+ * 落在工作区之内，越界即拒绝。没有这层，file/git 等只读白名单会退化成
+ * 宿主任意路径读取原语。
  */
 export function shapeArgsWithScope(arg: unknown, scope: PolicyWorkspaceScope): unknown {
   if (Array.isArray(arg)) {
@@ -148,6 +207,13 @@ export function shapeArgsWithScope(arg: unknown, scope: PolicyWorkspaceScope): u
   const shaped: Record<string, unknown> = { ...source };
   shaped.workspacePath = scope.workspacePath;
   shaped.workspaceIdentity = scope.workspaceIdentity;
+  if (Array.isArray(shaped.workspaceScopes)) {
+    shaped.workspaceScopes = shaped.workspaceScopes.map((item) =>
+      item && typeof item === "object" && !Array.isArray(item)
+        ? { ...(item as Record<string, unknown>), workspacePath: scope.workspacePath, workspaceIdentity: scope.workspaceIdentity }
+        : item,
+    );
+  }
   const assertInside = (key: string, value: unknown): void => {
     if (typeof value !== "string" || value.length === 0) return;
     if (!isUnderWorkspace(value, scope)) {
@@ -164,6 +230,62 @@ export function shapeArgsWithScope(arg: unknown, scope: PolicyWorkspaceScope): u
 
 function neverEvent<T>(): Event<T> {
   return ((_listener: unknown) => ({ dispose: () => undefined })) as unknown as Event<T>;
+}
+
+/**
+ * zcode-task 的 attachment 级 task 归属校验：
+ * - 列表/订阅类响应（经 workspaceScopes 覆写后只含绑定工作区的任务）里出现的
+ *   {taskId, workspacePath} 对被"学习"进本附件的允许集；
+ * - 任何携带 taskId 的调用（sendPrompt/closeTask/setModel/…）只放行允许集内
+ *   的任务，杜绝凭猜测的 taskId 跨工作区注入 prompt / 读轨迹 / 关任务。
+ * 未学习到就调用 = 拒绝（fail-closed）；UI 的正常路径总是先列表后操作。
+ */
+class TaskScopedChannel implements IServerChannel {
+  private readonly allowedTaskIds = new Set<string>();
+
+  constructor(
+    private readonly upstream: IChannel,
+    private readonly scope: PolicyWorkspaceScope,
+    private readonly logReject: (message: string) => void,
+  ) {}
+
+  private learnFrom(value: unknown): void {
+    walkJson(value, (node) => {
+      const taskId = node.taskId;
+      const workspacePath = node.workspacePath;
+      if (typeof taskId === "string" && taskId !== "" && typeof workspacePath === "string") {
+        if (isUnderWorkspace(workspacePath, this.scope)) {
+          this.allowedTaskIds.add(taskId);
+        }
+      }
+    });
+  }
+
+  private assertTaskAllowed(arg: unknown): void {
+    if (!arg || typeof arg !== "object") return;
+    const taskId = (arg as Record<string, unknown>).taskId;
+    if (typeof taskId !== "string" || taskId === "") return;
+    if (!this.allowedTaskIds.has(taskId)) {
+      this.logReject(`task not in attached workspace: ${taskId.slice(0, 8)}…`);
+      throw new Error("companion facade: task not in attached workspace");
+    }
+  }
+
+  async call<T>(_ctx: unknown, command: string, arg?: unknown): Promise<T> {
+    this.assertTaskAllowed(arg);
+    const result = await this.upstream.call<T>(command, shapeArgsWithScope(arg, this.scope));
+    this.learnFrom(result);
+    return result;
+  }
+
+  listen<T>(_ctx: unknown, event: string, arg?: unknown): Event<T> {
+    const inner = this.upstream.listen<T>(event, shapeArgsWithScope(arg, this.scope));
+    return ((listener: (value: T) => void) =>
+      inner((value: T) => {
+        this.learnFrom(value);
+        listener(value);
+      })) as unknown as Event<T>;
+  }
 }
 
 /** 按裁决生成频道 facade：T0 快速失败；T1 白名单外拒绝；事件面仅 T0 关闭。 */
@@ -190,6 +312,10 @@ export function createPolicyChannel(options: {
       },
     };
   }
+  if (policy.kind === "task-scoped") {
+    return new TaskScopedChannel(upstream, scope, logReject);
+  }
+  const maskResponse = channelName === ServiceChannels.ProviderSettings;
   return {
     async call<T>(_ctx: unknown, command: string, arg?: unknown): Promise<T> {
       if (policy.kind === "allow-calls" && !policy.calls.has(command)) {
@@ -197,7 +323,8 @@ export function createPolicyChannel(options: {
         throw new Error(`companion facade: method not allowed: ${channelName}.${command}`);
       }
       try {
-        return await upstream.call<T>(command, shapeArgsWithScope(arg, scope));
+        const result = await upstream.call<T>(command, shapeArgsWithScope(arg, scope));
+        return maskResponse ? (maskSecrets(result) as T) : result;
       } catch (error) {
         if (error instanceof Error && error.message.includes("path escapes workspace")) {
           logReject(`path escape: ${channelName}.${command}`);
