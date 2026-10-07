@@ -1,7 +1,10 @@
 /* WebUI 远控移动端适配（companion 模式 + ≤767px 视口）。
-   官方行为：手机上就是同一个 WebUI，窄视口下侧栏折叠为可唤起抽屉、
-   会话区全宽（官方 767px 断点 + --web-remote-navigation-height 语义）。
-   本文件只做布局适配，不改变 WebUI 的功能与交互结构。 */
+   官方证据（official-zcode-3.14.4-audit/extract/pretty.js）：移动视口判定为
+   matchMedia("(max-width: 767px)")；窄视口下侧栏以 --web-remote-navigation-height
+   折叠为顶条、配 expandNavigation/collapseNavigation 导航展开按钮。
+   本产品形态差异（自定，非官方复刻）：采用左抽屉而非顶条+居中拖拽手柄——
+   抽屉宽度 min(85vw,20rem)、触控下限 36px、过渡时长等参数均为本产品自定，
+   未声称与官方数值一致。本文件只做布局适配，不改变 WebUI 的功能与交互结构。 */
 
 /* 注入的抽屉开关默认隐藏（桌面/宽视口无适配布局）；仅移动断点内启用。 */
 #companion-nav-btn, #companion-scrim { display: none; }
@@ -99,7 +102,7 @@ html.compact-remote { --companion-statusbar-pad: env(safe-area-inset-top, 0px); 
   html.compact-remote [data-separator],
   html.compact-remote [data-testid="resizable-handle"] { display: none !important; }
 
-  /* 触控目标下限（官方 44px 触控规范） */
+  /* 触控目标下限 36px（本产品自定；官方触控尺寸无 bundle 证据，不冒称官方值） */
   html.compact-remote button { min-height: 36px; }
 }
 
