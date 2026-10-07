@@ -181,6 +181,19 @@ const run = async (): Promise<void> => {
   }
   step(`sessions-index subscribe OK (subscriptionId=${subscribeResult.ack.subscriptionId})`);
 
+  // 6c. 只读任务索引（specs §11.4a）真实链路：手机 → hub（TTL 缓存）→
+  // connector 临时上游 → daemon existing-only 订阅 → 快照摘要回传。
+  const tasks = await Promise.race([
+    client.workspaceTasks({ nodeId: "cloud-smoke", workspaceIdentity: workspaceDir }),
+    new Promise<never>((_resolve, reject) =>
+      setTimeout(() => reject(new Error("workspace-tasks timed out")), 45_000),
+    ),
+  ]);
+  if (!tasks.available || !Array.isArray(tasks.sessions)) {
+    throw new Error(`unexpected workspace-tasks result: ${JSON.stringify(tasks).slice(0, 200)}`);
+  }
+  step(`workspace-tasks OK (${tasks.sessions.length} sessions, available)`);
+
   // 7. 断开 relay（模拟手机断开）→ daemon 必须仍存活
   channel.close();
   await new Promise((resolve) => setTimeout(resolve, 800));
