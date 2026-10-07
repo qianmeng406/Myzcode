@@ -304,6 +304,8 @@ test("节点断开 → attachment 关闭并通知手机", async () => {
   const { mobile, mobileRelay, connectorRelay } = await attachAndJoin(hub);
 
   hub.handleNodeClosed("cloud-1", nodeLink);
+  // 状态广播按 grants 异步过滤后发送：等一拍再断言事件到达。
+  await new Promise((resolve) => setTimeout(resolve, 20));
   // hub 不反向 close 节点链路（ws 已死亡由适配器清理），但 attachment 必须拆除。
   assert.notEqual(mobileRelay.closedCode, null);
   assert.notEqual(connectorRelay.closedCode, null);
@@ -513,4 +515,59 @@ test("未知节点 hello 被拒", async () => {
     kind: "cloud",
   });
   assert.equal(hello.ok, false);
+});
+
+test("catalog 按设备 grants 过滤（未授权节点/工作区不可见）", async () => {
+  const { hub, store } = await makeHub();
+  await store.saveNode({
+    nodeId: "cloud-2",
+    kind: "cloud",
+    displayName: "别的节点",
+    tokenFingerprint: "e".repeat(64),
+    createdAt: 3,
+  });
+  await attachOnlineNode(hub);
+  hub.handleNodeWorkspaces("cloud-1", [
+    WORKSPACE,
+    {
+      nodeId: "",
+      workspacePath: "/srv/secret",
+      workspaceIdentity: "/srv/secret",
+      title: "Secret",
+      available: true,
+    },
+  ]);
+  // 设备只被授予 cloud-1 的 /srv/demo：cloud-2 与 /srv/secret 都不可见。
+  await store.saveGrants({
+    deviceId: "dev-1",
+    nodes: [{ nodeId: "cloud-1", workspaceIdentities: ["/srv/demo"] }],
+  });
+  const mobile = new FakeMobileLink("dev-1");
+  hub.handleMobileOpened(mobile);
+  await hub.handleMobileRequest(mobile, "c9", "catalog", undefined);
+  const response = (await mobile.waitForResponse("c9")) as {
+    ok: boolean;
+    value: { result?: { nodes: Array<{ nodeId: string; workspaces: Array<{ workspacePath: string }> }> } };
+  };
+  assert.ok(response.ok);
+  const nodes = response.value.result!.nodes;
+  assert.equal(nodes.length, 1);
+  assert.equal(nodes[0]!.nodeId, "cloud-1");
+  assert.equal(nodes[0]!.workspaces.length, 1);
+  assert.equal(nodes[0]!.workspaces[0]!.workspacePath, "/srv/demo");
+});
+
+test("grants 收缩 sweep 拆除越权存量 attachment", async () => {
+  const { hub, store } = await makeHub();
+  await attachOnlineNode(hub);
+  const { mobileRelay, connectorRelay } = await attachAndJoin(hub);
+  assert.equal(mobileRelay.closedCode, null);
+  // 授权收缩到别的工作区 → sweep 周期内拆除存量 attachment。
+  await store.saveGrants({
+    deviceId: "dev-1",
+    nodes: [{ nodeId: "cloud-1", workspaceIdentities: ["/srv/other"] }],
+  });
+  await hub.revalidateRevocations();
+  assert.notEqual(mobileRelay.closedCode, null);
+  assert.notEqual(connectorRelay.closedCode, null);
 });

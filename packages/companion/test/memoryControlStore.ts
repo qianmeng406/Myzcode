@@ -6,6 +6,7 @@ import type {
 } from "@zcode/shared/companion-protocol";
 import type { CompanionDeviceGrants } from "../src/domain/grants.js";
 import type {
+  ConsumedPairingCode,
   ControlStore,
   DeviceSecretKind,
   DeviceSecretRecord,
@@ -80,11 +81,14 @@ export class MemoryControlStore implements ControlStore {
     this.pairingCodes.set(record.hash, record);
   }
 
-  async consumePairingCode(hash: string, now: number): Promise<boolean> {
+  async consumePairingCode(hash: string, now: number): Promise<ConsumedPairingCode | null> {
     const record = this.pairingCodes.get(hash);
-    if (!record || record.usedAt !== null || record.expiresAt <= now) return false;
+    if (!record || record.usedAt !== null || record.expiresAt <= now) return null;
     this.pairingCodes.set(hash, { ...record, usedAt: now });
-    return true;
+    return {
+      issuedByNodeId: record.issuedByNodeId ?? null,
+      scopeWorkspaceIdentities: record.scopeWorkspaceIdentities ?? null,
+    };
   }
 
   async getGrants(deviceId: string): Promise<CompanionDeviceGrants | null> {

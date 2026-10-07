@@ -54,7 +54,12 @@ export class CompanionPairingService {
     },
   ) {}
 
-  async createPairingCode(): Promise<IssuedPairingCode> {
+  async createPairingCode(options?: {
+    /** 节点令牌签发：码只授予该节点（桌面节点不得给云节点发邀请）。 */
+    issuedByNodeId?: string;
+    /** 节点签发时声明的工作区范围；缺省 = 该节点全部共享工作区。 */
+    scopeWorkspaceIdentities?: string[];
+  }): Promise<IssuedPairingCode> {
     const code = String(this.deps.secrets.randomInt(10 ** PAIRING_CODE_DIGITS)).padStart(
       PAIRING_CODE_DIGITS,
       "0",
@@ -64,8 +69,14 @@ export class CompanionPairingService {
       hash: this.deps.secrets.sha256Hex(code),
       expiresAt,
       usedAt: null,
+      issuedByNodeId: options?.issuedByNodeId ?? null,
+      scopeWorkspaceIdentities:
+        options?.scopeWorkspaceIdentities === undefined ? null : [...options.scopeWorkspaceIdentities],
     });
-    this.deps.logger.info("companion pairing code issued");
+    this.deps.logger.info("companion pairing code issued", {
+      ...(options?.issuedByNodeId ? { nodeId: options.issuedByNodeId } : {}),
+      scopeCount: options?.scopeWorkspaceIdentities?.length ?? "all",
+    });
     return { code, expiresAt };
   }
 
@@ -88,17 +99,26 @@ export class CompanionPairingService {
       createdAt: now,
     };
     await this.deps.store.saveDevice(device);
-    // 个人使用默认授权：允许访问当前已登记且未撤销的全部节点（空白名单 = 全部工作区）。
-    const nodes = (await this.deps.store.listNodes()).filter(
-      (node: CompanionNodeRecord) => node.revokedAt === undefined,
-    );
-    const grants: CompanionDeviceGrants = {
-      deviceId: device.deviceId,
-      nodes: nodes.map((node) => ({ nodeId: node.nodeId, workspaceIdentities: [] })),
-    };
+    // 授权按码的签发绑定落成精确 grants：
+    //  - 节点令牌签发的码 → 只授予该节点（+声明的工作区范围）；
+    //  - owner 在 gateway 主机签发的码 → 全部已登记且未撤销节点（空白名单 = 全部工作区）。
+    const grantedNodes: CompanionDeviceGrants["nodes"] = consumed.issuedByNodeId
+      ? [
+          {
+            nodeId: consumed.issuedByNodeId,
+            workspaceIdentities: consumed.scopeWorkspaceIdentities ?? [],
+          },
+        ]
+      : (await this.deps.store.listNodes())
+          .filter((node: CompanionNodeRecord) => node.revokedAt === undefined)
+          .map((node) => ({ nodeId: node.nodeId, workspaceIdentities: [] }));
+    const grants: CompanionDeviceGrants = { deviceId: device.deviceId, nodes: grantedNodes };
     await this.deps.store.saveGrants(grants);
     const issued = await this.issueSecrets(device.deviceId);
-    this.deps.logger.info("companion device paired", { deviceId: device.deviceId });
+    this.deps.logger.info("companion device paired", {
+      deviceId: device.deviceId,
+      grantedNodes: grantedNodes.length,
+    });
     return { device, ...issued };
   }
 

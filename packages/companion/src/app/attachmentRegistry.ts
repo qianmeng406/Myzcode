@@ -11,6 +11,8 @@ export interface PendingAttachmentSpec {
   attachmentId: string;
   nodeId: string;
   deviceId: string;
+  /** attach 绑定的工作区身份（grants 收缩 sweep 用）。 */
+  workspaceIdentity: string;
   capabilityMobile: string;
   capabilityConnector: string;
 }
@@ -25,6 +27,7 @@ interface ActiveAttachment {
   attachmentId: string;
   nodeId: string;
   deviceId: string;
+  workspaceIdentity: string;
   capabilityMobile: string;
   capabilityConnector: string;
   relay: ReturnType<typeof bindRelayPair> | null;
@@ -71,6 +74,21 @@ export class AttachmentRegistry {
   /** attachment 归属的控制链路（新连接接管判定用）。 */
   mobileLinkOf(attachmentId: string): MobileLink | null {
     return this.mobileByAttachment.get(attachmentId) ?? null;
+  }
+
+  /** 活跃 attachment 快照（grants 收缩 sweep 用；不暴露内部可变结构）。 */
+  activeEntries(): ReadonlyArray<{
+    attachmentId: string;
+    deviceId: string;
+    nodeId: string;
+    workspaceIdentity: string;
+  }> {
+    return Array.from(this.active.values()).map((attachment) => ({
+      attachmentId: attachment.attachmentId,
+      deviceId: attachment.deviceId,
+      nodeId: attachment.nodeId,
+      workspaceIdentity: attachment.workspaceIdentity,
+    }));
   }
 
   findPendingByDevice(deviceId: string): PendingAttachmentSpec | null {
@@ -136,6 +154,7 @@ export class AttachmentRegistry {
       attachmentId: pending.attachmentId,
       nodeId: pending.nodeId,
       deviceId: pending.deviceId,
+      workspaceIdentity: pending.workspaceIdentity,
       capabilityMobile: pending.capabilityMobile,
       capabilityConnector: pending.capabilityConnector,
       relay: null,

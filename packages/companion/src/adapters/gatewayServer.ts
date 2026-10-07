@@ -22,19 +22,15 @@ import { CompanionPairingService } from "../app/pairing.js";
 import { NodeSecretBox, systemClock } from "./secrets.js";
 import { SqliteControlStore } from "./sqliteControlStore.js";
 import { attachRelaySocket, createMobileLink, createNodeLink } from "./wsLinks.js";
+import { registerPairingHttpRoutes } from "./httpPairingRoutes.js";
 import {
   CONTROL_FRAME_MAX_BYTES,
   createPairRateLimiter,
-  isSecureRequest,
   buildOriginChecker,
   readAuthAccessToken,
-  readCookie,
   readNodeToken,
-  refreshCookieHeader,
-  resolveClientSourceKey,
 } from "./httpGuards.js";
 
-const REFRESH_COOKIE = "zc_comp_rt";
 const FIRST_AUTH_TIMEOUT_MS = 10_000;
 /** CSRF 防线：跨站表单无法携带自定义头；POST 控制端点必须携带（spec §6）。 */
 /** /companion/pair 默认限速：15 分钟窗口 10 次/来源，防配对码在线爆破。 */
@@ -116,88 +112,15 @@ export async function startCompanionGatewayServer(
     c.json({ ok: true, version: COMPANION_PROTOCOL_VERSION, time: Date.now() }),
   );
 
-  app.post("/companion/pair", requireCsrf, async (c) => {
-    // 限速在 CSRF 之后、业务之前：无有效 CSRF 的请求同样计数（都不该出现）。
-    // 来源键取可信代理写入的覆盖式头（X-Real-IP 由 nginx 用 $remote_addr 覆盖，
-    // 客户端伪造无效）；退化链：XFF 最后一跳（追加语义下右端最可信）→ socket
-    // 对端地址。绝不能取 XFF 第一跳——那是客户端可随意伪造的值，会让限速失效。
-    const sourceKey = resolveClientSourceKey(c);
-    if (!allowPairAttempt(sourceKey, Date.now())) {
-      logger.warn("companion pair rate limited", { sourceKey });
-      return c.json({ error: { code: "rate_limited", message: "too many pairing attempts" } }, 429);
-    }
-    const body = (await c.req.json().catch(() => null)) as
-      | { deviceName?: unknown; code?: unknown }
-      | null;
-    if (typeof body?.deviceName !== "string" || typeof body?.code !== "string") {
-      return c.json({ error: { code: "bad_request", message: "deviceName and code required" } }, 400);
-    }
-    try {
-      const result = await pairing.pairDevice(body.deviceName, body.code);
-      c.header(
-        "Set-Cookie",
-        refreshCookieHeader(result.refreshToken, 365 * 24 * 60 * 60, isSecureRequest(c, trustForwardedProto)),
-      );
-      return c.json({
-        deviceId: result.device.deviceId,
-        deviceName: result.device.deviceName,
-        accessToken: result.accessToken,
-        accessExpiresAt: result.accessExpiresAt,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "pairing failed";
-      const code = error instanceof Error && "code" in error ? String((error as { code: unknown }).code) : "bad_request";
-      return c.json({ error: { code, message } }, 400);
-    }
-  });
-
-  // 节点侧配对码签发：桌面连接器用节点令牌（Bearer）为用户索取 6 位配对码，
-  // 免去在桌面 UI 手工保管/粘贴令牌。令牌只比对 sha256 指纹，日志不落明文。
-  app.post("/companion/nodes/pair-code", requireCsrf, async (c) => {
-    const authorization = c.req.header("authorization") ?? "";
-    const rawToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
-    if (rawToken === "") {
-      return c.json({ error: { code: "unauthorized", message: "missing node token" } }, 401);
-    }
-    const fingerprint = secrets.sha256Hex(rawToken);
-    const nodes = await store.listNodes();
-    const node = nodes.find(
-      (candidate) => candidate.tokenFingerprint === fingerprint && candidate.revokedAt === undefined,
-    );
-    if (!node) {
-      logger.warn("companion node pair-code rejected", { fingerprint });
-      return c.json({ error: { code: "unauthorized", message: "node token rejected" } }, 401);
-    }
-    const issued = await pairing.createPairingCode();
-    logger.info("companion node pair-code issued", { nodeId: node.nodeId });
-    return c.json({
-      code: issued.code,
-      expiresAt: issued.expiresAt,
-      nodeId: node.nodeId,
-      displayName: node.displayName,
-    });
-  });
-
-  app.post("/companion/refresh", requireCsrf, async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { refreshToken?: unknown };
-    const cookieToken = readCookie(c.req.header("cookie"), REFRESH_COOKIE);
-    const rawToken = typeof body.refreshToken === "string" ? body.refreshToken : cookieToken ?? "";
-    if (!rawToken) {
-      return c.json({ error: { code: "unauthorized", message: "missing refresh token" } }, 401);
-    }
-    const result = await pairing.refreshAccess(rawToken);
-    if (!result.ok) {
-      return c.json({ error: { code: "unauthorized", message: "refresh rejected" } }, 401);
-    }
-    c.header(
-      "Set-Cookie",
-      refreshCookieHeader(result.refreshToken, 365 * 24 * 60 * 60, isSecureRequest(c, trustForwardedProto)),
-    );
-    return c.json({
-      deviceId: result.deviceId,
-      accessToken: result.accessToken,
-      accessExpiresAt: result.accessExpiresAt,
-    });
+  registerPairingHttpRoutes({
+    app,
+    pairing,
+    store,
+    secrets,
+    logger,
+    requireCsrf,
+    trustForwardedProto,
+    allowPairAttempt,
   });
 
   // 手机控制面 WS：首帧 = {op:"auth", params:{accessToken}}，失败即关闭。

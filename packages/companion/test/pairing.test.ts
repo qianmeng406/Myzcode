@@ -98,10 +98,19 @@ test("SQLite 存储与内存语义一致（真实文件落盘）", async () => {
       createdAt: 2,
     });
     await store.saveGrants({ deviceId: "dev-1", nodes: [{ nodeId: "cloud-1", workspaceIdentities: [] }] });
-    await store.putPairingCode({ hash: "h1", expiresAt: 100, usedAt: null });
-    assert.equal(await store.consumePairingCode("h1", 50), true);
-    assert.equal(await store.consumePairingCode("h1", 51), false);
-    assert.equal(await store.consumePairingCode("h1", 50), false);
+    await store.putPairingCode({
+      hash: "h1",
+      expiresAt: 100,
+      usedAt: null,
+      issuedByNodeId: null,
+      scopeWorkspaceIdentities: null,
+    });
+    assert.deepEqual(await store.consumePairingCode("h1", 50), {
+      issuedByNodeId: null,
+      scopeWorkspaceIdentities: null,
+    });
+    assert.equal(await store.consumePairingCode("h1", 51), null);
+    assert.equal(await store.consumePairingCode("h1", 50), null);
     await store.putSecret({ deviceId: "dev-1", kind: "access", hash: "ah", expiresAt: 999 });
     assert.equal((await store.listSecrets("dev-1", "access")).length, 1);
     await store.deleteSecret("dev-1", "access", "ah");
@@ -148,4 +157,43 @@ test("refresh 并发重放：原子轮换下只有一个赢家", async () => {
     assert.ok(next.ok);
   }
   assert.equal((await pairing.refreshAccess(paired.refreshToken)).ok, false);
+});
+
+test("节点签发的配对码只授予该节点（含工作区范围）", async () => {
+  const store = new MemoryControlStore();
+  const secrets = new NodeSecretBox();
+  const pairing = new CompanionPairingService({
+    store,
+    secrets,
+    clock: { now: () => 1_000_000 },
+    logger: noopLogger,
+  });
+  await store.saveNode({ nodeId: "desktop-1", kind: "desktop", displayName: "家里电脑", tokenFingerprint: "fp-d", createdAt: 1 });
+  await store.saveNode({ nodeId: "cloud-1", kind: "cloud", displayName: "云端", tokenFingerprint: "fp-c", createdAt: 2 });
+
+  // 节点签发 + 声明工作区范围：grants 精确到该节点该范围，云节点不可见。
+  const scoped = await pairing.createPairingCode({
+    issuedByNodeId: "desktop-1",
+    scopeWorkspaceIdentities: ["/srv/ws-a"],
+  });
+  const scopedPairing = await pairing.pairDevice("手机A", scoped.code);
+  const scopedGrants = await store.getGrants(scopedPairing.device.deviceId);
+  assert.deepEqual(scopedGrants?.nodes, [
+    { nodeId: "desktop-1", workspaceIdentities: ["/srv/ws-a"] },
+  ]);
+
+  // 节点签发、未声明范围：该节点全部共享工作区（空 = all-shared），但不含其他节点。
+  const unscoped = await pairing.createPairingCode({ issuedByNodeId: "desktop-1" });
+  const unscopedPairing = await pairing.pairDevice("手机B", unscoped.code);
+  const unscopedGrants = await store.getGrants(unscopedPairing.device.deviceId);
+  assert.deepEqual(unscopedGrants?.nodes, [{ nodeId: "desktop-1", workspaceIdentities: [] }]);
+
+  // owner（gateway 主机）签发：全部已登记未撤销节点。
+  const ownerIssued = await pairing.createPairingCode();
+  const ownerPairing = await pairing.pairDevice("手机C", ownerIssued.code);
+  const ownerGrants = await store.getGrants(ownerPairing.device.deviceId);
+  assert.deepEqual(
+    ownerGrants?.nodes.map((entry) => entry.nodeId).sort(),
+    ["cloud-1", "desktop-1"],
+  );
 });

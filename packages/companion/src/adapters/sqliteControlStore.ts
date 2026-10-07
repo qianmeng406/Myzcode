@@ -7,6 +7,7 @@ import type {
 } from "@zcode/shared/companion-protocol";
 import type { CompanionDeviceGrants } from "../domain/grants.js";
 import type {
+  ConsumedPairingCode,
   ControlStore,
   DeviceSecretKind,
   DeviceSecretRecord,
@@ -38,7 +39,9 @@ CREATE TABLE IF NOT EXISTS nodes (
 CREATE TABLE IF NOT EXISTS pairing_codes (
   hash TEXT PRIMARY KEY,
   expires_at INTEGER NOT NULL,
-  used_at INTEGER
+  used_at INTEGER,
+  issued_by_node_id TEXT,
+  scope_workspace_identities TEXT
 );
 CREATE TABLE IF NOT EXISTS device_grants (
   device_id TEXT PRIMARY KEY,
@@ -53,6 +56,19 @@ export class SqliteControlStore implements ControlStore {
     this.db = new DatabaseSync(dbPath);
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec(SCHEMA);
+    this.migratePairingCodeBinding();
+  }
+
+  /** 既有库升级：pairing_codes 补签发绑定两列（CREATE IF NOT EXISTS 不会改旧表）。 */
+  private migratePairingCodeBinding(): void {
+    const columns = this.db.prepare("PRAGMA table_info(pairing_codes)").all() as Array<{ name: string }>;
+    const names = new Set(columns.map((column) => column.name));
+    if (!names.has("issued_by_node_id")) {
+      this.db.exec("ALTER TABLE pairing_codes ADD COLUMN issued_by_node_id TEXT");
+    }
+    if (!names.has("scope_workspace_identities")) {
+      this.db.exec("ALTER TABLE pairing_codes ADD COLUMN scope_workspace_identities TEXT");
+    }
   }
 
   async listDevices(): Promise<CompanionDeviceRecord[]> {
@@ -202,20 +218,39 @@ export class SqliteControlStore implements ControlStore {
 
   async putPairingCode(record: PairingCodeRecord): Promise<void> {
     this.db
-      .prepare("INSERT OR REPLACE INTO pairing_codes (hash, expires_at, used_at) VALUES (?, ?, ?)")
-      .run(record.hash, record.expiresAt, record.usedAt);
+      .prepare(
+        "INSERT OR REPLACE INTO pairing_codes (hash, expires_at, used_at, issued_by_node_id, scope_workspace_identities) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(
+        record.hash,
+        record.expiresAt,
+        record.usedAt,
+        record.issuedByNodeId,
+        record.scopeWorkspaceIdentities === null ? null : JSON.stringify(record.scopeWorkspaceIdentities),
+      );
   }
 
-  async consumePairingCode(hash: string, now: number): Promise<boolean> {
+  async consumePairingCode(hash: string, now: number): Promise<ConsumedPairingCode | null> {
     const row = this.db
-      .prepare("SELECT expires_at, used_at FROM pairing_codes WHERE hash = ?")
-      .get(hash) as { expires_at: number; used_at: number | null } | undefined;
-    if (!row) return false;
-    if (row.used_at !== null || row.expires_at <= now) return false;
+      .prepare(
+        "SELECT expires_at, used_at, issued_by_node_id, scope_workspace_identities FROM pairing_codes WHERE hash = ?",
+      )
+      .get(hash) as
+      | { expires_at: number; used_at: number | null; issued_by_node_id: string | null; scope_workspace_identities: string | null }
+      | undefined;
+    if (!row) return null;
+    if (row.used_at !== null || row.expires_at <= now) return null;
     const result = this.db
       .prepare("UPDATE pairing_codes SET used_at = ? WHERE hash = ? AND used_at IS NULL")
       .run(now, hash);
-    return Number(result.changes) === 1;
+    if (Number(result.changes) !== 1) return null;
+    return {
+      issuedByNodeId: row.issued_by_node_id,
+      scopeWorkspaceIdentities:
+        row.scope_workspace_identities === null
+          ? null
+          : (JSON.parse(row.scope_workspace_identities) as string[]),
+    };
   }
 
   async getGrants(deviceId: string): Promise<CompanionDeviceGrants | null> {

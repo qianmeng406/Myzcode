@@ -81,6 +81,10 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 
 - 管理边界（如实）：管理操作（登记节点、生成配对码、撤销设备/节点）以 control.db 所在主机的文件系统访问权为信任边界——通过捆绑 CLI（与 serve 共库）执行；无独立 owner 凭据/管理端口。
 - 配对码签发（三条途径）：① 服务器 CLI `pair-code`；② serve 进程内 owner port；③ `POST /companion/nodes/pair-code`（Bearer 节点令牌鉴权 + CSRF 头）——桌面连接器用已登记令牌为本机索取配对码，**持有节点令牌即拥有该节点的配对码签发权，撤销节点即收回**。
+- 配对码签发绑定（grants 落成依据）：码在存储层携带签发者绑定——①②（owner 在 gateway 主机签发）授予**全部已登记且未撤销节点**（工作区空白名单 = 该节点全部共享工作区）；③（节点令牌签发）**只授予该节点**，body 可声明 `workspaceIdentities`（桌面 UI 传当前勾选共享的工作区）进一步收窄。桌面节点令牌不能给云节点发邀请。
+- 目录可见性：`catalog` 与 `nodeStatus` 事件按设备 grants 过滤——未授权节点/工作区对设备不可见（存在性不泄露）；attach 时刻另有独立裁决。
+- grants 收缩：attach 时刻即时裁决；存量 attachment 由吊销复查 sweep（≤60s）按 `decideDeviceWorkspaceAccess` 复查，越权即以 `grants_shrunk` 拆除。
+- 桌面节点令牌落盘：优先 OS 凭证保护（electron safeStorage：DPAPI/Keychain/libsecret，`enc:v1:` 前缀密文）；不可用时保持 0600 明文 JSON，不阻塞功能。启动时对明文令牌做一次性升级迁移。
 - 配对：一次性短时配对码 → 手机手输 6 位码 + 设备名 → 签发设备凭证（长期 refresh + 短时 access）。配对码 15 分钟有效、单次使用；`/companion/pair` 每来源限速（15 分钟 10 次），来源键取覆盖式 `X-Real-IP`（nginx 必须以 `$remote_addr` 覆盖写入，禁止 `$proxy_add_x_forwarded_for` 追加语义——XFF 第一跳客户端可伪造）。
 - 手机凭证：浏览器 HttpOnly Cookie（`Path=/companion`，SameSite=Lax，Secure 生产强制）；Capacitor WebView 用 Bearer（access 短时轮换）。长期 refresh 不落 JS 可读存储（Cookie 承载）；Capacitor 端 12h access token 允许落 localStorage 作恢复回退（已接受的折中，服务端可即时撤销）。
 - 校验顺序（每个连接与每个请求）：设备凭证有效性 → 设备未撤销 → 目标节点/工作区在该设备授权范围内 → attachment 代次匹配。

@@ -41,6 +41,7 @@ import {
   nativeImage,
   net,
   protocol,
+  safeStorage,
   session,
   webContents,
 } from "electron";
@@ -197,9 +198,41 @@ import {
 import {
   loadCompanionConfig,
   saveCompanionConfig,
+  upgradeCompanionConfigTokenStorage,
+  type CompanionTokenCipher,
   type DesktopCompanionConfig,
 } from "./companion/companionConfig.js";
 import { requestCompanionPairingCode } from "./companion/desktopPairing.js";
+
+/**
+ * 节点令牌落盘保护：electron safeStorage（Windows DPAPI / macOS Keychain /
+ * Linux libsecret）。不可用（如 Linux 无 keyring）时保持 0600 明文 JSON，
+ * 不阻塞桌面直连功能。惰性初始化：safeStorage 在 app ready 前不可用，
+ * 模块加载期调用会抛错，不能缓存成永久 null。
+ */
+let companionTokenCipherCache: CompanionTokenCipher | null | undefined;
+function companionTokenCipher(): CompanionTokenCipher | null {
+  if (companionTokenCipherCache !== undefined) return companionTokenCipherCache;
+  try {
+    if (!safeStorage.isEncryptionAvailable()) {
+      companionTokenCipherCache = null;
+      return null;
+    }
+    companionTokenCipherCache = {
+      encrypt: (plain: string) => `enc:v1:${safeStorage.encryptString(plain).toString("base64")}`,
+      decrypt: (payload: string) => {
+        try {
+          return safeStorage.decryptString(Buffer.from(payload.slice("enc:v1:".length), "base64"));
+        } catch {
+          return null;
+        }
+      },
+    };
+  } catch {
+    companionTokenCipherCache = null;
+  }
+  return companionTokenCipherCache;
+}
 import {
   reportRemoteConnectionStateChangedToArms,
   reportRemoteDisconnectToArms,
@@ -888,7 +921,7 @@ async function applyCompanionConfig(next: DesktopCompanionConfig): Promise<void>
   cancelCompanionReconnect();
   await companionConnector?.stop().catch(() => undefined);
   companionConnector = null;
-  await saveCompanionConfig(app.getPath("userData"), next);
+  await saveCompanionConfig(app.getPath("userData"), next, companionTokenCipher());
   companionConfigRef = next;
   if (!next.enabled || next.gatewayUrl.trim() === "" || next.nodeToken.trim() === "") {
     return;
@@ -2118,8 +2151,13 @@ app.whenReady().then(async () => {
 
   // My zcode 桌面直连：启用过则启动时自动重连 gateway（连接失败不阻塞启动）。
   try {
-    const persistedCompanionConfig = await loadCompanionConfig(app.getPath("userData"));
+    const persistedCompanionConfig = await loadCompanionConfig(
+      app.getPath("userData"),
+      companionTokenCipher(),
+    );
     companionConfigCache = persistedCompanionConfig;
+    // 明文令牌一次性升级为 OS 凭证保护（DPAPI/Keychain）；失败不阻塞启动。
+    await upgradeCompanionConfigTokenStorage(app.getPath("userData"), companionTokenCipher());
     if (
       persistedCompanionConfig.enabled &&
       persistedCompanionConfig.gatewayUrl.trim() !== "" &&
@@ -2241,7 +2279,7 @@ app.whenReady().then(async () => {
     logger,
     companionHandlers: {
       getConfig: async () => {
-        const config = await loadCompanionConfig(app.getPath("userData"));
+        const config = await loadCompanionConfig(app.getPath("userData"), companionTokenCipher());
         companionConfigCache = config;
         return {
           enabled: config.enabled,
@@ -2251,7 +2289,7 @@ app.whenReady().then(async () => {
         };
       },
       setConfig: async (input) => {
-        const current = await loadCompanionConfig(app.getPath("userData"));
+        const current = await loadCompanionConfig(app.getPath("userData"), companionTokenCipher());
         await applyCompanionConfig({
           enabled: input.enabled,
           gatewayUrl: input.gatewayUrl,
@@ -2261,10 +2299,15 @@ app.whenReady().then(async () => {
         });
       },
       requestPairingCode: async () => {
-        const config = companionConfigCache ?? (await loadCompanionConfig(app.getPath("userData")));
+        const config =
+          companionConfigCache ?? (await loadCompanionConfig(app.getPath("userData"), companionTokenCipher()));
         const issued = await requestCompanionPairingCode({
           gatewayUrl: config.gatewayUrl,
           nodeToken: config.nodeToken,
+          // 码绑定当前共享范围：配对后的设备 grants 精确到此刻勾选的工作区。
+          ...(config.allowedWorkspaces.length > 0
+            ? { scopeWorkspaceIdentities: config.allowedWorkspaces }
+            : {}),
         });
         return {
           code: issued.code,

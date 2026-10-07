@@ -14,6 +14,9 @@ import {
   type CompanionWorkspaceEntry,
 } from "@zcode/shared/companion-protocol";
 import { canCreateAttachment, decideDeviceWorkspaceAccess } from "../domain/grants.js";
+import type { CompanionDeviceGrants } from "../domain/grants.js";
+import { runRevocationSweep } from "./revocationSweep.js";
+import { buildDeviceCatalog } from "./catalogView.js";
 import { AttachmentRegistry } from "./attachmentRegistry.js";
 import type {
   GatewayDefaults,
@@ -120,31 +123,17 @@ export class CompanionHub {
     }
   }
 
-  /** 周期性吊销复查：关闭已撤销设备/节点的在线链路（CLI 撤销跨进程生效）。 */
+  /** 周期性吊销复查：关闭已撤销设备/节点的在线链路并拆除越权 attachment（CLI 撤销跨进程生效）。 */
   async revalidateRevocations(): Promise<void> {
     if (this.stopped) return;
-    try {
-      const devices = await this.deps.store.listDevices();
-      const revokedDevices = new Set(
-        devices.filter((device) => device.revokedAt !== undefined).map((device) => device.deviceId),
-      );
-      for (const link of Array.from(this.mobileLinks)) {
-        if (revokedDevices.has(link.deviceId)) {
-          this.closeDeviceConnections(link.deviceId);
-        }
-      }
-      const nodes = await this.deps.store.listNodes();
-      for (const record of nodes) {
-        if (record.revokedAt !== undefined && this.nodeLinks.has(record.nodeId)) {
-          this.deps.logger.warn("companion node revoked while online", { nodeId: record.nodeId });
-          this.closeNodeConnections(record.nodeId);
-        }
-      }
-    } catch (error) {
-      this.deps.logger.warn("revocation sweep failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    await runRevocationSweep({
+      store: this.deps.store,
+      registry: this.registry,
+      mobileLinks: this.mobileLinks,
+      logger: this.deps.logger,
+      closeDeviceConnections: (deviceId) => this.closeDeviceConnections(deviceId),
+      closeNodeConnections: (nodeId) => this.closeNodeConnections(nodeId),
+    });
   }
 
   // ── 手机侧 ──
@@ -176,7 +165,9 @@ export class CompanionHub {
   ): Promise<void> {
     try {
       if (op === "catalog") {
-        link.respond(id, { ok: true, result: await this.buildCatalog() });
+        // 目录按设备 grants 过滤：未授权节点/工作区对设备不可见（存在性不泄露）。
+        const grants = await this.deps.store.getGrants(link.deviceId);
+        link.respond(id, { ok: true, result: await this.buildCatalog(grants) });
         return;
       }
       if (op === "attach") {
@@ -288,6 +279,7 @@ export class CompanionHub {
         attachmentId,
         nodeId: params.nodeId,
         deviceId: link.deviceId,
+        workspaceIdentity: params.workspaceIdentity,
         capabilityMobile,
         capabilityConnector,
       },
@@ -336,6 +328,7 @@ export class CompanionHub {
         attachmentId,
         nodeId: params.nodeId,
         deviceId: link.deviceId,
+        workspaceIdentity: params.workspaceIdentity,
         capabilityMobile,
         capabilityConnector,
       },
@@ -366,18 +359,14 @@ export class CompanionHub {
     link.respond(id, { ok: true });
   }
 
-  private async buildCatalog(): Promise<CompanionCatalogResult> {
-    const nodeRecords = await this.deps.store.listNodes();
-    const nodes = nodeRecords
-      .filter((record) => record.revokedAt === undefined)
-      .map((record) => ({
-        nodeId: record.nodeId,
-        kind: record.kind,
-        displayName: this.nodeDisplayNames.get(record.nodeId) ?? record.displayName,
-        online: this.nodeLinks.has(record.nodeId),
-        workspaces: this.nodeWorkspaces.get(record.nodeId) ?? [],
-      }));
-    return { nodes };
+  private async buildCatalog(grants: CompanionDeviceGrants | null): Promise<CompanionCatalogResult> {
+    return buildDeviceCatalog({
+      records: await this.deps.store.listNodes(),
+      grants,
+      nodeDisplayNames: this.nodeDisplayNames,
+      onlineNodeIds: this.nodeLinks,
+      nodeWorkspaces: this.nodeWorkspaces,
+    });
   }
 
   private broadcastNodeStatus(nodeId: string, online: boolean): void {
@@ -386,8 +375,17 @@ export class CompanionHub {
       event: "nodeStatus",
       payload: { nodeId, online },
     };
-    for (const link of this.mobileLinks) {
-      link.sendEvent(event);
-    }
+    // 逐链路按 grants 过滤：未授权节点不向设备广播（存在性不泄露）。
+    void (async () => {
+      for (const link of Array.from(this.mobileLinks)) {
+        try {
+          const grants = await this.deps.store.getGrants(link.deviceId);
+          if (!grants?.nodes.some((entry) => entry.nodeId === nodeId)) continue;
+        } catch {
+          // grants 读取失败按可见处理：状态是只读展示面，attach 仍有独立裁决。
+        }
+        link.sendEvent(event);
+      }
+    })();
   }
 }

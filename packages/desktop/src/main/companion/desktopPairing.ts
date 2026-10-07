@@ -21,6 +21,8 @@ export function gatewayHttpBase(gatewayUrl: string): string {
 export async function requestCompanionPairingCode(options: {
   gatewayUrl: string;
   nodeToken: string;
+  /** 当前勾选共享的工作区身份；随码声明范围，配对后的 grants 精确到此列表。 */
+  scopeWorkspaceIdentities?: string[];
   fetchImpl?: typeof fetch;
 }): Promise<CompanionPairingCode> {
   const base = gatewayHttpBase(options.gatewayUrl);
@@ -28,10 +30,19 @@ export async function requestCompanionPairingCode(options: {
     throw new Error("桌面直连未配置");
   }
   const doFetch = options.fetchImpl ?? fetch;
-  const response = await doFetch(`${base}/companion/nodes/pair-code`, {
-    method: "POST",
-    headers: { ...CSRF_HEADERS, authorization: `Bearer ${options.nodeToken}` },
-  });
+  const headers: Record<string, string> = {
+    ...CSRF_HEADERS,
+    authorization: `Bearer ${options.nodeToken}`,
+  };
+  const init: RequestInit = { method: "POST", headers };
+  if (options.scopeWorkspaceIdentities) {
+    // 随码声明共享范围：配对后的 grants 精确到当前勾选的工作区。
+    headers["content-type"] = "application/json";
+    init.body = JSON.stringify({
+      workspaceIdentities: options.scopeWorkspaceIdentities.slice(0, 32),
+    });
+  }
+  const response = await doFetch(`${base}/companion/nodes/pair-code`, init);
   const body = (await response.json().catch(() => null)) as
     | {
         code?: unknown;

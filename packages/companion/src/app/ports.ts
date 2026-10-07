@@ -36,6 +36,19 @@ export interface PairingCodeRecord {
   hash: string;
   expiresAt: number;
   usedAt: number | null;
+  /**
+   * 签发者绑定：节点令牌签发的码只授予该节点（桌面节点不得给云节点发邀请）；
+   * null = owner 在 gateway 主机签发，授予全部已登记且未撤销节点。
+   */
+  issuedByNodeId: string | null;
+  /** 节点签发时声明的工作区范围；null/空 = 该节点全部共享工作区。 */
+  scopeWorkspaceIdentities: string[] | null;
+}
+
+/** 配对码消费结果：携带签发绑定，供 pairDevice 落成精确 grants。 */
+export interface ConsumedPairingCode {
+  issuedByNodeId: string | null;
+  scopeWorkspaceIdentities: string[] | null;
 }
 
 /**
@@ -61,8 +74,8 @@ export interface ControlStore {
   deleteSecrets(deviceId: string): Promise<void>;
 
   putPairingCode(record: PairingCodeRecord): Promise<void>;
-  /** 单次消费：命中未过期未使用码时置 usedAt 并返回 true。 */
-  consumePairingCode(hash: string, now: number): Promise<boolean>;
+  /** 单次消费：命中未过期未使用码时置 usedAt 并返回签发绑定；否则 null。 */
+  consumePairingCode(hash: string, now: number): Promise<ConsumedPairingCode | null>;
 
   getGrants(deviceId: string): Promise<CompanionDeviceGrants | null>;
   saveGrants(grants: CompanionDeviceGrants): Promise<void>;
