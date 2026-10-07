@@ -8,7 +8,9 @@
     "preview": "vite preview",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "sync:android": "pnpm --filter @zcode/web run build && vite build && npx cap copy android && node scripts/copy-webui.mjs",
+    "apk:debug": "pnpm run sync:android && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
     "@capacitor/android": "^7.6.9",

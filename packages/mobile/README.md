@@ -33,16 +33,36 @@
 ## 构建与安装
 
 ```bash
-# 网页产物
-pnpm build
-# 同步进 Android 壳
-npx cap copy android
-# 调试 APK（需 JDK 17 + Android SDK；gradle-wrapper 镜像已指向腾讯源）
-cd android && ./gradlew assembleDebug
+# 一键同步（构建 web 完整 UI + 轻量页 → cap copy → 拷 webui 进 assets）
+pnpm sync:android
+# 打 debug APK（需 JAVA_HOME 指向 JDK 21+，如 Android Studio 自带 JBR）
+export JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
+pnpm apk:debug
 # 产物：android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+发布链顺序约束：`cap copy` 会重建 assets/public，`copy-webui.mjs`（完整 UI →
+`assets/public/webui/`）必须在其后执行——`sync:android` 已按此顺序串联，
+不要单独手动跑 `cap copy` 后直接打包（会丢失完整 UI 资源）。
+
 正式签名（release）需要签名密钥；未配置签名前的调试包即可完成配对与功能验收。
+
+## 真机验收清单（阶段一 A6，待执行）
+
+自动化（companion/desktop/mobile 单测 + companion-smoke）之外，以下场景必须在
+真实 Electron 桌面包 + Android 真机 APK 上验收并留证（录屏/截图 + 脱敏日志）：
+
+1. 配对：桌面弹窗取码（含共享范围绑定）→ 真机扫码/手输 → 目录只见授权工作区。
+2. 导航：多工作区选择、完整 UI 选择屏记住目标、轻量/完整往返、Android 返回键。
+3. 任务闭环：手机创建任务 → 桌面执行 → 手机连续流式渲染；跟进/停止/模式切换。
+4. 交互：permission（含伴随反馈文本）、纯 freeText、AskUserQuestion 多题、
+   计划批准/拒绝；双端同时处理只生效一次，迟到端显示已处理。
+5. 文件：turnHeader 文件变更卡展开 unified diff；reverted 标注；无任何写入口。
+6. 断线恢复：Wi-Fi↔移动网络切换、锁屏/后台恢复、force-stop 重启、网关重启、
+   桌面暂离线——自动重连 → re-attach → 会话恢复原位；12h access 过期静默刷新。
+7. 安全：撤销设备/收缩共享即时失效；未授权工作区不可见不可 attach；越权请求
+   被拒（负向用例）；凭据不出现在 URL/日志/备份。
+8. 体验：360–430px 布局、深浅主题、横竖屏、安全区、中文输入法、长文本/大 diff。
 
 ## 安全边界（如实说明）
 
