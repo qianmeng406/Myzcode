@@ -8,6 +8,7 @@ import type { CompanionClient } from "@zcode/companion/client";
 import type { ConversationTarget } from "./conversation.js";
 import { ConversationView } from "./conversation.js";
 import { SessionsListView } from "./sessions.js";
+import { MOBILE_CAPABILITIES } from "./mobileCapabilities.js";
 
 interface Attachment {
   attachResult: CompanionAttachResult;
@@ -211,7 +212,7 @@ export function WorkspaceView(props: {
       </div>
     ) : null;
 
-  const switcher = switcherOpen ? (
+  const switcher = switcherOpen && MOBILE_CAPABILITIES.workspaceSwitch ? (
     <div className="sheet-mask" onClick={() => setSwitcherOpen(false)}>
       <div className="sheet" onClick={(event) => event.stopPropagation()}>
         <div className="sheet-title">切换工作区</div>
@@ -242,9 +243,11 @@ export function WorkspaceView(props: {
             ←
           </button>
           <h1>{target.title}</h1>
-          <button className="button secondary" onClick={() => void openSwitcher()}>
-            切换
-          </button>
+          {MOBILE_CAPABILITIES.workspaceSwitch && (
+            <button className="button secondary" onClick={() => void openSwitcher()}>
+              切换
+            </button>
+          )}
         </header>
         <SessionsListView
           accessor={attachment.accessor}

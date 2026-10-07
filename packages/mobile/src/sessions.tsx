@@ -1,14 +1,16 @@
 // 工作区会话列表：复用 @zcode/ui 的 sessions-index 专用传输层。
 // 关键教训：wire 候选帧必须经 TopicWireDecoder 组装才是成品帧——直接读
 // `frame.payload` 会拿到 undefined（真机阶段 4 实测崩溃），所以这里不手写解析。
-// 幂等细节：subscribeSessionsIndexV4 带 runtimePolicy "existing-only"，
-// 只附着既有运行时，不为列表拉起新 Agent。
+// 幂等细节：subscribeSessionsIndexV4 用 runtimePolicy "start-if-needed"——
+// 手机主动进入某工作区视为用户打开意图，允许常驻端为该工作区拉起 agent；
+// 订阅本身不额外创造执行者（拉起只发生在这一条显式路径上）。
 // 列表信息结构对齐官方任务首页：排序偏好持久化、状态胶囊、未读点、相对时间。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { IServiceAccessor } from "@zcode/services";
 import type { SessionsIndexTopicFrame } from "@zcode/shared/zcode-protocol-v4";
 import { createAgentSessionsIndexTransport, type SessionsIndexTransport } from "@zcode/ui/v4-sessions-index-transport";
 import type { ConversationTarget } from "./conversation.js";
+import { MOBILE_CAPABILITIES } from "./mobileCapabilities.js";
 
 interface SessionSummary {
   sessionId: string;
@@ -217,9 +219,11 @@ export function SessionsListView(props: {
     <div className="app">
       <header className="topbar">
         <h1>{target.title}</h1>
-        <button className="button" onClick={props.onNewTask}>
-          新任务
-        </button>
+        {MOBILE_CAPABILITIES.taskCommands && (
+          <button className="button" onClick={props.onNewTask}>
+            新任务
+          </button>
+        )}
       </header>
       {error !== null && <div className="error" style={{ padding: "0 16px" }}>{error}</div>}
       <div className="sort-row" role="tablist" aria-label="排序">

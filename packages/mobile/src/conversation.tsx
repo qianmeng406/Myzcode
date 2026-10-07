@@ -26,6 +26,7 @@ import {
 import { agentServiceOf } from "./sessions.js";
 import { InteractionCard } from "./interactionCard.js";
 import { FileChangesCard } from "./fileChangesCard.js";
+import { MOBILE_CAPABILITIES } from "./mobileCapabilities.js";
 
 export interface ConversationTarget {
   node: string;
@@ -302,7 +303,7 @@ export function ConversationView(props: {
             {state.mode !== null ? ` · 模式 ${MODE_LABELS[state.mode] ?? state.mode}` : ""}
           </p>
         )}
-        {state.sessionId !== null && (
+        {MOBILE_CAPABILITIES.modeSwitch && state.sessionId !== null && (
           <div className="answer" style={{ marginBottom: 8 }}>
             {MODE_OPTIONS.map((mode) => (
               <button
@@ -317,7 +318,9 @@ export function ConversationView(props: {
             ))}
           </div>
         )}
-        {fileChangeRows.length > 0 && state.sessionId !== null && state.logEpoch !== null && state.revision !== null && (
+        {MOBILE_CAPABILITIES.readonlyFileDiff &&
+          fileChangeRows.length > 0 &&
+          state.sessionId !== null && state.logEpoch !== null && state.revision !== null && (
           <div style={{ marginBottom: 8 }}>
             {fileChangeRows.map((row) => (
               <FileChangesCard
@@ -344,14 +347,20 @@ export function ConversationView(props: {
             </div>
           ))}
         </div>
-        {state.interactions.map((interaction) => (
-          <InteractionCard
-            key={interaction.interactionId}
-            interaction={interaction}
-            disabled={state.sessionId === null}
-            onAnswer={answerInteraction}
-          />
-        ))}
+        {MOBILE_CAPABILITIES.interactions
+          ? state.interactions.map((interaction) => (
+              <InteractionCard
+                key={interaction.interactionId}
+                interaction={interaction}
+                disabled={state.sessionId === null}
+                onAnswer={answerInteraction}
+              />
+            ))
+          : state.interactions.length > 0 && (
+              <p className="muted">
+                有 {state.interactions.length} 项待处理交互；当前端未开放交互入口，请在电脑端处理。
+              </p>
+            )}
         {rendered.length === 0 && state.interactions.length === 0 && transport !== null && (
           <p className="muted">
             {state.sessionId === null ? "在下方输入开始一个任务。" : "暂无会话内容。"}
