@@ -261,7 +261,17 @@ class TaskScopedChannel implements IServerChannel {
     });
   }
 
+  /**
+   * 真实 RPC 经 ProxyChannel.toService 传输：调用参数是数组（[params]），
+   * 只查 arg.taskId 会整体跳过校验。这里对数组逐元素、对象取自身 taskId
+   * 判定；深度遍历只用于学习（响应面），不用于拒绝判定——嵌套引用
+   * （如事件里的关联任务）不是本调用的目标任务，不能据以放行或误拒。
+   */
   private assertTaskAllowed(arg: unknown): void {
+    if (Array.isArray(arg)) {
+      for (const item of arg) this.assertTaskAllowed(item);
+      return;
+    }
     if (!arg || typeof arg !== "object") return;
     const taskId = (arg as Record<string, unknown>).taskId;
     if (typeof taskId !== "string" || taskId === "") return;

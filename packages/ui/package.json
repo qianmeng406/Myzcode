@@ -13,7 +13,8 @@
     "./styles.css": "./src/styles.css",
     "./replay": "./src/replay.ts",
     "./v4-agent-transport": "./src/v4/agentConversationTransport.ts",
-    "./v4-sessions-index-transport": "./src/v4/agentSessionsIndexTransport.ts"
+    "./v4-sessions-index-transport": "./src/v4/agentSessionsIndexTransport.ts",
+    "./v4-command-factory": "./src/v4/commandFactory.ts"
   },
   "scripts": {
     "lint": "oxlint",

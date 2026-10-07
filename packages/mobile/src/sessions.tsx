@@ -27,14 +27,17 @@ function applySessionsFrame(
   state: SessionsIndexState,
   frame: SessionsIndexTopicFrame,
 ): SessionsIndexState {
-  const sessions = new Map(state.sessions);
   const { payload } = frame;
+  // snapshot 是权威全量（协议注释：conflated 最新态），必须整体替换——
+  // 沿旧 Map 合并会让已不存在的会话永远残留（对齐 ui/v4/sessionsIndexStore 语义）。
   if (payload.kind === "snapshot") {
+    const sessions = new Map<string, SessionSummary>();
     for (const session of payload.snapshot.sessions) {
       sessions.set(session.sessionId, session);
     }
     return { sessions };
   }
+  const sessions = new Map(state.sessions);
   for (const delta of payload.deltas) {
     if (delta.op === "session.upserted") {
       sessions.set(delta.session.sessionId, delta.session);

@@ -4,8 +4,8 @@
 import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CompanionClient } from "@zcode/companion/client";
-import type { CompanionCatalogResult } from "@zcode/shared/companion-protocol";
 import "./app.css";
+import { CatalogView } from "./catalog.js";
 import { WorkspaceView } from "./workspace.js";
 
 interface CompanionConfig {
@@ -151,10 +151,13 @@ function App(): React.ReactElement {
       clientRef.current = client;
       return client;
     })();
-    ensureInFlightRef.current = attempt.finally(() => {
-      if (ensureInFlightRef.current === attempt) ensureInFlightRef.current = null;
+    // ref 存 finally 链、清理却比对 attempt：两个不同 Promise 永不相等，
+    // 失败的尝试会永久滞留 in-flight，之后所有 ensure 复用同一次拒绝、无法重连。
+    const inFlight = attempt.finally(() => {
+      if (ensureInFlightRef.current === inFlight) ensureInFlightRef.current = null;
     });
-    return ensureInFlightRef.current;
+    ensureInFlightRef.current = inFlight;
+    return inFlight;
   }, []);
 
   if (view.name === "config") {
@@ -199,6 +202,11 @@ function App(): React.ReactElement {
           onOpen={(node, workspacePath, workspaceIdentity, title) =>
             setView({ name: "workspace", node, workspacePath, workspaceIdentity, title })
           }
+          onOpenFullUi={() => {
+            openFullUi();
+            // 用户主动进完整 UI：清除“偏好轻量”标记，下次恢复仍直达完整界面。
+            window.localStorage.removeItem(PREFER_LIGHT_KEY);
+          }}
         />
       </div>
     );
@@ -334,115 +342,6 @@ function ConfigView(props: {
           </label>
         </details>
       </div>
-    </div>
-  );
-}
-
-function CatalogView(props: {
-  ensureClient: () => Promise<CompanionClient>;
-  onOpen: (nodeId: string, workspacePath: string, workspaceIdentity: string, title: string) => void;
-}): React.ReactElement {
-  const [catalog, setCatalog] = useState<CompanionCatalogResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let disposed = false;
-    // interval 句柄必须挂在 effect 作用域：写在 async IIFE 内 return 的清理函数
-    // 不会被 React 采用，组件卸载后 10s 轮询会泄漏。
-    let interval: ReturnType<typeof setInterval> | null = null;
-    void (async () => {
-      try {
-        const client = await props.ensureClient();
-        const load = async (): Promise<void> => {
-          const result = await client.catalog();
-          if (!disposed) setCatalog(result);
-        };
-        await load();
-        if (disposed) return;
-        interval = setInterval(() => void load().catch(() => undefined), 10_000);
-      } catch (catalogError) {
-        if (!disposed) {
-          setError(catalogError instanceof Error ? catalogError.message : String(catalogError));
-        }
-      }
-    })();
-    return () => {
-      disposed = true;
-      if (interval !== null) clearInterval(interval);
-    };
-  }, [props.ensureClient]);
-  const onlineCount = catalog?.nodes.filter((node) => node.online).length ?? 0;
-  const workspaceCount =
-    catalog?.nodes.reduce((sum, node) => sum + node.workspaces.length, 0) ?? 0;
-  return (
-    <div className="content">
-      {error !== null && <div className="error">{error}</div>}
-      <button
-        className="feature-card"
-        onClick={() => {
-          openFullUi();
-          // 用户主动进完整 UI：清除"偏好轻量"标记，下次恢复仍直达完整界面。
-          window.localStorage.removeItem(PREFER_LIGHT_KEY);
-        }}
-      >
-        <span className="feature-main">
-          <span className="feature-title">打开完整界面</span>
-          <span className="feature-sub">桌面级完整 UI · 工作区 / 差异 / 文件树</span>
-        </span>
-        <span className="feature-arrow">›</span>
-      </button>
-
-      <div className="section-label">
-        <span>工作区</span>
-        {catalog !== null && (
-          <span className="section-meta">{onlineCount} 台在线 · {workspaceCount} 个工作区</span>
-        )}
-      </div>
-
-      {catalog === null && <p className="muted">正在加载工作区…</p>}
-      {catalog !== null && catalog.nodes.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-icon">⌘</div>
-          <p>还没有已连接的设备</p>
-          <p className="empty-sub">在电脑端「Myzcode 桌面直连」弹窗生成配对码</p>
-        </div>
-      )}
-      {catalog?.nodes.map((node) => (
-        <div key={node.nodeId} className="node-group">
-          <div className="node-header">
-            <span className={node.online ? "dot on" : "dot off"} />
-            <span className="node-name">{node.displayName}</span>
-            <span className={node.kind === "cloud" ? "node-chip cloud" : "node-chip desktop"}>
-              {node.kind === "cloud" ? "云端" : "电脑"}
-            </span>
-            <span className={node.online ? "node-state on" : "node-state off"}>
-              {node.online ? "在线" : "离线"}
-            </span>
-          </div>
-          {node.workspaces.map((workspace) => (
-            <button
-              key={`${node.nodeId}:${workspace.workspaceIdentity}`}
-              className="ws-row"
-              disabled={!node.online || !workspace.available}
-              onClick={() =>
-                props.onOpen(node.nodeId, workspace.workspacePath, workspace.workspaceIdentity, workspace.title)
-              }
-            >
-              <span className="ws-icon">▣</span>
-              <span className="ws-main">
-                <span className="ws-title">{workspace.title}</span>
-                <span className="ws-path">{workspace.workspacePath}</span>
-              </span>
-              <span className={workspace.available && node.online ? "ws-badge ok" : "ws-badge off"}>
-                {workspace.available ? (node.online ? "可用" : "离线") : "不可用"}
-              </span>
-              <span className="ws-arrow">›</span>
-            </button>
-          ))}
-          {node.online && node.workspaces.length === 0 && (
-            <p className="node-empty">该节点未开放工作区</p>
-          )}
-        </div>
-      ))}
     </div>
   );
 }

@@ -295,6 +295,47 @@ test("zcode-task：taskId 必须先经列表学习（跨工作区注入拒绝）
   assert.equal(calls[calls.length - 1]!.command, "sendPrompt");
 });
 
+test("zcode-task：数组参数形态（真实 ProxyChannel 传输形）同样过 taskId 门禁", async () => {
+  // ProxyChannel.toService 把方法调用序列化为 channel.call(command, [param1, ...])；
+  // 门禁若只读 arg.taskId 会整体跳过——这里按真实传输形态回归。
+  const upstream: IChannel = {
+    async call<T>(command: string): Promise<T> {
+      if (command === "listTaskList") {
+        return {
+          items: [
+            { taskId: "task-in-ws", workspacePath: "/srv/ws", title: "hello" },
+          ],
+        } as T;
+      }
+      return {} as T;
+    },
+    listen() {
+      return { dispose: () => undefined } as never;
+    },
+  };
+  const scope = { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" };
+  const channel = createPolicyChannel({
+    channelName: "zcode-task",
+    upstream,
+    policy: { kind: "task-scoped" },
+    scope,
+  });
+
+  // 数组包裹的陌生 taskId → 拒绝（修复前直接放行）
+  await assert.rejects(
+    () => channel.call("ctx", "sendPrompt", [{ taskId: "task-foreign", content: "hi" }]),
+    (error: unknown) => error instanceof Error && error.message.includes("task not in attached workspace"),
+  );
+  // 学习后数组形态放行，且 workspace 绑定注入到数组首元素
+  await channel.call("ctx", "listTaskList", [{ workspaceScopes: [] }]);
+  await channel.call("ctx", "sendPrompt", [{ taskId: "task-in-ws", content: "hi" }]);
+  // 多元素数组：任一元素携带陌生 taskId 都拒绝
+  await assert.rejects(
+    () => channel.call("ctx", "sendPrompt", [{ taskId: "task-in-ws" }, { taskId: "task-foreign" }]),
+    (error: unknown) => error instanceof Error && error.message.includes("task not in attached workspace"),
+  );
+});
+
 test("provider-settings：响应中的明文 apiKey 脱敏后下发", async () => {
   const upstream: IChannel = {
     async call<T>(): Promise<T> {

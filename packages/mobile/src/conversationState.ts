@@ -17,8 +17,6 @@ export interface MobileInteraction {
   freeText: boolean;
 }
 
-const MODE_OPTIONS = ["build", "edit", "plan", "yolo"] as const;
-
 function rowText(raw: Record<string, unknown>): string {
   for (const key of ["text", "summary", "description", "title"]) {
     const value = raw[key];

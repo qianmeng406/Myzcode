@@ -12,13 +12,15 @@ import {
   createAgentConversationTransport,
   type ConversationTransport,
 } from "@zcode/ui/v4-agent-transport";
+// 命令 clientId 必须与 clientHello 一致：companion attachment 的 connection
+// scope 是 terminal-client 角色，envelope.clientId 不匹配会拒绝
+// fault.command.clientMismatch（幂等归属也随之失真）。
+import { getV4ClientId } from "@zcode/ui/v4-command-factory";
 import {
   INITIAL_STATE,
   MODE_LABELS,
   applyFrame,
   type ConversationState,
-  type MobileInteraction,
-  type MobileRow,
 } from "./conversationState.js";
 import { agentServiceOf } from "./sessions.js";
 
@@ -118,7 +120,7 @@ export function ConversationView(props: {
         // 首条输入：createSession（sessionId=null），ACK result 带回新会话 id。
         const ack = await activeTransport.sendCommand({
           commandId: newCommandId(),
-          clientId: "my-zcode",
+          clientId: getV4ClientId(),
           sessionId: null,
           type: "createSession",
           payload: {
@@ -151,7 +153,7 @@ export function ConversationView(props: {
       }
       const ack = await activeTransport.sendCommand({
         commandId: newCommandId(),
-        clientId: "my-zcode",
+        clientId: getV4ClientId(),
         sessionId: current.sessionId,
         type: "sendText",
         payload: { text, displayText: text },
@@ -178,7 +180,7 @@ export function ConversationView(props: {
     try {
       await activeTransport.sendCommand({
         commandId: newCommandId(),
-        clientId: "my-zcode",
+        clientId: getV4ClientId(),
         sessionId: current.sessionId,
         type: "stop",
         payload: {},
@@ -200,7 +202,7 @@ export function ConversationView(props: {
         // 先到先得由运行时保证（迟到 noop）；已处理的请求点击无效果属预期。
         await activeTransport.sendCommand({
           commandId: newCommandId(),
-          clientId: "my-zcode",
+          clientId: getV4ClientId(),
           sessionId: current.sessionId,
           type: "resolveInteraction",
           payload: { interactionId, answer: { optionId } },
