@@ -10,8 +10,48 @@ import { AppErrorBoundary, Root, ZCodeIntlProvider } from "@zcode/ui";
 import { createRoot } from "react-dom/client";
 import { createWebPlatform } from "./webPlatform.js";
 import { renderCompanionTargetPicker } from "./companionTargetPicker.js";
+import "./companionMobile.css";
 
 const CONFIG_KEY = "zcode-companion-config";
+
+/**
+ * 移动端适配（官方语义：远控移动端 = 同一 WebUI + 窄视口适配）。
+ * ≤767px 时打 compact-remote 标记（侧栏抽屉化等样式见 companionMobile.css），
+ * 并注入抽屉开关：左侧汉堡按钮 + 遮罩；点选工作区/会话或点遮罩即收起。
+ */
+function mountMobileCompat(): void {
+  const apply = (): void => {
+    document.documentElement.classList.toggle("compact-remote", window.matchMedia("(max-width: 767px)").matches);
+  };
+  apply();
+  window.matchMedia("(max-width: 767px)").addEventListener("change", apply);
+
+  const scrim = document.createElement("div");
+  scrim.id = "companion-scrim";
+  const nav = document.createElement("button");
+  nav.id = "companion-nav-btn";
+  nav.type = "button";
+  nav.setAttribute("aria-label", "切换侧栏");
+  nav.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>';
+  document.body.append(scrim, nav);
+
+  const sidebar = (): HTMLElement | null => document.getElementById("sidebar");
+  const setDrawer = (open: boolean): void => {
+    sidebar()?.classList.toggle("companion-open", open);
+    scrim.classList.toggle("visible", open);
+  };
+  nav.addEventListener("click", () => setDrawer(!sidebar()?.classList.contains("companion-open")));
+  scrim.addEventListener("click", () => setDrawer(false));
+  // 点抽屉内任意位置（会话条目/按钮/链接）后收起：移动抽屉惯例。
+  // Root 是后渲染的，#sidebar 事件用 document 级委托绑定（capture 先于 React）。
+  document.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (target !== null && target.closest("#sidebar") !== null && sidebar()?.classList.contains("companion-open")) {
+      window.setTimeout(() => setDrawer(false), 350);
+    }
+  }, true);
+}
 
 interface CompanionWebConfig {
   baseUrl: string;
@@ -229,6 +269,7 @@ export async function bootstrapCompanionApp(): Promise<void> {
   if (new URLSearchParams(window.location.search).has("companionDebug")) {
     mountCompanionDebugOverlay();
   }
+  mountMobileCompat();
   const config = resolveCompanionConfig();
   if (!config) {
     renderCompanionStatus(
@@ -336,32 +377,6 @@ async function attachAndRender(
           supportsEmbeddedBrowser={false}
           allowRemoteWorkspace={false}
         />
-        {/* 手机壳内的退出浮钮：回轻量目录页（不拆 attachment，凭据仍在会话内）。 */}
-        {new URLSearchParams(window.location.search).get("lightExit") !== "0" && (
-          <button
-            type="button"
-            onClick={() => {
-              window.localStorage.setItem("zcode-companion-prefer-light", "1");
-              window.location.href = "../index.html";
-            }}
-            style={{
-              position: "fixed",
-              left: 10,
-              bottom: "calc(env(safe-area-inset-bottom, 0px) + 10px)",
-              zIndex: 2147483000,
-              padding: "6px 12px",
-              borderRadius: 999,
-              border: "1px solid rgba(255,255,255,0.14)",
-              background: "rgba(20,20,24,0.72)",
-              color: "#cfcfd8",
-              fontSize: 12,
-              backdropFilter: "blur(6px)",
-              cursor: "pointer",
-            }}
-          >
-            {isChineseLocale() ? "轻量界面" : "Light UI"}
-          </button>
-        )}
       </ZCodeIntlProvider>
     </AppErrorBoundary>,
   );

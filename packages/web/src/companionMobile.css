@@ -1,0 +1,108 @@
+/* WebUI 远控移动端适配（companion 模式 + ≤767px 视口）。
+   官方行为：手机上就是同一个 WebUI，窄视口下侧栏折叠为可唤起抽屉、
+   会话区全宽（官方 767px 断点 + --web-remote-navigation-height 语义）。
+   本文件只做布局适配，不改变 WebUI 的功能与交互结构。 */
+
+/* 注入的抽屉开关默认隐藏（桌面/宽视口无适配布局）；仅移动断点内启用。 */
+#companion-nav-btn, #companion-scrim { display: none; }
+
+/* WebView edge-to-edge：状态栏高度补偿（仅 companion 移动布局需要） */
+html.compact-remote { --companion-statusbar-pad: env(safe-area-inset-top, 0px); }
+
+@media (max-width: 767px) {
+  html.compact-remote body { overscroll-behavior: none; }
+
+  /* ── 侧栏：固定宽度抽屉，默认收起在屏幕左缘外 ── */
+  html.compact-remote #sidebar {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 60;
+    width: min(85vw, 20rem) !important;
+    max-width: 85vw !important;
+    min-width: 0 !important;
+    background: var(--background, #161616);
+    border-right: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+    box-shadow: none;
+    transform: translateX(-102%);
+    transition: transform 0.22s ease-out;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+  html.compact-remote #sidebar.companion-open {
+    transform: translateX(0);
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+  }
+  html.compact-remote #sidebar aside { width: 100%; }
+
+  /* 抽屉遮罩（companionBootstrap 注入） */
+  #companion-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, 0.55);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease-out;
+  }
+  #companion-scrim.visible { opacity: 1; pointer-events: auto; }
+
+  /* 汉堡按钮（顶条左侧，固定悬浮避免依赖 header 内部结构）。
+     WebView 已 fitsSystemWindows（MainActivity），系统 inset 由原生层吃掉。 */
+  #companion-nav-btn {
+    display: inline-flex;
+    position: fixed;
+    top: 8px;
+    left: 10px;
+    z-index: 50;
+    width: 36px;
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+    border-radius: 8px;
+    background: var(--header, #202020);
+    color: var(--foreground, #d4d4d4);
+    cursor: pointer;
+  }
+  #companion-nav-btn svg { width: 18px; height: 18px; }
+
+  /* ── 主内容：全宽，预留顶条高度；桌面内缩进去除 ── */
+  html.compact-remote #content {
+    min-width: 0 !important;
+    width: 100% !important;
+    padding: 0 !important;
+  }
+
+  /* 桌面圆角/窗口镶边在手机上移除（官方 max-md:rounded-none 同义） */
+  html.compact-remote #content [data-workspace-conversation-frame] {
+    border-radius: 0 !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+    border-bottom: 0 !important;
+  }
+
+  /* ── 右侧 side pane（详情/终端/浏览器槽位）：窄屏为全屏覆盖层 ──
+     resizable-panels 写内联 flex-basis，这里强制绝对定位覆盖会话区。 */
+  html.compact-remote #content [data-panel-group][data-panel-group-direction="horizontal"] > [data-panel]:not(:first-child) {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    max-width: 100% !important;
+    flex-basis: 100% !important;
+    background: var(--background, #161616);
+  }
+
+  /* resize 分隔条在触摸设备无意义 */
+  html.compact-remote [data-separator],
+  html.compact-remote [data-testid="resizable-handle"] { display: none !important; }
+
+  /* 触控目标下限（官方 44px 触控规范） */
+  html.compact-remote button { min-height: 36px; }
+}
+
+@media (max-width: 767px) and (hover: none) {
+  html.compact-remote ::-webkit-scrollbar { width: 3px; height: 3px; }
+}
