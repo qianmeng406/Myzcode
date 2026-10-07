@@ -323,19 +323,185 @@ test("撤销设备 → 立即关闭连接与 attachment", async () => {
   assert.notEqual(connectorRelay.closedCode, null);
 });
 
-test("同一设备重复 attach 被拒", async () => {
+test("同链路重复 attach 被拒；新链路 attach 接管旧 attachment", async () => {
   const { hub } = await makeHub();
   await attachOnlineNode(hub);
-  await attachAndJoin(hub);
-  const mobile = new FakeMobileLink("dev-1");
-  hub.handleMobileOpened(mobile);
-  await hub.handleMobileRequest(mobile, "a3", "attach", {
+  const first = await attachAndJoin(hub);
+
+  // 同一条链路重复 attach：仍是编程错误，拒绝。
+  await hub.handleMobileRequest(first.mobile, "dup", "attach", {
     nodeId: "cloud-1",
     workspacePath: "/srv/demo",
     workspaceIdentity: "/srv/demo",
   });
-  const response = (await mobile.waitForResponse("a3")) as { ok: boolean };
+  const dupResponse = (await first.mobile.waitForResponse("dup")) as { ok: boolean };
+  assert.equal(dupResponse.ok, false);
+
+  // 新控制链路（旧页面关闭后新页面/完整 UI 接管）：旧 attachment 拆除、新 attach 成功。
+  const second = new FakeMobileLink("dev-1");
+  hub.handleMobileOpened(second);
+  await hub.handleMobileRequest(second, "takeover", "attach", {
+    nodeId: "cloud-1",
+    workspacePath: "/srv/demo",
+    workspaceIdentity: "/srv/demo",
+  });
+  const takeoverResponse = (await second.waitForResponse("takeover")) as {
+    ok: boolean;
+    value: { result?: { attachmentId: string } };
+  };
+  assert.equal(takeoverResponse.ok, true);
+  assert.notEqual(takeoverResponse.value.result!.attachmentId, first.attachResult.attachmentId);
+  const closedEvent = first.mobile.events.find(
+    (event) => event.event === "attachmentClosed" && event.payload?.reason === "mobile_replaced",
+  );
+  assert.ok(closedEvent);
+  assert.notEqual(first.mobileRelay.closedCode, null);
+  assert.notEqual(first.connectorRelay.closedCode, null);
+  // 收尾拆掉新 attachment：不留 joinTimer 拖住测试进程事件循环。
+  hub.handleMobileClosed(second);
+});
+
+test("迟到的旧链路 close 不拆新链路的 attachment", async () => {
+  const { hub } = await makeHub();
+  await attachOnlineNode(hub);
+  const first = await attachAndJoin(hub);
+
+  const second = new FakeMobileLink("dev-1");
+  hub.handleMobileOpened(second);
+  await hub.handleMobileRequest(second, "takeover", "attach", {
+    nodeId: "cloud-1",
+    workspacePath: "/srv/demo",
+    workspaceIdentity: "/srv/demo",
+  });
+  const takeoverResponse = (await second.waitForResponse("takeover")) as {
+    ok: boolean;
+    value: { result?: { attachmentId: string; relayCapability: string } };
+  };
+  assert.ok(takeoverResponse.ok);
+
+  // 旧链路此刻才断开（迟到 close）：只清自己，新 attachment 不受影响。
+  hub.handleMobileClosed(first.mobile);
+  const secondRelay = new FakeRelayJoin(
+    takeoverResponse.value.result!.attachmentId,
+    takeoverResponse.value.result!.relayCapability,
+  );
+  assert.equal(hub.handleRelayJoin(secondRelay, Date.now()), true);
+  // 新 attachment 仍然存活：binary 帧能进入透传（单侧等待不误拆）。
+  const connectorCapability = (
+    (hub["nodeLinks"].get("cloud-1") as FakeNodeLink).requests.findLast(
+      (entry) => entry.op === "attach",
+    )!.params as { relayCapability: string }
+  ).relayCapability;
+  const secondConnectorRelay = new FakeRelayJoin(
+    takeoverResponse.value.result!.attachmentId,
+    connectorCapability,
+  );
+  assert.equal(hub.handleRelayJoin(secondConnectorRelay, Date.now()), true);
+  const payload = new Uint8Array([7, 7, 7]);
+  secondRelay.pushIncoming(payload);
+  assert.deepEqual(secondConnectorRelay.received[0], payload);
+});
+
+test("pending 计入 attachment 配额（并发 attach 不得绕过限额）", async () => {
+  const controlStore = new MemoryControlStore();
+  await controlStore.saveNode({
+    nodeId: "cloud-1",
+    kind: "cloud",
+    displayName: "云端节点",
+    tokenFingerprint: "f".repeat(64),
+    createdAt: 1,
+  });
+  for (const deviceId of ["dev-1", "dev-2"]) {
+    await controlStore.saveDevice({ deviceId, deviceName: deviceId, createdAt: 2 });
+    await controlStore.saveGrants({
+      deviceId,
+      nodes: [{ nodeId: "cloud-1", workspaceIdentities: [] }],
+    });
+  }
+  const hub = new CompanionHub({
+    store: controlStore,
+    clock: makeClock(),
+    secrets: makeSecrets(),
+    defaults: { ...COMPANION_GATEWAY_DEFAULTS, maxAttachments: 1, attachRequestTimeoutMs: 150 },
+    logger: noopLogger,
+  });
+  await attachOnlineNode(hub);
+  // 节点挂起 attach 响应 → 第一个请求停留在 pending（占用配额）。
+  (hub["nodeLinks"].get("cloud-1") as FakeNodeLink).onAttach(() => new Promise(() => undefined));
+
+  const first = new FakeMobileLink("dev-1");
+  hub.handleMobileOpened(first);
+  // 不 await：handleAttach 停在挂起的节点请求上；轮询等 pending 落地即可。
+  void hub.handleMobileRequest(first, "p1", "attach", {
+    nodeId: "cloud-1",
+    workspacePath: "/srv/demo",
+    workspaceIdentity: "/srv/demo",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(
+    (hub["nodeLinks"].get("cloud-1") as FakeNodeLink).requests.some((entry) => entry.op === "attach"),
+  );
+
+  const second = new FakeMobileLink("dev-2");
+  hub.handleMobileOpened(second);
+  await hub.handleMobileRequest(second, "p2", "attach", {
+    nodeId: "cloud-1",
+    workspacePath: "/srv/demo",
+    workspaceIdentity: "/srv/demo",
+  });
+  const response = (await second.waitForResponse("p2")) as {
+    ok: boolean;
+    value: { code?: string };
+  };
   assert.equal(response.ok, false);
+  assert.equal(response.value.code, "attachment_limit");
+  // 等 pending 超时兜底走完，测试进程不留挂起计时器。
+  await new Promise((resolve) => setTimeout(resolve, 250));
+});
+
+test("attach 超时：回复手机并同步请求节点清理（防孤儿 attachment）", async () => {
+  const controlStore = new MemoryControlStore();
+  await controlStore.saveNode({
+    nodeId: "cloud-1",
+    kind: "cloud",
+    displayName: "云端节点",
+    tokenFingerprint: "f".repeat(64),
+    createdAt: 1,
+  });
+  await controlStore.saveDevice({ deviceId: "dev-1", deviceName: "手机", createdAt: 2 });
+  await controlStore.saveGrants({
+    deviceId: "dev-1",
+    nodes: [{ nodeId: "cloud-1", workspaceIdentities: [] }],
+  });
+  const hub = new CompanionHub({
+    store: controlStore,
+    clock: makeClock(),
+    secrets: makeSecrets(),
+    defaults: { ...COMPANION_GATEWAY_DEFAULTS, attachRequestTimeoutMs: 20 },
+    logger: noopLogger,
+  });
+  await attachOnlineNode(hub);
+  (hub["nodeLinks"].get("cloud-1") as FakeNodeLink).onAttach(() => new Promise(() => undefined));
+
+  const mobile = new FakeMobileLink("dev-1");
+  hub.handleMobileOpened(mobile);
+  // 不 await：handleAttach 停在挂起的节点请求上；响应由 20ms 超时兜底发出。
+  void hub.handleMobileRequest(mobile, "t1", "attach", {
+    nodeId: "cloud-1",
+    workspacePath: "/srv/demo",
+    workspaceIdentity: "/srv/demo",
+  });
+  const response = (await mobile.waitForResponse("t1")) as {
+    ok: boolean;
+    value: { code?: string };
+  };
+  assert.equal(response.ok, false);
+  assert.equal(response.value.code, "node_offline");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const nodeRequests = (hub["nodeLinks"].get("cloud-1") as FakeNodeLink).requests;
+  const detach = nodeRequests.findLast((entry) => entry.op === "detach");
+  assert.ok(detach);
+  assert.equal(detach.op, "detach");
 });
 
 test("未知节点 hello 被拒", async () => {

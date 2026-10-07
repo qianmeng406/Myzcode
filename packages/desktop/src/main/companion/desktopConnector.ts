@@ -5,7 +5,6 @@
 // 路径/身份绑定必须发生在连接器侧，防手机越权访问同 Host 其他工作区）。
 import { ChannelClient, MessagePortProtocol, type IChannel } from "@zcode/rpc";
 import { companionAttachRequestParamsSchema } from "@zcode/shared/companion-protocol";
-import { IZCodeAgentService } from "@zcode/services";
 import {
   connectControlChannel,
   type ControlChannel,
@@ -105,6 +104,9 @@ export async function startDesktopCompanionConnector(
       workspacePath: entry.workspacePath,
       workspaceIdentity: entry.workspaceIdentity,
       title: entry.title,
+      // 远程工作区必须回传 remoteSessionId：手机 attach 靠它路由到既有远程
+      // 连接的 attachment（协议字段 optional，漏传则恢复/交接断链）。
+      ...(entry.remoteSessionId !== undefined ? { remoteSessionId: entry.remoteSessionId } : {}),
       available: true,
     }));
     const snapshot = JSON.stringify(workspaces);

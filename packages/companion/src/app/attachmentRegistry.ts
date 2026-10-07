@@ -52,6 +52,11 @@ export class AttachmentRegistry {
     return this.active.size;
   }
 
+  /** 在途 attach 计数：与 active 一起计入配额（并发 attach 不得借 pending 绕过限额）。 */
+  countPending(): number {
+    return this.pending.size;
+  }
+
   getByAttachment(attachmentId: string): ActiveAttachment | null {
     return this.active.get(attachmentId) ?? null;
   }
@@ -61,6 +66,34 @@ export class AttachmentRegistry {
       if (attachment.deviceId === deviceId) return attachment;
     }
     return null;
+  }
+
+  /** attachment 归属的控制链路（新连接接管判定用）。 */
+  mobileLinkOf(attachmentId: string): MobileLink | null {
+    return this.mobileByAttachment.get(attachmentId) ?? null;
+  }
+
+  findPendingByDevice(deviceId: string): PendingAttachmentSpec | null {
+    for (const pending of this.pending.values()) {
+      if (pending.deviceId === deviceId) return pending;
+    }
+    return null;
+  }
+
+  /**
+   * 按控制链路身份清理（手机连接关闭时调用）。同设备可能已有新连接与
+   * 新 attachment：迟到的旧链路 close 只清自己的 pending/attachment，
+   * 不得波及新链路（对照节点侧"以新连接为准"语义）。
+   */
+  teardownAllForLink(link: MobileLink, reason: string): void {
+    for (const attachment of Array.from(this.active.values())) {
+      if (this.mobileByAttachment.get(attachment.attachmentId) === link) {
+        this.teardown(attachment.attachmentId, reason);
+      }
+    }
+    for (const pending of Array.from(this.pending.values())) {
+      if (pending.mobileLink === link) this.takePending(pending.attachmentId);
+    }
   }
 
   /** attach 请求发起：登记 pending 并启动超时（超时直接回复手机）。 */
@@ -74,6 +107,9 @@ export class AttachmentRegistry {
       if (this.pending.get(spec.attachmentId) === entry) {
         this.pending.delete(spec.attachmentId);
         onTimeoutRespond();
+        // 节点可能仍在完成 attach：超时即同步请求节点侧清理，
+        // 防止迟到的 accept 留下孤儿 relay attachment / attachment 记录。
+        this.host.requestNodeDetach(spec.nodeId, spec.attachmentId);
       }
     }, this.defaults.attachRequestTimeoutMs);
     const entry: PendingEntry = { ...spec, timer, mobileLink, requestId };
@@ -176,13 +212,6 @@ export class AttachmentRegistry {
         message: "node went offline during attach",
       });
       this.takePending(pending.attachmentId);
-    }
-  }
-
-  /** 断开/撤销时取消该设备仍在途的 attach 请求（不必等 attachRequestTimeout 兜底）。 */
-  cancelPendingForDevice(deviceId: string): void {
-    for (const pending of Array.from(this.pending.values())) {
-      if (pending.deviceId === deviceId) this.takePending(pending.attachmentId);
     }
   }
 

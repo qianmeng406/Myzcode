@@ -155,12 +155,9 @@ export class CompanionHub {
 
   handleMobileClosed(link: MobileLink): void {
     this.mobileLinks.delete(link);
-    // 在途 attach 请求随连接断开即时失效（spec「断开即时失效」），不等超时兜底。
-    this.registry.cancelPendingForDevice(link.deviceId);
-    const attachment = this.registry.findActiveByDevice(link.deviceId);
-    if (attachment) {
-      this.registry.teardown(attachment.attachmentId, "mobile_detached");
-    }
+    // 按链路身份清理：迟到的旧连接 close 不得拆掉同设备新连接的 attachment
+    // （registry 记录了 attachment ↔ 链路归属）；在途 attach 随断开即时失效。
+    this.registry.teardownAllForLink(link, "mobile_detached");
   }
 
   /** owner 撤销设备时调用：立即拆除其 attachment 并关闭其在线控制连接。 */
@@ -216,8 +213,20 @@ export class CompanionHub {
       return;
     }
     const params = parsed.data;
-    if (this.registry.findActiveByDevice(link.deviceId)) {
-      link.respond(id, { ok: false, code: "bad_request", message: "device already attached" });
+    const existingAttachment = this.registry.findActiveByDevice(link.deviceId);
+    if (existingAttachment) {
+      const ownerLink = this.registry.mobileLinkOf(existingAttachment.attachmentId);
+      if (ownerLink === link) {
+        link.respond(id, { ok: false, code: "bad_request", message: "device already attached" });
+        return;
+      }
+      // 新控制连接接管（旧页面关闭后被新页面/完整 UI 替换）：旧链路的
+      // attachment 已成孤儿，先拆再建——与节点侧「以新连接为准」一致。
+      this.registry.teardown(existingAttachment.attachmentId, "mobile_replaced");
+    }
+    if (this.registry.findPendingByDevice(link.deviceId)) {
+      // 在途 attach 未决时不接受第二个：配额预留必须先落地或超时。
+      link.respond(id, { ok: false, code: "bad_request", message: "attach already in progress" });
       return;
     }
     const device = await this.deps.store.getDevice(link.deviceId);
@@ -258,7 +267,12 @@ export class CompanionHub {
       });
       return;
     }
-    if (!canCreateAttachment(this.registry.countActive(), this.deps.defaults.maxAttachments)) {
+    if (
+      !canCreateAttachment(
+        this.registry.countActive() + this.registry.countPending(),
+        this.deps.defaults.maxAttachments,
+      )
+    ) {
       link.respond(id, {
         ok: false,
         code: "attachment_limit",
