@@ -25,6 +25,7 @@ import {
 } from "./conversationState.js";
 import { agentServiceOf } from "./sessions.js";
 import { InteractionCard } from "./interactionCard.js";
+import { FileChangesCard } from "./fileChangesCard.js";
 
 export interface ConversationTarget {
   node: string;
@@ -273,6 +274,11 @@ export function ConversationView(props: {
   );
 
   const rendered = useMemo(() => state.rows.filter((row) => row.text !== ""), [state.rows]);
+  // turnHeader 上的文件变更摘要 → 只读差异卡（详情按需拉取，无任何写入口）。
+  const fileChangeRows = useMemo(
+    () => state.rows.filter((row) => row.fileChanges !== null),
+    [state.rows],
+  );
 
   return (
     <div className="app">
@@ -308,6 +314,22 @@ export function ConversationView(props: {
               >
                 {MODE_LABELS[mode]}
               </button>
+            ))}
+          </div>
+        )}
+        {fileChangeRows.length > 0 && state.sessionId !== null && state.logEpoch !== null && state.revision !== null && (
+          <div style={{ marginBottom: 8 }}>
+            {fileChangeRows.map((row) => (
+              <FileChangesCard
+                key={`fc-${row.rowId}`}
+                rowId={row.rowId}
+                entityId={row.entityId}
+                sessionId={state.sessionId!}
+                logEpoch={state.logEpoch!}
+                revision={state.revision!}
+                summary={row.fileChanges!}
+                fetch={(params) => transport!.fileChanges(params)}
+              />
             ))}
           </div>
         )}

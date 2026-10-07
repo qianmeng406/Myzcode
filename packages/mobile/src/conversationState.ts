@@ -2,11 +2,20 @@
 // 独立模块原因：架构门禁单文件 400 行上限；组件文件只留视图与命令提交。
 import type { ConversationTopicFrame } from "@zcode/shared/zcode-protocol-v4";
 
+export interface MobileFileChangesSummary {
+  files: number;
+  additions: number;
+  deletions: number;
+  state?: string;
+}
+
 export interface MobileRow {
   rowId: number;
   entityId: string;
   kind: string;
   text: string;
+  /** turnHeader 行的文件变更摘要（只读详情按需经 fileChanges 查询拉取）。 */
+  fileChanges: MobileFileChangesSummary | null;
 }
 
 export interface MobileInteraction {
@@ -36,11 +45,21 @@ function rowText(raw: Record<string, unknown>): string {
 }
 
 function describeRow(raw: Record<string, unknown>): MobileRow {
+  const summary = (raw.fileChanges ?? null) as Record<string, unknown> | null;
   return {
     rowId: typeof raw.rowId === "number" ? raw.rowId : 0,
     entityId: typeof raw.entityId === "string" ? raw.entityId : "",
     kind: String(raw.kind ?? "row"),
     text: rowText(raw),
+    fileChanges:
+      summary !== null && typeof summary === "object"
+        ? {
+            files: typeof summary.files === "number" ? summary.files : 0,
+            additions: typeof summary.additions === "number" ? summary.additions : 0,
+            deletions: typeof summary.deletions === "number" ? summary.deletions : 0,
+            ...(typeof summary.state === "string" ? { state: summary.state } : {}),
+          }
+        : null,
   };
 }
 
@@ -93,6 +112,9 @@ export interface ConversationState {
   interactions: MobileInteraction[];
   mode: string | null;
   modelLabel: string | null;
+  /** 只读查询（fileChanges）的 CAS 游标：快照携带，增量帧推进 revision。 */
+  logEpoch: string | null;
+  revision: number | null;
 }
 
 export const INITIAL_STATE: ConversationState = {
@@ -101,6 +123,8 @@ export const INITIAL_STATE: ConversationState = {
   interactions: [],
   mode: null,
   modelLabel: null,
+  logEpoch: null,
+  revision: null,
 };
 
 export function applyFrame(state: ConversationState, frame: ConversationTopicFrame): ConversationState {
@@ -121,6 +145,8 @@ export function applyFrame(state: ConversationState, frame: ConversationTopicFra
         typeof config?.provider === "string" && typeof config?.model === "string"
           ? `${config.provider}/${config.model}`
           : state.modelLabel,
+      logEpoch: typeof snapshot.logEpoch === "string" ? snapshot.logEpoch : state.logEpoch,
+      revision: typeof snapshot.revision === "number" ? snapshot.revision : state.revision,
     };
   }
   let { sessionId, rows, interactions, mode, modelLabel } = state;
@@ -164,7 +190,7 @@ export function applyFrame(state: ConversationState, frame: ConversationTopicFra
     }
     // workflowRun.*：v1 渲染不消费。
   }
-  return { sessionId, rows, interactions, mode, modelLabel };
+  return { sessionId, rows, interactions, mode, modelLabel, logEpoch: state.logEpoch, revision: frame.toSeq };
 }
 
 export const MODE_LABELS: Record<string, string> = {
