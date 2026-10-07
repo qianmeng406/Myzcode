@@ -120,7 +120,9 @@ export function OracleReviewBanner({
                     { tool: state.toolName },
                   )}
                   {state.toolTarget ? (
-                    <span className="ml-1 max-w-48 truncate font-mono align-bottom">
+                    // inline-block：行内元素上 max-width/truncate 不生效，长命令
+                    // 会撑出卡片把右侧计数挤出可视区（用户实测）。
+                    <span className="ml-1 inline-block max-w-48 truncate font-mono align-bottom">
                       {state.toolTarget}
                     </span>
                   ) : null}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ConversationSnapshot, TurnHeaderRow } from "@zcode/shared/zcode-protocol-v4";
 import { useOptionalServices } from "@/hooks/useServices.js";
 import {
@@ -51,26 +51,24 @@ export function useOracleReviewPendingProgress(params: {
   const { state, services, workspacePath, sessionId } = params;
 
   const [pendingElapsedSeconds, setPendingElapsedSeconds] = useState(0);
-  const pendingStartedAtRef = useRef<number | null>(null);
+  // 起始时间读 store 里的 pending.startedAt（请求发起时写入）：组件随会话切换
+  // 卸载重建时计时不重置——之前挂 React ref，重挂载即归零，表现为「切走再切回，
+  // 已等待从 0:00 重新跳」。阶段推进经 ...current 合并，startedAt 自然保留。
+  const pendingStartedAt = state.status === "pending" ? state.startedAt : null;
   useEffect(() => {
-    if (state.status !== "pending") {
-      pendingStartedAtRef.current = null;
+    if (pendingStartedAt === null) {
       setPendingElapsedSeconds(0);
       return;
     }
-    if (pendingStartedAtRef.current === null) {
-      pendingStartedAtRef.current = Date.now();
-    }
-    const startedAt = pendingStartedAtRef.current;
     const tick = () => {
-      setPendingElapsedSeconds(Math.max(0, Math.round((Date.now() - startedAt) / 1000)));
+      setPendingElapsedSeconds(Math.max(0, Math.round((Date.now() - pendingStartedAt) / 1000)));
     };
     tick();
     const timer = window.setInterval(tick, 1000);
     return () => {
       window.clearInterval(timer);
     };
-  }, [state.status]);
+  }, [pendingStartedAt]);
 
   const [pendingOutputChars, setPendingOutputChars] = useState(0);
   // operationId 只在 pending 态存在；提升到 effect 外做联合收窄，effect 依赖它即可

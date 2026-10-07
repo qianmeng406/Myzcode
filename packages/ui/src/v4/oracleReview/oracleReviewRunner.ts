@@ -175,6 +175,7 @@ export async function runOracleReview(
     status: "pending",
     mode: request.mode,
     reviewId: request.reviewId,
+    startedAt: Date.now(),
     stage: "collecting",
     modelLabel: pendingModelLabel,
     depth: request.depth,

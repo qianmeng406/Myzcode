@@ -170,6 +170,8 @@ export type OracleReviewState =
       status: "pending";
       mode: OracleReviewRequestMode;
       reviewId: string;
+      /** pending 起始时间戳：存进 store（跨会话切换/重挂载存活），计时不再重置。 */
+      startedAt: number;
       /** 当前运行阶段（collecting/analyzing/reviewing），卡片展示进度。 */
       stage: OracleReviewStage;
       /** 本次审查实际使用的把关模型（providerId/modelId），卡片 pending 时展示。 */
