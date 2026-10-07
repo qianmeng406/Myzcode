@@ -17,7 +17,9 @@ const CONFIG_KEY = "zcode-companion-config";
 /**
  * 移动端适配（官方语义：远控移动端 = 同一 WebUI + 窄视口适配）。
  * ≤767px 时打 compact-remote 标记（侧栏抽屉化等样式见 companionMobile.css），
- * 并注入抽屉开关：左侧汉堡按钮 + 遮罩；点选工作区/会话或点遮罩即收起。
+ * 并注入抽屉开关：左上按钮（开→关切换，图标随状态变化）+ 纯视觉遮罩。
+ * 关闭判定统一走 document 捕获阶段（点抽屉外任意处关闭、点抽屉内条目收起），
+ * 不依赖遮罩自身的 z-index 命中，避免被 WebUI 更高层级容器拦截。
  */
 function mountMobileCompat(): void {
   const apply = (): void => {
@@ -26,31 +28,56 @@ function mountMobileCompat(): void {
   apply();
   window.matchMedia("(max-width: 767px)").addEventListener("change", apply);
 
+  const MENU_ICON =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>';
+  const CLOSE_ICON =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg>';
+
   const scrim = document.createElement("div");
   scrim.id = "companion-scrim";
   const nav = document.createElement("button");
   nav.id = "companion-nav-btn";
   nav.type = "button";
-  nav.setAttribute("aria-label", "切换侧栏");
-  nav.innerHTML =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>';
   document.body.append(scrim, nav);
 
   const sidebar = (): HTMLElement | null => document.getElementById("sidebar");
+  const isOpen = (): boolean => sidebar()?.classList.contains("companion-open") === true;
   const setDrawer = (open: boolean): void => {
     sidebar()?.classList.toggle("companion-open", open);
     scrim.classList.toggle("visible", open);
+    // 打开时按钮即「关闭」控件（图标 ←，提示可收起）。
+    nav.innerHTML = open ? CLOSE_ICON : MENU_ICON;
+    nav.setAttribute("aria-label", open ? "收起侧栏" : "展开侧栏");
+    nav.setAttribute("aria-expanded", open ? "true" : "false");
   };
-  nav.addEventListener("click", () => setDrawer(!sidebar()?.classList.contains("companion-open")));
-  scrim.addEventListener("click", () => setDrawer(false));
-  // 点抽屉内任意位置（会话条目/按钮/链接）后收起：移动抽屉惯例。
-  // Root 是后渲染的，#sidebar 事件用 document 级委托绑定（capture 先于 React）。
-  document.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement | null;
-    if (target !== null && target.closest("#sidebar") !== null && sidebar()?.classList.contains("companion-open")) {
-      window.setTimeout(() => setDrawer(false), 350);
-    }
-  }, true);
+  setDrawer(false);
+
+  nav.addEventListener("click", () => setDrawer(!isOpen()));
+  // 指针按下即判定（capture 阶段最早）：点抽屉外任意处关闭；点抽屉内条目
+  // 延迟收起以让 WebUI 先处理导航。
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (!isOpen()) return;
+      const target = event.target as HTMLElement | null;
+      if (target === null) return;
+      if (target.closest("#sidebar") === null && target.closest("#companion-nav-btn") === null) {
+        setDrawer(false);
+      }
+    },
+    true,
+  );
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!isOpen()) return;
+      const target = event.target as HTMLElement | null;
+      if (target !== null && target.closest("#sidebar") !== null) {
+        window.setTimeout(() => setDrawer(false), 350);
+      }
+    },
+    true,
+  );
 }
 
 interface CompanionWebConfig {
