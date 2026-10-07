@@ -5,9 +5,11 @@
 // localStorage（历史遗留回退）。session 必须先于持久存储，否则历史联调
 // 遗留的旧配置会遮蔽轻量页刚写入的新配置。
 import { CompanionClient, type CompanionRelayChannel } from "@zcode/companion/client";
+import type { CompanionCatalogResult } from "@zcode/shared/companion-protocol";
 import { AppErrorBoundary, Root, ZCodeIntlProvider } from "@zcode/ui";
 import { createRoot } from "react-dom/client";
 import { createWebPlatform } from "./webPlatform.js";
+import { renderCompanionTargetPicker } from "./companionTargetPicker.js";
 
 const CONFIG_KEY = "zcode-companion-config";
 
@@ -70,7 +72,7 @@ function isChineseLocale(): boolean {
   return /^zh\b/i.test(navigator.language);
 }
 
-function renderCompanionStatus(title: string, message: string): void {
+function renderCompanionStatus(title: string, message: string, onRetry?: () => void): void {
   renderCompanionTree(
     <div className="h-dvh min-h-dvh w-screen bg-background text-foreground">
       <div className="mx-auto flex h-full w-full max-w-lg items-center px-4">
@@ -81,7 +83,8 @@ function renderCompanionStatus(title: string, message: string): void {
             type="button"
             className="mt-4 rounded-lg border border-border bg-surface px-3 py-2 text-ui-xs text-foreground-subtle hover:bg-surface-hover"
             onClick={() => {
-              window.location.reload();
+              if (onRetry) onRetry();
+              else window.location.reload();
             }}
           >
             {isChineseLocale() ? "重试" : "Retry"}
@@ -162,8 +165,66 @@ async function connectCompanionControl(
 
 /**
  * companion relay 引导：attach catalog 首个可用工作区，以 relay accessor
- * 启动完整 Root。attach/连接失败显示可重试状态屏（不做静默循环重连）。
+ * 启动完整 Root。目标工作区解析：记住的上次选择 > 唯一候选 > 选择屏
+ * （不再静默取第一项）。attach/连接失败显示可重试状态屏（不做静默循环
+ * 重连），重试保持原目标重新 attach。
  */
+const TARGET_KEY = "zcode-companion-target";
+
+interface BootTarget {
+  nodeId: string;
+  workspacePath: string;
+  workspaceIdentity: string;
+}
+
+function loadStoredTarget(): BootTarget | null {
+  try {
+    const raw = window.sessionStorage.getItem(TARGET_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<BootTarget>;
+    if (
+      typeof parsed.nodeId === "string" &&
+      typeof parsed.workspacePath === "string" &&
+      typeof parsed.workspaceIdentity === "string"
+    ) {
+      return { nodeId: parsed.nodeId, workspacePath: parsed.workspacePath, workspaceIdentity: parsed.workspaceIdentity };
+    }
+  } catch {
+    // 坏数据按未记录处理。
+  }
+  return null;
+}
+
+/** 目录中解析目标：记住的选择（仍在线可用）> 唯一候选 > null（弹选择屏）。 */
+function resolveBootTarget(catalog: CompanionCatalogResult): BootTarget | null {
+  const candidates: Array<{ nodeId: string; entry: (typeof catalog.nodes)[number]["workspaces"][number] }> = [];
+  for (const node of catalog.nodes) {
+    if (!node.online) continue;
+    for (const entry of node.workspaces) {
+      if (entry.available) candidates.push({ nodeId: node.nodeId, entry });
+    }
+  }
+  const stored = loadStoredTarget();
+  const remembered = stored
+    ? candidates.find((candidate) => candidate.nodeId === stored.nodeId && candidate.entry.workspaceIdentity === stored.workspaceIdentity)
+    : undefined;
+  if (remembered) {
+    return {
+      nodeId: remembered.nodeId,
+      workspacePath: remembered.entry.workspacePath,
+      workspaceIdentity: remembered.entry.workspaceIdentity,
+    };
+  }
+  if (candidates.length === 1) {
+    return {
+      nodeId: candidates[0]!.nodeId,
+      workspacePath: candidates[0]!.entry.workspacePath,
+      workspaceIdentity: candidates[0]!.entry.workspaceIdentity,
+    };
+  }
+  return null;
+}
+
 export async function bootstrapCompanionApp(): Promise<void> {
   if (new URLSearchParams(window.location.search).has("companionDebug")) {
     mountCompanionDebugOverlay();
@@ -178,51 +239,78 @@ export async function bootstrapCompanionApp(): Promise<void> {
     );
     return;
   }
+  await runCompanionBoot(config);
+}
 
-  let relay: CompanionRelayChannel | null = null;
-  let bootClient: CompanionClient | null = null;
-  let workspace: { path: string; identity?: string } | null = null;
+async function runCompanionBoot(config: CompanionWebConfig): Promise<void> {
+  let client: CompanionClient | null = null;
   try {
-    const { client } = await connectCompanionControl(config);
-    bootClient = client;
+    const connected = await connectCompanionControl(config);
+    client = connected.client;
     const catalog = await client.catalog();
-    const node = catalog.nodes.find((entry) => entry.online && entry.workspaces[0]?.available);
-    const workspaceEntry = node?.workspaces[0];
-    if (!node || !workspaceEntry) {
-      throw new Error(isChineseLocale() ? "目录中没有在线且可用的工作区" : "no online workspace in catalog");
+    const target = resolveBootTarget(catalog);
+    if (target === null) {
+      // 多候选：先选目标再进入（选择即记住，重试/重进不再询问）。
+      renderCompanionTargetPicker(catalog, (picked) => {
+        window.sessionStorage.setItem(
+          TARGET_KEY,
+          JSON.stringify({ nodeId: picked.nodeId, workspacePath: picked.workspacePath, workspaceIdentity: picked.workspaceIdentity }),
+        );
+        void attachAndRender(client!, config, picked);
+      }, renderCompanionTree);
+      return;
     }
+    await attachAndRender(client, config, target);
+  } catch (error) {
+    // 引导失败关闭控制面连接；状态屏重试整段重跑（保持记住的目标）。
+    client?.close();
+    renderCompanionStatus(
+      isChineseLocale() ? "接入服务连接失败" : "Companion connection failed",
+      error instanceof Error ? error.message : String(error),
+      () => void runCompanionBoot(config),
+    );
+  }
+}
+
+async function attachAndRender(
+  client: CompanionClient,
+  config: CompanionWebConfig,
+  target: BootTarget,
+): Promise<void> {
+  let relay: CompanionRelayChannel | null = null;
+  let workspace: { path: string; identity?: string };
+  try {
+    const attach = await client.attach({
+      nodeId: target.nodeId,
+      workspacePath: target.workspacePath,
+      workspaceIdentity: target.workspaceIdentity,
+    });
+    relay = await client.openRelayChannel(attach);
     workspace = {
-      path: workspaceEntry.workspacePath,
+      path: target.workspacePath,
       // 云端工作区 identity === path：省略 identity，避免被侧栏按
       // “remoteSessionId 缺失的远程工作区”误判成断连（本地流走 path 语义）。
       identity:
-        workspaceEntry.workspaceIdentity &&
-        workspaceEntry.workspaceIdentity !== workspaceEntry.workspacePath
-          ? workspaceEntry.workspaceIdentity
+        target.workspaceIdentity && target.workspaceIdentity !== target.workspacePath
+          ? target.workspaceIdentity
           : undefined,
     };
-
-    const attach = await client.attach({
-      nodeId: node.nodeId,
-      workspacePath: workspaceEntry.workspacePath,
-      workspaceIdentity: workspaceEntry.workspaceIdentity,
-    });
-    relay = await client.openRelayChannel(attach);
-    // relay 断开（网关重启/网络问题/attachment 拆除）→ 明确提示而非静默挂死。
+    // relay 断开（网关重启/网络问题/attachment 拆除）→ 明确提示而非静默挂死；
+    // 重试整段重跑（新 attach + 全新订阅），目标保持用户上次选择。
     relay.onClosed(() => {
       renderCompanionStatus(
         isChineseLocale() ? "与接入服务的连接已断开" : "Companion connection lost",
         isChineseLocale()
           ? "工作区任务不受影响仍在执行；点击重试将重新 attach 并恢复界面。"
           : "Workspace tasks keep running on the host. Retry to re-attach and restore the UI.",
+        () => void runCompanionBoot(config),
       );
     });
   } catch (error) {
-    // 引导失败时关闭控制面连接（relay 若已建立会自行触发 onClosed 状态屏）。
-    if (!relay) bootClient?.close();
     renderCompanionStatus(
       isChineseLocale() ? "接入服务连接失败" : "Companion connection failed",
       error instanceof Error ? error.message : String(error),
+      () => void runCompanionBoot(config),
     );
     return;
   }
