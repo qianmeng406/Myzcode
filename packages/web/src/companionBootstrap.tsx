@@ -224,6 +224,32 @@ export async function bootstrapCompanionApp(): Promise<void> {
           supportsEmbeddedBrowser={false}
           allowRemoteWorkspace={false}
         />
+        {/* 手机壳内的退出浮钮：回轻量目录页（不拆 attachment，凭据仍在会话内）。 */}
+        {new URLSearchParams(window.location.search).get("lightExit") !== "0" && (
+          <button
+            type="button"
+            onClick={() => {
+              window.localStorage.setItem("zcode-companion-prefer-light", "1");
+              window.location.href = "../index.html";
+            }}
+            style={{
+              position: "fixed",
+              left: 10,
+              bottom: "calc(env(safe-area-inset-bottom, 0px) + 10px)",
+              zIndex: 2147483000,
+              padding: "6px 12px",
+              borderRadius: 999,
+              border: "1px solid rgba(255,255,255,0.14)",
+              background: "rgba(20,20,24,0.72)",
+              color: "#cfcfd8",
+              fontSize: 12,
+              backdropFilter: "blur(6px)",
+              cursor: "pointer",
+            }}
+          >
+            {isChineseLocale() ? "轻量界面" : "Light UI"}
+          </button>
+        )}
       </ZCodeIntlProvider>
     </AppErrorBoundary>,
   );

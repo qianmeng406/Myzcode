@@ -36,6 +36,13 @@ function loadConfig(): CompanionConfig | null {
  */
 const ENDPOINT_KEY = "zcode-companion-endpoint";
 const PERSIST_KEY = "zcode-companion-persist";
+/** 用户在完整 UI 里点过"轻量界面"后置位：之后恢复/配对停在轻量目录页。 */
+const PREFER_LIGHT_KEY = "zcode-companion-prefer-light";
+
+function openFullUi(): void {
+  // 完整 Web UI 在同 WebView 子路径（sessionStorage 配置直接交接，免重新认证）。
+  window.location.href = "webui/index.html?companion=1";
+}
 
 function loadPersistedConfig(): { baseUrl: string; accessToken: string } | null {
   try {
@@ -112,7 +119,11 @@ function App(): React.ReactElement {
       // 恢复在途时用户可能已完成手动配对：不得用旧 token 覆盖新配置。
       if (config && configRef.current === null) {
         configRef.current = config;
-        setView({ name: "catalog" });
+        if (window.localStorage.getItem(PREFER_LIGHT_KEY) === "1") {
+          setView({ name: "catalog" });
+        } else {
+          openFullUi();
+        }
       }
       setRecovered(true);
     })();
@@ -156,7 +167,12 @@ function App(): React.ReactElement {
           window.localStorage.setItem(ENDPOINT_KEY, config.baseUrl);
           window.localStorage.setItem(PERSIST_KEY, JSON.stringify(config));
           setError(null);
-          setView({ name: "catalog" });
+          // 配对成功默认直达完整 Web UI（B 阶段主体验）；轻量页作为后备入口。
+          if (window.localStorage.getItem(PREFER_LIGHT_KEY) === "1") {
+            setView({ name: "catalog" });
+          } else {
+            openFullUi();
+          }
         }}
       />
     );
@@ -363,8 +379,9 @@ function CatalogView(props: {
       <button
         className="feature-card"
         onClick={() => {
-          // 完整 Web UI（同 WebView 子路径，sessionStorage 配置直接交接）。
-          window.location.href = "webui/index.html?companion=1";
+          openFullUi();
+          // 用户主动进完整 UI：清除"偏好轻量"标记，下次恢复仍直达完整界面。
+          window.localStorage.removeItem(PREFER_LIGHT_KEY);
         }}
       >
         <span className="feature-main">
