@@ -10,6 +10,12 @@ export function createDesktopPlatform(options: {
     canSelectFilePath: true,
     createLocalMediaPreviewUrl: buildLocalMediaPreviewUrl,
     isLocalDevelopmentRuntime: options.isLocalDevelopmentRuntime,
+    getCompanionConfig: window.zcode.getCompanionConfig
+      ? () => window.zcode.getCompanionConfig!()
+      : undefined,
+    setCompanionConfig: window.zcode.setCompanionConfig
+      ? (input) => window.zcode.setCompanionConfig!(input)
+      : undefined,
     selectDirectory: () => window.zcode.selectDirectory(),
     selectFile: () => window.zcode.selectFile(),
     selectFiles: () => window.zcode.selectFiles?.() ?? Promise.resolve([]),
