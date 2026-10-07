@@ -14,7 +14,10 @@ export interface MobileInteraction {
   kind: string;
   prompt: string;
   options: Array<{ optionId: string; label: string }>;
+  /** 允许自由文本回答（permission 反馈 / userInput 输入）。 */
   freeText: boolean;
+  /** 敏感输入：按密码框渲染，只留内存、不入草稿/历史。 */
+  sensitive: boolean;
 }
 
 function rowText(raw: Record<string, unknown>): string {
@@ -60,6 +63,7 @@ function describeInteraction(raw: Record<string, unknown>): MobileInteraction | 
         }))
         .filter((option) => option.optionId !== ""),
       freeText: payload.freeText === true,
+      sensitive: payload.sensitive === true,
     };
   }
   if (kind === "userInput") {
@@ -76,10 +80,11 @@ function describeInteraction(raw: Record<string, unknown>): MobileInteraction | 
         }))
         .filter((option) => option.optionId !== ""),
       freeText: payload.freeText === true,
+      sensitive: payload.sensitive === true,
     };
   }
   // workspaceHookReview 等其余类型：v1 只展示，不提供手机侧按钮（命令面未开放）。
-  return { interactionId, kind, prompt: "待处理项（请在电脑端处理）", options: [], freeText: false };
+  return { interactionId, kind, prompt: "待处理项（请在电脑端处理）", options: [], freeText: false, sensitive: false };
 }
 
 export interface ConversationState {

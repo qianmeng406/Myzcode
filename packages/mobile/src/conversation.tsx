@@ -24,6 +24,7 @@ import {
   type ConversationState,
 } from "./conversationState.js";
 import { agentServiceOf } from "./sessions.js";
+import { InteractionCard } from "./interactionCard.js";
 
 export interface ConversationTarget {
   node: string;
@@ -232,7 +233,7 @@ export function ConversationView(props: {
   }, [transport, newCommandId, sendCommandWithReconcile]);
 
   const answerInteraction = useCallback(
-    async (interactionId: string, optionId: string): Promise<void> => {
+    async (interactionId: string, answer: { optionId?: string; freeText?: string }): Promise<void> => {
       const activeTransport = transport;
       const current = stateRef.current;
       if (activeTransport === null || current.sessionId === null) return;
@@ -243,7 +244,7 @@ export function ConversationView(props: {
           clientId: getV4ClientId(),
           sessionId: current.sessionId,
           type: "resolveInteraction",
-          payload: { interactionId, answer: { optionId } },
+          payload: { interactionId, answer },
           issuedAt: Date.now(),
         });
       } catch (answerError) {
@@ -322,22 +323,12 @@ export function ConversationView(props: {
           ))}
         </div>
         {state.interactions.map((interaction) => (
-          <div key={interaction.interactionId} className="row">
-            <div className="kind">{interaction.kind}</div>
-            {interaction.prompt}
-            <div className="answer">
-              {interaction.options.map((option) => (
-                <button
-                  key={option.optionId}
-                  className="button secondary"
-                  disabled={state.sessionId === null}
-                  onClick={() => void answerInteraction(interaction.interactionId, option.optionId)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <InteractionCard
+            key={interaction.interactionId}
+            interaction={interaction}
+            disabled={state.sessionId === null}
+            onAnswer={answerInteraction}
+          />
         ))}
         {rendered.length === 0 && state.interactions.length === 0 && transport !== null && (
           <p className="muted">
