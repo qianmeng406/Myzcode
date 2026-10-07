@@ -25,6 +25,8 @@ interface SwitchCandidate {
 
 export function WorkspaceView(props: {
   target: ConversationTarget;
+  /** 目录任务直达：attach 成功后自动打开该会话（每目标只生效一次）。 */
+  initialSessionId: string | null;
   ensureClient: () => Promise<CompanionClient>;
   /** 连接代次：控制面掉线重连成功后 +1，触发 re-attach 与订阅重建。 */
   connectionEpoch: number;
@@ -74,6 +76,10 @@ export function WorkspaceView(props: {
         attachRef.current = record;
         setAttachment(record);
         setError(null);
+        // 任务直达：从目录点具体任务进入时自动打开该会话（pushState 一次）。
+        if (props.initialSessionId !== null && openRef.current === null) {
+          openSessionRef.current?.(props.initialSessionId);
+        }
       } catch (attachError) {
         if (!disposed) {
           setError(attachError instanceof Error ? attachError.message : String(attachError));
@@ -104,6 +110,8 @@ export function WorkspaceView(props: {
     window.history.pushState({ view: "chat", sessionId }, "");
     setOpenSessionId(sessionId);
   }, []);
+  const openSessionRef = useRef<((sessionId: string) => void) | null>(null);
+  openSessionRef.current = openSession;
 
   const backToSessions = useCallback((): void => {
     if (window.history.state?.view === "chat") {

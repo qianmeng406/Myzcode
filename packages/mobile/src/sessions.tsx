@@ -104,7 +104,7 @@ export function markSessionSeen(workspaceIdentity: string, sessionId: string, la
   }
 }
 
-function relativeTime(timestamp: number, now: number): string {
+export function relativeTime(timestamp: number, now: number): string {
   const delta = Math.max(0, now - timestamp);
   if (delta < 60_000) return "刚刚";
   if (delta < 3_600_000) return `${Math.floor(delta / 60_000)} 分钟前`;

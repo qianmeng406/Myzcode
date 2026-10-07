@@ -979,6 +979,41 @@ async function applyCompanionConfig(next: DesktopCompanionConfig): Promise<void>
         );
         return port1;
       },
+      resolveListPort: (entry, listId) => {
+        // 任务索引临时端口：与 attachment 同机制、短生命周期（读取器取到快照即 close）。
+        if (entry.remoteSessionId !== undefined) {
+          return remoteSessionManager
+            .attachRemoteWorkspaceSessionHost({
+              windowId: entry.windowId,
+              remoteSessionId: entry.remoteSessionId,
+              workspacePath: entry.workspacePath,
+              workspaceIdentity: entry.workspaceIdentity,
+              workspaceKey: entry.workspaceIdentity,
+              clientMode: "web-remote-replayable",
+            })
+            .port;
+        }
+        const { port1, port2 } = new MessageChannelMain();
+        const host = windowHostProcessMap.get(entry.windowId);
+        if (!host) {
+          port2.close();
+          port1.close();
+          throw Object.assign(new Error("window host is not running"), {
+            code: "workspace_unavailable",
+          });
+        }
+        host.postMessage(
+          {
+            type: HostMessageTypes.AttachServicePort,
+            requestId: randomUUID(),
+            attachmentId: listId,
+            clientMode: "web-remote-replayable",
+            scope: { kind: "local" },
+          },
+          [port2],
+        );
+        return port1;
+      },
       log: (message, details) => logger.info("[companion-desktop] " + message, details),
     },
   });

@@ -20,6 +20,7 @@ import {
   residentDaemonStatusPath,
 } from "../remote/resident-protocol.js";
 import { openCompanionRelayAttachment, type CompanionLogger } from "./relayAttachment.js";
+import { readWorkspaceTaskSummary } from "./ephemeralTaskIndex.js";
 import { connectControlChannel } from "./controlChannel.js";
 
 export interface CloudCompanionWorkspace {
@@ -104,6 +105,29 @@ export async function startCloudCompanionConnector(
       const teardown = await openRelayAttachment(gatewayUrl, options, params, log);
       attachments.set(params.attachmentId, teardown);
       return { ok: true };
+    }
+    if (frame.op === "workspace-tasks") {
+      const params = frame.params as
+        | { workspaceIdentity?: unknown; workspacePath?: unknown }
+        | null;
+      const workspaceIdentity = typeof params?.workspaceIdentity === "string" ? params.workspaceIdentity : "";
+      const workspacePath = typeof params?.workspacePath === "string" ? params.workspacePath : workspaceIdentity;
+      const result = await readWorkspaceTaskSummary({
+        workspacePath,
+        workspaceIdentity,
+        createUpstream: async () => {
+          const status = await readResidentDaemonStatus(residentDaemonStatusPath(options.runtimeRoot));
+          if (!status) {
+            throw Object.assign(new Error("resident daemon not running"), { code: "workspace_unavailable" });
+          }
+          const tcp = await connectLoopbackPort(status.port);
+          const upstreamSocket = await performClientHandshake(tcp);
+          const client = new ChannelClient(new SocketProtocol(upstreamSocket));
+          return { channelClient: client, dispose: () => tcp.destroy() };
+        },
+        log,
+      });
+      return { ok: true, result };
     }
     if (frame.op === "detach") {
       const params = frame.params as { attachmentId?: unknown } | null;

@@ -9,7 +9,8 @@
     "./remote/*.js": "./src/remote/*.ts",
     "./companion": "./src/companion/cloudConnector.ts",
     "./companion-control": "./src/companion/controlChannel.js",
-    "./companion-relay": "./src/companion/relayAttachment.js"
+    "./companion-relay": "./src/companion/relayAttachment.js",
+    "./companion-task-index": "./src/companion/ephemeralTaskIndex.ts"
   },
   "scripts": {
     "dev": "tsup --watch --onSuccess 'node dist/entry-http.js'",

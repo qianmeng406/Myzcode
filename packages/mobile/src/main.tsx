@@ -39,6 +39,8 @@ type View =
       workspacePath: string;
       workspaceIdentity: string;
       title: string;
+      /** 目录任务直达：attach 成功后自动打开该会话。 */
+      initialSessionId?: string;
     };
 
 function App(): React.ReactElement {
@@ -174,8 +176,8 @@ function App(): React.ReactElement {
         {error !== null && <div className="error" style={{ padding: "0 16px" }}>{error}</div>}
         <CatalogView
           ensureClient={ensureClient}
-          onOpen={(node, workspacePath, workspaceIdentity, title) =>
-            setView({ name: "workspace", node, workspacePath, workspaceIdentity, title })
+          onOpen={(node, workspacePath, workspaceIdentity, title, initialSessionId) =>
+            setView({ name: "workspace", node, workspacePath, workspaceIdentity, title, initialSessionId })
           }
           onOpenFullUi={() => {
             openFullUi();
@@ -194,6 +196,7 @@ function App(): React.ReactElement {
         workspaceIdentity: view.workspaceIdentity,
         title: view.title,
       }}
+      initialSessionId={view.initialSessionId ?? null}
       ensureClient={ensureClient}
       connectionEpoch={connectionEpoch}
       onBackToCatalog={() => setView({ name: "catalog" })}

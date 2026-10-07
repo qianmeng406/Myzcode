@@ -5,10 +5,12 @@
 // 路径/身份绑定必须发生在连接器侧，防手机越权访问同 Host 其他工作区）。
 import { ChannelClient, MessagePortProtocol, type IChannel } from "@zcode/rpc";
 import { companionAttachRequestParamsSchema } from "@zcode/shared/companion-protocol";
+import { randomUUID } from "node:crypto";
 import {
   connectControlChannel,
   type ControlChannel,
 } from "@zcode/server/companion-control";
+import { readWorkspaceTaskSummary } from "@zcode/server/companion-task-index";
 import {
   openCompanionRelayAttachment,
   type CompanionLogger,
@@ -36,6 +38,11 @@ export interface CompanionPortLike {
 export interface DesktopCompanionConnectorDeps {
   listOpenWorkspaces(): OpenWorkspaceEntry[];
   resolveAttachmentPort(entry: OpenWorkspaceEntry, attachmentId: string): CompanionPortLike;
+  /**
+   * 任务索引用的临时列表端口（specs §11.4）：与 attachment 端口同机制但
+   * 短生命周期——读取器取到快照即 close，Host 侧 scope 随之释放。
+   */
+  resolveListPort(entry: OpenWorkspaceEntry, listId: string): CompanionPortLike;
   log: CompanionLogger;
 }
 
@@ -153,6 +160,26 @@ export async function startDesktopCompanionConnector(
       });
       attachments.set(params.attachmentId, { entry, teardown });
       return { ok: true };
+    }
+    if (frame.op === "workspace-tasks") {
+      const params = frame.params as { workspaceIdentity?: unknown } | null;
+      const workspaceIdentity = typeof params?.workspaceIdentity === "string" ? params.workspaceIdentity : "";
+      const entry = buildCatalogEntries().find(
+        (candidate) => candidate.workspaceIdentity === workspaceIdentity,
+      );
+      if (!entry) {
+        return { ok: false, code: "workspace_unavailable", message: "workspace not open or not shared" };
+      }
+      const result = await readWorkspaceTaskSummary({
+        workspacePath: entry.workspacePath,
+        workspaceIdentity: entry.workspaceIdentity,
+        createUpstream: async () => {
+          const port = options.deps.resolveListPort(entry, `task-index-${randomUUID()}`);
+          return createPortUpstream(port);
+        },
+        log,
+      });
+      return { ok: true, result };
     }
     if (frame.op === "detach") {
       const params = frame.params as { attachmentId?: unknown } | null;

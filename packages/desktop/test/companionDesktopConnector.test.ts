@@ -102,6 +102,12 @@ test("目录只包含白名单工作区；attach 走对端口；非白名单被�
           createdPorts.push(port);
           return port;
         },
+        resolveListPort: (entry) => {
+          resolvedIdentity = entry.workspaceIdentity;
+          const port = createFakePort();
+          createdPorts.push(port);
+          return port;
+        },
         log: noopLogger.info,
       },
     });
@@ -175,6 +181,11 @@ test("白名单收缩即时拆除已不在名单内的 attachment；窗口关闭
       deps: {
         listOpenWorkspaces: () => openWorkspaces,
         resolveAttachmentPort: () => {
+          const port = createFakePort();
+          createdPorts.push(port);
+          return port;
+        },
+        resolveListPort: () => {
           const port = createFakePort();
           createdPorts.push(port);
           return port;

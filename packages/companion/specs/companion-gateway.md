@@ -200,6 +200,18 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 - 没有这层，file/git 等只读白名单会退化成宿主任意路径读取原语（审查发现并已封堵）。
 - zcode-agent 由既有窄 facade 注入，语义相同。
 
+### 11.4a 只读任务索引（目录层跨工作区聚合）
+
+- op：手机 `workspace-tasks {nodeId, workspaceIdentity}` → hub（grants 裁决与 attach 同一
+  函数 + 30s TTL 缓存）→ 节点 `workspace-tasks` → connector。
+- connector 执行 `readWorkspaceTaskSummary`：对既有运行时开**临时上游**（云端 = daemon
+  loopback TCP；桌面 = 窗口 Host 临时 attachment 端口），v4 握手后以
+  `runtimePolicy: "existing-only"` 订阅 sessions-index，取首个权威快照即退订并释放——
+  **不新建执行者**（start-if-needed 只属于手机显式进入工作区路径）。
+- 摘要只含目录展示最小字段（sessionId/title/ended/pendingCount/lastActivityAt，≤20 条，
+  title 截断 200 字）；不携带正文/命令/答案。全程硬超时，失败返回 `available:false`。
+- 任务权威永远在执行端；gateway 缓存只是展示摘要，随 grants 收缩由裁决路径即时拒绝。
+
 ### 11.5 桌面与云端差异
 
 - 桌面附着工作区：上游 Host 已暴露完整 remote ServiceCollection，relay 按本表逐频道裁决。

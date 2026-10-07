@@ -506,6 +506,84 @@ test("attach 超时：回复手机并同步请求节点清理（防孤儿 attach
   assert.equal(detach.op, "detach");
 });
 
+test("workspace-tasks：grants 校验 + 节点转发 + 30s TTL 缓存", async () => {
+  const { hub, store } = await makeHub();
+  const nodeLink = await attachOnlineNode(hub);
+  // 节点侧应答任务摘要（带调用计数，验证缓存命中不再透传）。
+  let summaryCalls = 0;
+  nodeLink.onAttach(() => ({ ok: true }));
+  nodeLink.request = async (op: string, params: unknown) => {
+    if (op === "workspace-tasks") {
+      summaryCalls += 1;
+      return {
+        ok: true,
+        result: {
+          generatedAt: 1,
+          available: true,
+          sessions: [
+            { sessionId: "s1", title: "修复登录", sessionEnded: false, pendingCount: 2, lastActivityAt: 9 },
+          ],
+        },
+      } as never;
+    }
+    return { ok: true } as never;
+  };
+  void store;
+  const mobile = new FakeMobileLink("dev-1");
+  hub.handleMobileOpened(mobile);
+
+  const request = (requestId: string): Promise<{ ok: boolean; value: { result?: { sessions: unknown[] }; code?: string } }> =>
+    hub
+      .handleMobileRequest(mobile, requestId, "workspace-tasks", {
+        nodeId: "cloud-1",
+        workspaceIdentity: "/srv/demo",
+      })
+      .then(() => mobile.waitForResponse(requestId)) as never;
+
+  const first = (await request("t1")) as never as { ok: boolean; value: { result?: { sessions: unknown[] } } };
+  assert.ok(first.ok);
+  assert.equal(first.value.result!.sessions.length, 1);
+  assert.equal(summaryCalls, 1);
+
+  // TTL 内第二次请求：缓存命中，节点不再被调用。
+  const second = (await request("t2")) as never as { ok: boolean; value: { result?: { sessions: unknown[] } } };
+  assert.ok(second.ok);
+  assert.equal(summaryCalls, 1);
+});
+
+test("workspace-tasks：未授权工作区拒绝、离线节点拒绝", async () => {
+  const { hub, store } = await makeHub();
+  await attachOnlineNode(hub);
+  await store.saveGrants({
+    deviceId: "dev-1",
+    nodes: [{ nodeId: "cloud-1", workspaceIdentities: ["/srv/other"] }],
+  });
+  const mobile = new FakeMobileLink("dev-1");
+  hub.handleMobileOpened(mobile);
+  await hub.handleMobileRequest(mobile, "t3", "workspace-tasks", {
+    nodeId: "cloud-1",
+    workspaceIdentity: "/srv/demo",
+  });
+  const denied = (await mobile.waitForResponse("t3")) as { ok: boolean; value: { code?: string } };
+  assert.equal(denied.ok, false);
+  assert.equal(denied.value.code, "forbidden_workspace");
+
+  // 离线节点（先授权后断开 node 链路）。
+  await store.saveGrants({
+    deviceId: "dev-1",
+    nodes: [{ nodeId: "cloud-1", workspaceIdentities: [] }],
+  });
+  const nodeLink = hub["nodeLinks"].get("cloud-1");
+  if (nodeLink) hub.handleNodeClosed("cloud-1", nodeLink as FakeNodeLink);
+  await hub.handleMobileRequest(mobile, "t4", "workspace-tasks", {
+    nodeId: "cloud-1",
+    workspaceIdentity: "/srv/demo",
+  });
+  const offline = (await mobile.waitForResponse("t4")) as { ok: boolean; value: { code?: string } };
+  assert.equal(offline.ok, false);
+  assert.equal(offline.value.code, "node_offline");
+});
+
 test("未知节点 hello 被拒", async () => {
   const { hub } = await makeHub();
   const link = new FakeNodeLink();

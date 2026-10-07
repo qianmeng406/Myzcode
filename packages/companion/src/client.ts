@@ -4,13 +4,18 @@
 // 手机侧因此能直接复用 packages/ui 的 v4 会话数据层与恢复语义。
 import { ChannelClient, SocketProtocol } from "@zcode/rpc";
 import {
+  COMPANION_CSRF_HEADERS,
   companionAttachResultSchema,
   companionCatalogResultSchema,
+  companionWorkspaceTasksParamsSchema,
+  companionWorkspaceTasksResultSchema,
   type CompanionAttachParams,
   type CompanionAttachResult,
   type CompanionCatalogResult,
   type CompanionDetachParams,
-  type CompanionEvent,  COMPANION_CSRF_HEADERS,
+  type CompanionEvent,
+  type CompanionWorkspaceTasksParams,
+  type CompanionWorkspaceTasksResult,
 } from "@zcode/shared/companion-protocol";
 import { RemoteServiceAccess, wrapBrowserWebSocket } from "@zcode/client";
 import type { IServiceAccessor } from "@zcode/services";
@@ -300,6 +305,22 @@ export class CompanionClient {
 
   async detach(params: CompanionDetachParams): Promise<void> {
     await this.request("detach", params);
+  }
+
+  /**
+   * 只读任务索引（specs §11.4）：目录层跨工作区任务摘要，gateway 侧
+   * 30s TTL 缓存；工作区未在运行时返回 available:false 而非报错。
+   */
+  async workspaceTasks(params: CompanionWorkspaceTasksParams): Promise<CompanionWorkspaceTasksResult> {
+    const result = await this.request("workspace-tasks", params);
+    if (!result.ok) {
+      throw new Error(`companion workspace-tasks failed: ${result.code} ${result.message}`);
+    }
+    const parsed = companionWorkspaceTasksResultSchema.safeParse(result.result);
+    if (!parsed.success) {
+      throw new Error("companion workspace-tasks response malformed");
+    }
+    return parsed.data;
   }
 
   /**

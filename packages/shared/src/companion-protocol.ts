@@ -131,6 +131,37 @@ export const companionDetachParamsSchema = z.object({
 });
 export type CompanionDetachParams = z.infer<typeof companionDetachParamsSchema>;
 
+/**
+ * 只读任务索引（specs §11.4）：手机在目录层跨工作区聚合任务。
+ * connector 对既有运行时做一次 existing-only 订阅取权威快照即退——
+ * 不新建执行者（start-if-needed 只属于手机显式进入工作区路径），
+ * gateway 只做短 TTL 缓存，任务权威永远在执行端。
+ */
+export const companionWorkspaceTasksParamsSchema = z.object({
+  nodeId: companionNodeIdSchema,
+  workspaceIdentity: z.string().min(1).max(1024),
+});
+export type CompanionWorkspaceTasksParams = z.infer<typeof companionWorkspaceTasksParamsSchema>;
+
+/** 单条任务摘要：只含目录展示所需最小字段，不携带正文/命令/答案。 */
+export const companionWorkspaceTaskItemSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  title: z.string().max(256),
+  sessionEnded: z.boolean(),
+  pendingCount: z.number().int().nonnegative(),
+  lastActivityAt: z.number().int().nonnegative(),
+});
+export type CompanionWorkspaceTaskItem = z.infer<typeof companionWorkspaceTaskItemSchema>;
+
+export const companionWorkspaceTasksResultSchema = z.object({
+  /** 摘要产生时间（connector 时钟）；供手机端陈旧标记。 */
+  generatedAt: z.number().int().nonnegative(),
+  /** 可用即真；不可用（运行时未起等）时 sessions 为空且 available=false。 */
+  available: z.boolean(),
+  sessions: z.array(companionWorkspaceTaskItemSchema).max(20),
+});
+export type CompanionWorkspaceTasksResult = z.infer<typeof companionWorkspaceTasksResultSchema>;
+
 // ── gateway ↔ connector 控制操作（/companion/node） ──
 
 export const companionNodeHelloParamsSchema = z.object({

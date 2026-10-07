@@ -3,6 +3,7 @@
 // 空工作区白名单 = 该节点全部共享工作区（个人自托管默认粒度，spec §6）。
 import type { CompanionCatalogResult, CompanionWorkspaceEntry } from "@zcode/shared/companion-protocol";
 import type { CompanionDeviceGrants } from "../domain/grants.js";
+import type { CompanionEvent } from "@zcode/shared/companion-protocol";
 
 export function buildDeviceCatalog(input: {
   records: ReadonlyArray<{ nodeId: string; kind: "desktop" | "cloud"; displayName: string; revokedAt?: number }>;
@@ -32,4 +33,31 @@ export function buildDeviceCatalog(input: {
       };
     });
   return { nodes };
+}
+
+/**
+ * 节点状态事件按设备 grants 过滤后广播：未授权节点不向设备发送
+ * （存在性不泄露）。grants 读取失败按可见处理——状态是只读展示面，
+ * attach 仍有独立裁决。
+ */
+export async function broadcastNodeStatus(options: {
+  links: ReadonlyArray<{ deviceId: string; sendEvent(event: CompanionEvent): void }>;
+  getGrants(deviceId: string): Promise<CompanionDeviceGrants | null>;
+  nodeId: string;
+  online: boolean;
+}): Promise<void> {
+  const event: CompanionEvent = {
+    v: 1,
+    event: "nodeStatus",
+    payload: { nodeId: options.nodeId, online: options.online },
+  };
+  for (const link of options.links) {
+    try {
+      const grants = await options.getGrants(link.deviceId);
+      if (!grants?.nodes.some((entry) => entry.nodeId === options.nodeId)) continue;
+    } catch {
+      // 读不到按可见处理。
+    }
+    link.sendEvent(event);
+  }
 }

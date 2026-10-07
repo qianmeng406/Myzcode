@@ -1,10 +1,6 @@
-// Companion hub：gateway 的链路编排骨架（app 层，IO 全部经 ports）。
-// attachment 状态机（pending/active/relay 绑定/计时器）归 AttachmentRegistry 所有；
-// hub 持有节点与手机的在线链路、工作区目录缓存与 catalog 编排。
-// 不变量（specs/companion-gateway.md）：
-//  - 一条手机连接同时至多绑定一个 attachment（切换 = detach → attach）；
-//  - 数据面 binary 帧只在 relay 双端间逐帧互转，hub/registry 不缓存、不解释；
-//  - hub 不持有任务/会话状态；节点断开只影响经它的 attachment，不影响运行时任务。
+// Companion hub：gateway 链路编排骨架（IO 经 ports；attachment 状态机归
+// AttachmentRegistry，任务摘要代理归 taskSummaryProxy）。不变量见
+// specs/companion-gateway.md：单设备单 attachment；relay 逐帧互转不缓存。
 import {
   companionAttachParamsSchema,
   companionDetachParamsSchema,
@@ -16,26 +12,31 @@ import {
 import { canCreateAttachment, decideDeviceWorkspaceAccess } from "../domain/grants.js";
 import type { CompanionDeviceGrants } from "../domain/grants.js";
 import { runRevocationSweep } from "./revocationSweep.js";
-import { buildDeviceCatalog } from "./catalogView.js";
+import { buildDeviceCatalog, broadcastNodeStatus as broadcastNodeStatusToDevices } from "./catalogView.js";
+import { createWorkspaceTasksResolver, type WorkspaceTasksResolver } from "./taskSummaryProxy.js";
 import { AttachmentRegistry } from "./attachmentRegistry.js";
 import type {
+  Clock,
+  ControlStore,
   GatewayDefaults,
   HubLogger,
   MobileLink,
   NodeLink,
   RelayJoin,
+  SecretBox,
 } from "./ports.js";
 
 export interface CompanionHubDeps {
-  store: import("./ports.js").ControlStore;
-  clock: import("./ports.js").Clock;
-  secrets: import("./ports.js").SecretBox;
+  store: ControlStore;
+  clock: Clock;
+  secrets: SecretBox;
   defaults: GatewayDefaults;
   logger: HubLogger;
 }
 
 export class CompanionHub {
   private readonly registry: AttachmentRegistry;
+  private readonly taskSummaryProxy: WorkspaceTasksResolver;
   private readonly nodeLinks = new Map<string, NodeLink>();
   private readonly nodeWorkspaces = new Map<string, CompanionWorkspaceEntry[]>();
   private readonly nodeDisplayNames = new Map<string, string>();
@@ -43,6 +44,12 @@ export class CompanionHub {
   private stopped = false;
 
   constructor(private readonly deps: CompanionHubDeps) {
+    this.taskSummaryProxy = createWorkspaceTasksResolver({
+      store: deps.store,
+      clock: deps.clock,
+      logger: deps.logger,
+      resolveNodeLink: (nodeId) => this.nodeLinks.get(nodeId) ?? null,
+    });
     this.registry = new AttachmentRegistry(
       {
         logger: deps.logger,
@@ -66,6 +73,7 @@ export class CompanionHub {
     this.nodeWorkspaces.clear();
     this.nodeDisplayNames.clear();
     this.mobileLinks.clear();
+    this.taskSummaryProxy.clear();
   }
 
   // ── 节点侧 ──
@@ -177,6 +185,10 @@ export class CompanionHub {
       }
       if (op === "attach") {
         await this.handleAttach(link, id, rawParams);
+        return;
+      }
+      if (op === "workspace-tasks") {
+        await this.taskSummaryProxy.resolve(link, id, rawParams);
         return;
       }
       if (op === "detach") {
@@ -375,22 +387,11 @@ export class CompanionHub {
   }
 
   private broadcastNodeStatus(nodeId: string, online: boolean): void {
-    const event: CompanionEvent = {
-      v: 1,
-      event: "nodeStatus",
-      payload: { nodeId, online },
-    };
-    // 逐链路按 grants 过滤：未授权节点不向设备广播（存在性不泄露）。
-    void (async () => {
-      for (const link of Array.from(this.mobileLinks)) {
-        try {
-          const grants = await this.deps.store.getGrants(link.deviceId);
-          if (!grants?.nodes.some((entry) => entry.nodeId === nodeId)) continue;
-        } catch {
-          // grants 读取失败按可见处理：状态是只读展示面，attach 仍有独立裁决。
-        }
-        link.sendEvent(event);
-      }
-    })();
+    void broadcastNodeStatusToDevices({
+      links: Array.from(this.mobileLinks),
+      getGrants: (deviceId) => this.deps.store.getGrants(deviceId),
+      nodeId,
+      online,
+    });
   }
 }
