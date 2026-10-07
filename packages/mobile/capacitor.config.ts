@@ -2,7 +2,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
   appId: "com.zcode.myzcode",
-  appName: "My zcode",
+  appName: "Myzcode",
   // 网页产物由 `pnpm build` 生成；Android 壳只加载本地构建（不依赖远程页面）。
   webDir: "dist",
   server: {

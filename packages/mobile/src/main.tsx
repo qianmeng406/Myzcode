@@ -152,7 +152,7 @@ function App(): React.ReactElement {
     return (
       <div className="app">
         <header className="topbar">
-          <h1>My zcode</h1>
+          <h1>Myzcode</h1>
           <button
             className="button secondary"
             onClick={() => {
