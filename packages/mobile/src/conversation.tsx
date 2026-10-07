@@ -100,8 +100,8 @@ export function ConversationView(props: {
       }
       currentTransport = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 通道按目标建立一次；重建由返回列表触发
-  }, [view.workspaceIdentity, initialSessionId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 通道按目标/连接代次建立；重建由 accessor 换新触发
+  }, [props.accessor, view.workspaceIdentity, initialSessionId]);
 
   const newCommandId = useCallback(
     (): string => `mob-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,

@@ -4,6 +4,7 @@
 import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CompanionClient } from "@zcode/companion/client";
+import { CompanionConnectionSession } from "@zcode/companion/connection-session";
 import "./app.css";
 import { CatalogView } from "./catalog.js";
 import { WorkspaceView } from "./workspace.js";
@@ -105,9 +106,53 @@ type View =
 function App(): React.ReactElement {
   const [view, setView] = useState<View>(() => (loadConfig() ? { name: "catalog" } : { name: "config" }));
   const [error, setError] = useState<string | null>(null);
-  const clientRef = useRef<CompanionClient | null>(null);
   const configRef = useRef<CompanionConfig | null>(loadConfig());
-  const ensureInFlightRef = useRef<Promise<CompanionClient> | null>(null);
+  const sessionRef = useRef<CompanionConnectionSession | null>(null);
+  const sessionKeyRef = useRef<string | null>(null);
+  const everConnectedRef = useRef(false);
+  // 连接代次：掉线重连成功后 +1，工作区视图据此 re-attach 并重建订阅。
+  const [connectionEpoch, setConnectionEpoch] = useState(0);
+
+  // 唯一连接所有者：目录/工作区/完整 UI 共用；重连、静默刷新、前台探测都在这里。
+  const ensureSession = useCallback((config: CompanionConfig): CompanionConnectionSession => {
+    const key = `${config.baseUrl}|${config.accessToken}`;
+    if (sessionRef.current !== null && sessionKeyRef.current === key) {
+      return sessionRef.current;
+    }
+    sessionRef.current?.stop();
+    const session = new CompanionConnectionSession({
+      baseUrl: config.baseUrl,
+      accessToken: config.accessToken,
+      refresh: async (baseUrl) => {
+        const result = await CompanionClient.refresh({ baseUrl });
+        const next = { baseUrl, accessToken: result.accessToken };
+        configRef.current = next;
+        window.sessionStorage.setItem(CONFIG_KEY, JSON.stringify(next));
+        window.localStorage.setItem(PERSIST_KEY, JSON.stringify(next));
+        return result.accessToken;
+      },
+      onStateChange: (state) => {
+        if (state === "connected") {
+          setError(null);
+          if (everConnectedRef.current) setConnectionEpoch((epoch) => epoch + 1);
+          everConnectedRef.current = true;
+        } else if (state === "reconnecting") {
+          setError("与接入服务的连接已断开，正在重连…");
+        } else if (state === "authExpired") {
+          // 刷新也失效：清会话回配对页（refresh Cookie 已死，不能再自动恢复）。
+          configRef.current = null;
+          window.sessionStorage.removeItem(CONFIG_KEY);
+          window.localStorage.removeItem(PERSIST_KEY);
+          setError("登录已过期，请重新配对");
+          setView({ name: "config" });
+        }
+      },
+    });
+    session.start();
+    sessionRef.current = session;
+    sessionKeyRef.current = key;
+    return session;
+  }, []);
 
   // Cookie 会话恢复：access 缺失但 endpoint 已记住时，静默刷新一轮；
   // 成功直接进目录页（配对跨 App 重启持久），失败留在配对页。
@@ -129,52 +174,26 @@ function App(): React.ReactElement {
     })();
   }, [recovered]);
 
+  // 前台恢复即时探测：WebView 回前台时取消退避等待，立即尝试重连。
+  useEffect(() => {
+    const onVisible = (): void => {
+      if (document.visibilityState === "visible") sessionRef.current?.nudge();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", () => sessionRef.current?.nudge());
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
   const ensureClient = useCallback(async (): Promise<CompanionClient> => {
     const config = configRef.current;
     if (!config) {
       setView({ name: "config" });
       throw new Error("未配置");
     }
-    if (clientRef.current?.isOpen()) {
-      return clientRef.current;
-    }
-    // 并发去重：两个调用方同时 ensure 会各建一条控制连接，先建者变孤儿链路。
-    if (ensureInFlightRef.current) return ensureInFlightRef.current;
-    const attempt = (async (): Promise<CompanionClient> => {
-      clientRef.current?.close();
-      const buildClient = (accessToken: string): CompanionClient =>
-        new CompanionClient({
-          baseUrl: config.baseUrl,
-          accessToken,
-          onClose: () => setError("与接入服务的连接已断开"),
-        });
-      let client = buildClient(config.accessToken);
-      try {
-        await client.connect();
-      } catch (connectError) {
-        if (!CompanionClient.isAuthRejectedError(connectError)) throw connectError;
-        // access 过期：HttpOnly refresh Cookie 静默换新，仅重试一次；
-        // 刷新失败把原始鉴权错误抛给调用方（回配对页）。
-        const refreshed = await CompanionClient.refresh({ baseUrl: config.baseUrl });
-        const next = { baseUrl: config.baseUrl, accessToken: refreshed.accessToken };
-        configRef.current = next;
-        window.sessionStorage.setItem(CONFIG_KEY, JSON.stringify(next));
-        window.localStorage.setItem(PERSIST_KEY, JSON.stringify(next));
-        client.close();
-        client = buildClient(refreshed.accessToken);
-        await client.connect();
-      }
-      clientRef.current = client;
-      return client;
-    })();
-    // ref 存 finally 链、清理却比对 attempt：两个不同 Promise 永不相等，
-    // 失败的尝试会永久滞留 in-flight，之后所有 ensure 复用同一次拒绝、无法重连。
-    const inFlight = attempt.finally(() => {
-      if (ensureInFlightRef.current === inFlight) ensureInFlightRef.current = null;
-    });
-    ensureInFlightRef.current = inFlight;
-    return inFlight;
-  }, []);
+    const client = await ensureSession(config).ensureConnected();
+    // 会话默认工厂持有完整 CompanionClient（catalog/attach/relay 只在它上面）。
+    return client as CompanionClient;
+  }, [ensureSession]);
 
   if (view.name === "config") {
     return (
@@ -204,8 +223,10 @@ function App(): React.ReactElement {
           <button
             className="button secondary"
             onClick={() => {
-              clientRef.current?.close();
-              clientRef.current = null;
+              sessionRef.current?.stop();
+              sessionRef.current = null;
+              sessionKeyRef.current = null;
+              everConnectedRef.current = false;
               setView({ name: "config" });
             }}
           >
@@ -236,6 +257,7 @@ function App(): React.ReactElement {
         title: view.title,
       }}
       ensureClient={ensureClient}
+      connectionEpoch={connectionEpoch}
       onBackToCatalog={() => setView({ name: "catalog" })}
     />
   );

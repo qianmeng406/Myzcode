@@ -850,7 +850,6 @@ function cancelCompanionReconnect(): void {
     companionReconnectTimer = null;
   }
   companionReconnectInFlight = false;
-  companionReconnectBackoffMs = COMPANION_RECONNECT_MIN_MS;
 }
 
 function scheduleCompanionReconnect(reason: string): void {
@@ -858,7 +857,10 @@ function scheduleCompanionReconnect(reason: string): void {
   const config = companionConfigRef;
   if (!config?.enabled || config.gatewayUrl.trim() === "" || config.nodeToken.trim() === "") return;
   companionReconnectInFlight = true;
-  const delay = companionReconnectBackoffMs;
+  // full jitter：延迟在 [0.5, 1)×退避之间抖动，避免多端同步重连打满网关。
+  const delay = Math.floor(
+    companionReconnectBackoffMs * (0.5 + Math.random() * 0.5),
+  );
   companionReconnectBackoffMs = Math.min(companionReconnectBackoffMs * 2, COMPANION_RECONNECT_MAX_MS);
   logger.info("[companion-desktop] reconnect scheduled", { reason, delayMs: delay });
   companionReconnectTimer = setTimeout(() => {
@@ -872,8 +874,10 @@ function scheduleCompanionReconnect(reason: string): void {
         });
       } finally {
         companionReconnectInFlight = false;
-        // 若 applyCompanionConfig 走到 startDesktopCompanionConnector 成功路径，
-        // 它内部会重置退避；失败时保持当前退避继续由下一次 onDisconnected 触发。
+        // 连接器没有起来（connectControlChannel 抛错等）就不会有 onDisconnected
+        // 回调来驱动下一轮：这里必须自行续排，否则一次失败后重连永久停摆。
+        // 注意 applyCompanionConfig 每次都会先 cancel 重连——重排放在其后。
+        if (companionConnector === null) scheduleCompanionReconnect("previous attempt failed");
       }
     })();
   }, delay);
@@ -979,6 +983,8 @@ async function applyCompanionConfig(next: DesktopCompanionConfig): Promise<void>
     },
   });
   companionConnector = instance;
+  // 只有连接器真正建立才重置退避；失败路径由 scheduleCompanionReconnect 续排。
+  companionReconnectBackoffMs = COMPANION_RECONNECT_MIN_MS;
 }
 
 

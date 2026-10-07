@@ -18,6 +18,8 @@ interface Attachment {
 export function WorkspaceView(props: {
   target: ConversationTarget;
   ensureClient: () => Promise<CompanionClient>;
+  /** 连接代次：控制面掉线重连成功后 +1，触发 re-attach 与订阅重建。 */
+  connectionEpoch: number;
   onBackToCatalog: () => void;
 }): React.ReactElement {
   const { target } = props;
@@ -43,10 +45,11 @@ export function WorkspaceView(props: {
           channel.close();
           return;
         }
-        // relay 断开必须显式呈现：否则在途 RPC 永挂、事件静默失效，界面卡死无提示。
+        // relay 断开（含控制面掉线引发的 attachment 拆除）：呈现重连横幅；
+        // 自动恢复由 connectionEpoch 变化触发本 effect 重跑（re-attach + 重建订阅）。
         channel.onClosed(() => {
           if (disposed) return;
-          setError("与工作区的连接已断开，请返回目录后重试");
+          setError("与工作区的连接已断开，正在自动恢复…");
         });
         const record: Attachment = {
           attachResult,
@@ -55,6 +58,7 @@ export function WorkspaceView(props: {
         };
         attachRef.current = record;
         setAttachment(record);
+        setError(null);
       } catch (attachError) {
         if (!disposed) {
           setError(attachError instanceof Error ? attachError.message : String(attachError));
@@ -67,8 +71,8 @@ export function WorkspaceView(props: {
       attachRef.current?.close();
       attachRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 每个工作区进入时建立一次
-  }, [target.node, target.workspaceIdentity]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 每个工作区/每代连接建立一次
+  }, [target.node, target.workspaceIdentity, props.connectionEpoch]);
 
   const backToCatalog = useCallback(() => {
     const record = attachRef.current;
@@ -87,7 +91,8 @@ export function WorkspaceView(props: {
       });
   }, [props]);
 
-  if (error !== null) {
+  if (error !== null && attachment === null) {
+    // 无 attachment 的失败（attach 失败等）：整页错误，返回目录重试。
     return (
       <div className="app">
         <header className="topbar">
@@ -117,22 +122,34 @@ export function WorkspaceView(props: {
       </div>
     );
   }
+  const banner =
+    error !== null ? (
+      <div className="error" style={{ padding: "0 16px" }}>
+        {error}
+      </div>
+    ) : null;
   if (openSessionId === null) {
     return (
-      <SessionsListView
-        accessor={attachment.accessor}
-        target={target}
-        onOpen={setOpenSessionId}
-        onNewTask={() => setOpenSessionId("")}
-      />
+      <div className="app">
+        {banner}
+        <SessionsListView
+          accessor={attachment.accessor}
+          target={target}
+          onOpen={setOpenSessionId}
+          onNewTask={() => setOpenSessionId("")}
+        />
+      </div>
     );
   }
   return (
-    <ConversationView
-      target={target}
-      sessionId={openSessionId === "" ? null : openSessionId}
-      accessor={attachment.accessor}
-      onBack={() => setOpenSessionId(null)}
-    />
+    <div className="app">
+      {banner}
+      <ConversationView
+        target={target}
+        sessionId={openSessionId === "" ? null : openSessionId}
+        accessor={attachment.accessor}
+        onBack={() => setOpenSessionId(null)}
+      />
+    </div>
   );
 }

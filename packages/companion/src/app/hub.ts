@@ -164,6 +164,11 @@ export class CompanionHub {
     rawParams: unknown,
   ): Promise<void> {
     try {
+      if (op === "ping") {
+        // 控制面应用层心跳：客户端 watchdog 未收到回包即判定半开连接并重连。
+        link.respond(id, { ok: true });
+        return;
+      }
       if (op === "catalog") {
         // 目录按设备 grants 过滤：未授权节点/工作区对设备不可见（存在性不泄露）。
         const grants = await this.deps.store.getGrants(link.deviceId);

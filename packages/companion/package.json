@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/contract.ts",
     "./admin": "./src/admin.ts",
-    "./client": "./src/client.ts"
+    "./client": "./src/client.ts",
+    "./connection-session": "./src/connectionSession.ts"
   },
   "scripts": {
     "test": "tsx --test test/*.test.ts",

@@ -94,6 +94,7 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 
 ## 7. 恢复与幂等语义
 
+- 控制面心跳（spec §6 扩展）：手机 client 默认每 10s 发应用层 `ping` op，30s watchdog 内无回包判定半开连接并主动断开 → 进入重连。`CompanionConnectionSession` 是手机端唯一连接所有者：指数退避（full jitter，1s 起 30s 封顶）自动重连；鉴权被拒（WS 4401）每掉线情节先静默刷新一次，刷新失败进入 `authExpired` 终态（回配对页）；前台恢复/`online` 事件触发 `nudge()` 即时探测。UI 以连接代次（epoch）驱动 re-attach 与订阅重建——掉线时网关已按链路身份拆除 attachment，恢复 = 全新 attach + 全新订阅（不跨连接复用 capability/subscriptionId）。
 - 手机保存 `(logEpoch, seq)` 游标仅在完整应用投影后更新；重连 → 新订阅 → 请求 resume，缺口/换代 → resync 快照。复用 UI 数据层既有实现，gateway 不新增恢复状态。
 - 命令幂等边界在 CommandInbox：手机对每条命令生成稳定 commandId，ACK 丢失后先 `queryCommands` 对账，不盲目重发；执行端换代后未确认命令显示"未确认"，不自动重放。
 - gateway/connector 重启：节点重连重新 hello；手机收到 nodeStatus 离线→在线事件后重新 attach；数据面透传不跨重启保持。

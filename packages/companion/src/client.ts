@@ -23,6 +23,11 @@ export interface CompanionClientOptions {
   onEvent?: (event: CompanionEvent) => void;
   onClose?: (event: { code: number; reason: string }) => void;
   requestTimeoutMs?: number;
+  /**
+   * 控制面应用层心跳（默认开启）：间隔 10s 发 ping，30s 无回包判定半开连接，
+   * 主动断开（触发 onClose → 上层自动重连）。显式传 null 关闭（测试用）。
+   */
+  heartbeat?: { intervalMs?: number; watchdogMs?: number } | null;
 }
 
 export interface CompanionRelayChannel {
@@ -126,6 +131,8 @@ export class CompanionClient {
   private readonly pending = new Map<string, PendingRequest>();
   private readonly eventListeners = new Set<(event: CompanionEvent) => void>();
   private closedByServer = false;
+  private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  private pingInFlight = false;
 
   constructor(private readonly options: CompanionClientOptions) {}
 
@@ -171,6 +178,7 @@ export class CompanionClient {
           clearTimeout(authTimer);
           if (record.ok === true) {
             settled = true;
+            this.startHeartbeat();
             resolve();
           } else {
             fail(new Error("companion auth rejected"));
@@ -221,6 +229,44 @@ export class CompanionClient {
    */
   static isAuthRejectedError(error: unknown): boolean {
     return error instanceof Error && error.message.includes("(4401)");
+  }
+
+  /** 心跳：单一在途 ping；watchdog 内无回包即主动断开（半开连接探测）。 */
+  private startHeartbeat(): void {
+    if (this.options.heartbeat === null) return;
+    const intervalMs = this.options.heartbeat?.intervalMs ?? 10_000;
+    const watchdogMs = this.options.heartbeat?.watchdogMs ?? 30_000;
+    const schedule = (): void => {
+      this.heartbeatTimer = setTimeout(() => {
+        if (!this.isOpen() || this.pingInFlight) {
+          schedule();
+          return;
+        }
+        this.pingInFlight = true;
+        void this.request("ping", undefined, watchdogMs).then((result) => {
+          this.pingInFlight = false;
+          if (!result.ok) {
+            // 半开/已死链路：主动断开，走 onClose → 上层重连状态机。
+            try {
+              this.ws?.close();
+            } catch {
+              // no-op
+            }
+            return;
+          }
+          schedule();
+        });
+      }, intervalMs);
+    };
+    schedule();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer !== null) {
+      clearTimeout(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    this.pingInFlight = false;
   }
 
   onEvent(listener: (event: CompanionEvent) => void): () => void {
@@ -298,6 +344,7 @@ export class CompanionClient {
   }
 
   close(): void {
+    this.stopHeartbeat();
     if (this.ws) {
       this.closedByServer = true; // 主动关闭不触发 onClose 语义
       this.ws.close();

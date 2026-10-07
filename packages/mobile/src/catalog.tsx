@@ -17,8 +17,9 @@ export function CatalogView(props: {
     let interval: ReturnType<typeof setInterval> | null = null;
     void (async () => {
       try {
-        const client = await props.ensureClient();
         const load = async (): Promise<void> => {
+          // 每轮重取：掉线重连后 session 换新 client 实例，旧实例调用只会失败一轮。
+          const client = await props.ensureClient();
           const result = await client.catalog();
           if (!disposed) setCatalog(result);
         };
