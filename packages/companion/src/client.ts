@@ -215,6 +215,14 @@ export class CompanionClient {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
+  /**
+   * 鉴权被拒特征（WS close 4401）：token 过期/撤销/设备吊销。
+   * 调用方据此走静默刷新（HttpOnly refresh Cookie）而不是直接把用户踢回配对页。
+   */
+  static isAuthRejectedError(error: unknown): boolean {
+    return error instanceof Error && error.message.includes("(4401)");
+  }
+
   onEvent(listener: (event: CompanionEvent) => void): () => void {
     this.eventListeners.add(listener);
     return () => this.eventListeners.delete(listener);

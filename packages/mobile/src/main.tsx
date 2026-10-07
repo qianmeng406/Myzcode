@@ -142,12 +142,28 @@ function App(): React.ReactElement {
     if (ensureInFlightRef.current) return ensureInFlightRef.current;
     const attempt = (async (): Promise<CompanionClient> => {
       clientRef.current?.close();
-      const client = new CompanionClient({
-        baseUrl: config.baseUrl,
-        accessToken: config.accessToken,
-        onClose: () => setError("与接入服务的连接已断开"),
-      });
-      await client.connect();
+      const buildClient = (accessToken: string): CompanionClient =>
+        new CompanionClient({
+          baseUrl: config.baseUrl,
+          accessToken,
+          onClose: () => setError("与接入服务的连接已断开"),
+        });
+      let client = buildClient(config.accessToken);
+      try {
+        await client.connect();
+      } catch (connectError) {
+        if (!CompanionClient.isAuthRejectedError(connectError)) throw connectError;
+        // access 过期：HttpOnly refresh Cookie 静默换新，仅重试一次；
+        // 刷新失败把原始鉴权错误抛给调用方（回配对页）。
+        const refreshed = await CompanionClient.refresh({ baseUrl: config.baseUrl });
+        const next = { baseUrl: config.baseUrl, accessToken: refreshed.accessToken };
+        configRef.current = next;
+        window.sessionStorage.setItem(CONFIG_KEY, JSON.stringify(next));
+        window.localStorage.setItem(PERSIST_KEY, JSON.stringify(next));
+        client.close();
+        client = buildClient(refreshed.accessToken);
+        await client.connect();
+      }
       clientRef.current = client;
       return client;
     })();

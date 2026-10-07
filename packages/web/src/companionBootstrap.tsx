@@ -136,6 +136,31 @@ function mountCompanionDebugOverlay(): void {
 }
 
 /**
+ * 建控制面连接；鉴权被拒（access 过期）时经 HttpOnly refresh Cookie 静默换新
+ * 并重试一次。刷新成功回写 sessionStorage，轻量页与本次会话共用新 token。
+ */
+async function connectCompanionControl(
+  config: CompanionWebConfig,
+): Promise<{ client: CompanionClient; config: CompanionWebConfig }> {
+  const build = (token: string): CompanionClient =>
+    new CompanionClient({ baseUrl: config.baseUrl, accessToken: token });
+  let client = build(config.accessToken);
+  try {
+    await client.connect();
+    return { client, config };
+  } catch (error) {
+    if (!CompanionClient.isAuthRejectedError(error)) throw error;
+    const refreshed = await CompanionClient.refresh({ baseUrl: config.baseUrl });
+    const next: CompanionWebConfig = { baseUrl: config.baseUrl, accessToken: refreshed.accessToken };
+    window.sessionStorage.setItem(CONFIG_KEY, JSON.stringify(next));
+    client.close();
+    client = build(refreshed.accessToken);
+    await client.connect();
+    return { client, config: next };
+  }
+}
+
+/**
  * companion relay 引导：attach catalog 首个可用工作区，以 relay accessor
  * 启动完整 Root。attach/连接失败显示可重试状态屏（不做静默循环重连）。
  */
@@ -158,12 +183,8 @@ export async function bootstrapCompanionApp(): Promise<void> {
   let bootClient: CompanionClient | null = null;
   let workspace: { path: string; identity?: string } | null = null;
   try {
-    const client = new CompanionClient({
-      baseUrl: config.baseUrl,
-      accessToken: config.accessToken,
-    });
+    const { client } = await connectCompanionControl(config);
     bootClient = client;
-    await client.connect();
     const catalog = await client.catalog();
     const node = catalog.nodes.find((entry) => entry.online && entry.workspaces[0]?.available);
     const workspaceEntry = node?.workspaces[0];
