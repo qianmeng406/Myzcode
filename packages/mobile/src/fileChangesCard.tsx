@@ -27,31 +27,18 @@ function DiffHunks(props: { patches: Array<{ lines: string[] }> }): React.ReactE
   }
   if (lines.length === 0) return null;
   return (
-    <pre
-      style={{
-        margin: "6px 0 0",
-        padding: "8px",
-        background: "#111",
-        borderRadius: 8,
-        overflowX: "auto",
-        fontSize: 11,
-        lineHeight: 1.5,
-        whiteSpace: "pre",
-      }}
-    >
+    <pre className="diff-box">
       {lines.map((line, index) => (
         <div
           key={index}
-          style={{
-            color: line.startsWith("+") ? "#4ade80" : line.startsWith("-") ? "#f87171" : "#9a9a9e",
-            whiteSpace: "pre-wrap",
-            overflowWrap: "anywhere",
-          }}
+          className={
+            line.startsWith("+") ? "diff-add" : line.startsWith("-") ? "diff-del" : "diff-ctx"
+          }
         >
           {line}
         </div>
       ))}
-      {lines.length >= MAX_DIFF_LINES && <div style={{ color: "#777" }}>…差异过大已截断</div>}
+      {lines.length >= MAX_DIFF_LINES && <div className="diff-ctx">…差异过大已截断</div>}
     </pre>
   );
 }
@@ -92,11 +79,9 @@ export function FileChangesCard(props: {
     props.summary.state === "reverted" ? "（已回退）" : ` +${props.summary.additions} −${props.summary.deletions}`;
 
   return (
-    <div className="card" onClick={() => void toggle()}>
-      <span className={props.summary.state === "reverted" ? "muted-title" : undefined}>
-        📄 文件变更 {props.summary.files} 个
-      </span>
-      <div className="sub">
+    <div className="interaction-card" onClick={() => void toggle()}>
+      <span className="ic-title">文件变更 {props.summary.files} 个</span>
+      <div className="fc-sub">
         {summary}
         {state === "loading" ? " · 加载中…" : state === "error" ? " · 加载失败，点按重试" : details !== null ? " · 收起" : " · 点按查看差异"}
       </div>
@@ -104,16 +89,16 @@ export function FileChangesCard(props: {
         <div style={{ marginTop: 8 }}>
           {details.items.slice(0, MAX_FILES).map((item) => (
             <div key={item.path} style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 12, overflowWrap: "anywhere" }}>
+              <div className="fc-path">
                 {item.path}{" "}
-                <span style={{ color: "#4ade80" }}>+{item.additions}</span>{" "}
-                <span style={{ color: "#f87171" }}>−{item.deletions}</span>
+                <span className="diff-add">+{item.additions}</span>{" "}
+                <span className="diff-del">−{item.deletions}</span>
               </div>
               <DiffHunks patches={item.patches} />
             </div>
           ))}
           {details.items.length > MAX_FILES && (
-            <div className="sub">其余 {details.items.length - MAX_FILES} 个文件未展示</div>
+            <div className="fc-sub">其余 {details.items.length - MAX_FILES} 个文件未展示</div>
           )}
         </div>
       )}

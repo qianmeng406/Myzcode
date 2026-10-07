@@ -1,14 +1,18 @@
-// Myzcode 手机端入口：配置 → 工作区目录 → 工作区（会话列表/会话）。
+// Myzcode 手机端入口 = 官方 WebRemoteControlMobileShell 的结构复刻：
+// 单页 home(任务首页) ↔ chat(任务会话)，history.pushState({zcodeMobilePage:'chat'})
+// + popstate 收口（官方 x5t 语义，Android 返回键自然生效）。
 // 认证：access token 优先存 sessionStorage（会话级），另以 12h 短时 token 落
 // localStorage 作恢复回退（服务端可即时撤销）；长期 refresh 只走 HttpOnly Cookie。
 import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { App as CapacitorApp } from "@capacitor/app";
 import { CompanionClient } from "@zcode/companion/client";
 import { CompanionConnectionSession } from "@zcode/companion/connection-session";
 import "./app.css";
-import { CatalogView } from "./catalog.js";
 import { CONFIG_KEY, ENDPOINT_KEY, PERSIST_KEY, tryRecoverSession, type CompanionConfig } from "./recover.js";
-import { WorkspaceView } from "./workspace.js";
+import { TaskHomeView } from "./taskHome.js";
+import { ChatView } from "./workspace.js";
+import { useTheme } from "./ui.js";
 
 /** 个人自托管部署的默认接入服务（配对页免填；换环境时仍可手动覆盖）。 */
 const DEFAULT_GATEWAY_URL = "https://47.101.52.182";
@@ -22,38 +26,33 @@ function loadConfig(): CompanionConfig | null {
   }
 }
 
-/** 用户在完整 UI 里点过"轻量界面"后置位：之后恢复/配对停在轻量目录页。 */
-const PREFER_LIGHT_KEY = "zcode-companion-prefer-light";
-
 function openFullUi(): void {
-  // 完整 Web UI 在同 WebView 子路径（sessionStorage 配置直接交接，免重新认证）。
+  // 完整 Web UI 在同 WebView 子路径（官方 >767px 形态，手机端从菜单进入）。
   window.location.href = "webui/index.html?companion=1";
 }
 
-type View =
-  | { name: "config" }
-  | { name: "catalog" }
-  | {
-      name: "workspace";
-      node: string;
-      workspacePath: string;
-      workspaceIdentity: string;
-      title: string;
-      /** 目录任务直达：attach 成功后自动打开该会话。 */
-      initialSessionId?: string;
-    };
+interface ChatTarget {
+  node: string;
+  workspacePath: string;
+  workspaceIdentity: string;
+  title: string;
+  /** null = 保持既有会话；"" = 新任务草稿；非空 = 任务直达。 */
+  initialSessionId: string | null;
+}
+
+type View = { name: "config" } | { name: "home" } | { name: "chat"; target: ChatTarget };
 
 function App(): React.ReactElement {
-  const [view, setView] = useState<View>(() => (loadConfig() ? { name: "catalog" } : { name: "config" }));
-  const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<View>(() => (loadConfig() ? { name: "home" } : { name: "config" }));
+  const { theme, setTheme } = useTheme();
   const configRef = useRef<CompanionConfig | null>(loadConfig());
   const sessionRef = useRef<CompanionConnectionSession | null>(null);
   const sessionKeyRef = useRef<string | null>(null);
   const everConnectedRef = useRef(false);
-  // 连接代次：掉线重连成功后 +1，工作区视图据此 re-attach 并重建订阅。
+  // 连接代次：掉线重连成功后 +1，chat 视图据此 re-attach 并重建订阅。
   const [connectionEpoch, setConnectionEpoch] = useState(0);
 
-  // 唯一连接所有者：目录/工作区/完整 UI 共用；重连、静默刷新、前台探测都在这里。
+  // 唯一连接所有者：首页/chat/完整 UI 共用；重连、静默刷新、前台探测都在这里。
   const ensureSession = useCallback((config: CompanionConfig): CompanionConnectionSession => {
     const key = `${config.baseUrl}|${config.accessToken}`;
     if (sessionRef.current !== null && sessionKeyRef.current === key) {
@@ -73,17 +72,13 @@ function App(): React.ReactElement {
       },
       onStateChange: (state) => {
         if (state === "connected") {
-          setError(null);
           if (everConnectedRef.current) setConnectionEpoch((epoch) => epoch + 1);
           everConnectedRef.current = true;
-        } else if (state === "reconnecting") {
-          setError("与接入服务的连接已断开，正在重连…");
         } else if (state === "authExpired") {
           // 刷新也失效：清会话回配对页（refresh Cookie 已死，不能再自动恢复）。
           configRef.current = null;
           window.sessionStorage.removeItem(CONFIG_KEY);
           window.localStorage.removeItem(PERSIST_KEY);
-          setError("登录已过期，请重新配对");
           setView({ name: "config" });
         }
       },
@@ -95,7 +90,7 @@ function App(): React.ReactElement {
   }, []);
 
   // Cookie 会话恢复：access 缺失但 endpoint 已记住时，静默刷新一轮；
-  // 成功直接进目录页（配对跨 App 重启持久），失败留在配对页。
+  // 成功直接进手机端首页（配对跨 App 重启持久），失败留在配对页。
   const [recovered, setRecovered] = useState(false);
   useEffect(() => {
     if (configRef.current || recovered) return;
@@ -104,11 +99,8 @@ function App(): React.ReactElement {
       // 恢复在途时用户可能已完成手动配对：不得用旧 token 覆盖新配置。
       if (config && configRef.current === null) {
         configRef.current = config;
-        if (window.localStorage.getItem(PREFER_LIGHT_KEY) === "1") {
-          setView({ name: "catalog" });
-        } else {
-          openFullUi();
-        }
+        // 官方语义：手机视口直接进 MobileShell 任务首页，完整 UI 由菜单进入。
+        setView({ name: "home" });
       }
       setRecovered(true);
     })();
@@ -122,6 +114,47 @@ function App(): React.ReactElement {
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("online", () => sessionRef.current?.nudge());
     return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
+  // 官方 popstate 语义：chat 历史项出栈 = 回首页（Android 返回键同一通路）。
+  useEffect(() => {
+    const onPopState = (event: PopStateEvent): void => {
+      if ((event.state as { zcodeMobilePage?: string } | null)?.zcodeMobilePage === "chat") {
+        return;
+      }
+      setView((current) => (current.name === "chat" ? { name: "home" } : current));
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  // Android 硬件返回键（Capacitor 7 默认直接退出，需 JS 接管）：
+  // 优先关开着的弹层（sheet/菜单），再 chat→home（popstate 通路），home 上退出。
+  useEffect(() => {
+    const handleRef: { current: { remove: () => Promise<void> } | null } = { current: null };
+    let disposed = false;
+    void CapacitorApp.addListener("backButton", () => {
+      if (document.querySelector(".sheet-mask") !== null) {
+        window.dispatchEvent(new CustomEvent("zcode-close-sheets"));
+        return;
+      }
+      if (document.querySelector(".menu-pop") !== null) {
+        document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        return;
+      }
+      if ((window.history.state as { zcodeMobilePage?: string } | null)?.zcodeMobilePage === "chat") {
+        window.history.back();
+        return;
+      }
+      void CapacitorApp.exitApp();
+    }).then((handle) => {
+      if (disposed) void handle.remove();
+      else handleRef.current = handle;
+    });
+    return () => {
+      disposed = true;
+      void handleRef.current?.remove();
+    };
   }, []);
 
   const ensureClient = useCallback(async (): Promise<CompanionClient> => {
@@ -144,72 +177,67 @@ function App(): React.ReactElement {
           window.sessionStorage.setItem(CONFIG_KEY, JSON.stringify(config));
           window.localStorage.setItem(ENDPOINT_KEY, config.baseUrl);
           window.localStorage.setItem(PERSIST_KEY, JSON.stringify(config));
-          setError(null);
-          // 配对成功默认直达完整 Web UI（B 阶段主体验）；轻量页作为后备入口。
-          if (window.localStorage.getItem(PREFER_LIGHT_KEY) === "1") {
-            setView({ name: "catalog" });
-          } else {
-            openFullUi();
-          }
+          // 官方语义：配对成功即进手机任务首页（MobileShell）；完整 UI 从整理菜单进入。
+          setView({ name: "home" });
         }}
       />
     );
   }
-  if (view.name === "catalog") {
+
+  if (view.name === "home") {
     return (
-      <div className="app">
-        <header className="topbar">
-          <h1>Myzcode</h1>
-          <button
-            className="button secondary"
-            onClick={() => {
-              sessionRef.current?.stop();
-              sessionRef.current = null;
-              sessionKeyRef.current = null;
-              everConnectedRef.current = false;
-              setView({ name: "config" });
-            }}
-          >
-            设置
-          </button>
-        </header>
-        {error !== null && <div className="error" style={{ padding: "0 16px" }}>{error}</div>}
-        <CatalogView
+      <div className="shell-root">
+        <TaskHomeView
           ensureClient={ensureClient}
-          onOpen={(node, workspacePath, workspaceIdentity, title, initialSessionId) =>
-            setView({ name: "workspace", node, workspacePath, workspaceIdentity, title, initialSessionId })
-          }
-          onOpenFullUi={() => {
-            openFullUi();
-            // 用户主动进完整 UI：清除“偏好轻量”标记，下次恢复仍直达完整界面。
-            window.localStorage.removeItem(PREFER_LIGHT_KEY);
+          theme={theme}
+          onThemeChange={setTheme}
+          onOpenTask={(nodeId, workspacePath, workspaceIdentity, title, sessionId) => {
+            // 官方 d8t：打开任务 = 压入 chat 历史 + 进入 chat 页。
+            window.history.pushState({ zcodeMobilePage: "chat" }, "");
+            setView({
+              name: "chat",
+              target: { node: nodeId, workspacePath, workspaceIdentity, title, initialSessionId: sessionId },
+            });
+          }}
+          onOpenFullUi={() => openFullUi()}
+          onOpenSettings={() => {
+            sessionRef.current?.stop();
+            sessionRef.current = null;
+            sessionKeyRef.current = null;
+            everConnectedRef.current = false;
+            setView({ name: "config" });
           }}
         />
       </div>
     );
   }
+
   return (
-    <WorkspaceView
-      target={{
-        node: view.node,
-        workspacePath: view.workspacePath,
-        workspaceIdentity: view.workspaceIdentity,
-        title: view.title,
-      }}
-      initialSessionId={view.initialSessionId ?? null}
+    <ChatView
+      target={view.target}
+      initialSessionId={view.target.initialSessionId}
       ensureClient={ensureClient}
       connectionEpoch={connectionEpoch}
-      onBackToCatalog={() => setView({ name: "catalog" })}
-      onSwitchWorkspace={(candidate) =>
-        setView({
-          name: "workspace",
-          node: candidate.node,
-          workspacePath: candidate.workspacePath,
-          workspaceIdentity: candidate.workspaceIdentity,
-          // 抽屉标题带节点前缀（"节点 · 工作区"），视图标题只留工作区名。
-          title: candidate.title.split(" · ").slice(1).join(" · ") || candidate.title,
-        })
-      }
+      onBackHome={() => setView({ name: "home" })}
+      onSwitchWorkspace={(candidate) => {
+        // 官方语义：chat 页内切换目标，保持 chat 页与加载浮层。
+        setView((current) =>
+          current.name === "chat"
+            ? {
+                name: "chat",
+                target: {
+                  node: candidate.node,
+                  workspacePath: candidate.workspacePath,
+                  workspaceIdentity: candidate.workspaceIdentity,
+                  title: candidate.title,
+                  initialSessionId: null,
+                },
+              }
+            : current,
+        );
+      }}
+      theme={theme}
+      onThemeChange={setTheme}
     />
   );
 }
@@ -262,74 +290,76 @@ function ConfigView(props: {
   };
 
   return (
-    <div className="app">
-      <div className="hero">
-        <div className="hero-icon">Z</div>
+    <div className="pair-root">
+      <header className="pair-header">
         <h1>Myzcode</h1>
         <p>输入电脑端显示的 6 位配对码，连接你的工作区</p>
-      </div>
-      <div className="content">
-        <div className="code-input" aria-label="配对码">
-          {digits.map((digit, index) => (
-            <input
-              key={index}
-              ref={(element) => {
-                inputsRef.current[index] = element;
-              }}
-              value={digit}
-              onChange={(event) => setDigit(index, event.target.value)}
-              onKeyDown={(event) => onDigitKeyDown(index, event)}
-              onFocus={(event) => event.currentTarget.select()}
-              inputMode="numeric"
-              autoComplete={index === 0 ? "one-time-code" : "off"}
-              maxLength={6}
-              className={digit === "" ? "" : "filled"}
-            />
-          ))}
+      </header>
+      <div className="pair-body">
+        <div className="pair-card">
+          <div className="code-input" aria-label="配对码">
+            {digits.map((digit, index) => (
+              <input
+                key={index}
+                ref={(element) => {
+                  inputsRef.current[index] = element;
+                }}
+                value={digit}
+                onChange={(event) => setDigit(index, event.target.value)}
+                onKeyDown={(event) => onDigitKeyDown(index, event)}
+                onFocus={(event) => event.currentTarget.select()}
+                inputMode="numeric"
+                autoComplete={index === 0 ? "one-time-code" : "off"}
+                maxLength={6}
+                className={digit === "" ? "" : "filled"}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            className="button-primary-block"
+            disabled={pairing || !codeComplete || deviceName.trim() === ""}
+            onClick={() => {
+              setPairing(true);
+              setPairError(null);
+              const effectiveBaseUrl = baseUrl.trim() === "" ? DEFAULT_GATEWAY_URL : baseUrl.trim();
+              CompanionClient.pair({
+                baseUrl: effectiveBaseUrl,
+                deviceName: deviceName.trim(),
+                code,
+              })
+                .then((pairResult) => {
+                  props.onSaved({ baseUrl: effectiveBaseUrl, accessToken: pairResult.accessToken });
+                })
+                .catch((pairFailure: unknown) => {
+                  setPairError(
+                    pairFailure instanceof Error ? pairFailure.message : String(pairFailure),
+                  );
+                })
+                .finally(() => setPairing(false));
+            }}
+          >
+            {pairing ? "配对中…" : "配对并连接"}
+          </button>
+          {pairError !== null && <div className="error">{pairError}</div>}
+          <p className="hint-line">配对码一次性有效（15 分钟），在电脑端「Myzcode 桌面直连」弹窗生成。</p>
+          <details className="advanced">
+            <summary>更多选项</summary>
+            <label className="field">
+              <span>接入服务地址</span>
+              <input
+                value={baseUrl}
+                onChange={(event) => setBaseUrl(event.target.value)}
+                placeholder={DEFAULT_GATEWAY_URL}
+                autoCapitalize="none"
+              />
+            </label>
+            <label className="field">
+              <span>设备名称</span>
+              <input value={deviceName} onChange={(event) => setDeviceName(event.target.value)} />
+            </label>
+          </details>
         </div>
-        <button
-          className="button primary-block"
-          disabled={pairing || !codeComplete || deviceName.trim() === ""}
-          onClick={() => {
-            setPairing(true);
-            setPairError(null);
-            const effectiveBaseUrl = baseUrl.trim() === "" ? DEFAULT_GATEWAY_URL : baseUrl.trim();
-            CompanionClient.pair({
-              baseUrl: effectiveBaseUrl,
-              deviceName: deviceName.trim(),
-              code,
-            })
-              .then((pairResult) => {
-                props.onSaved({ baseUrl: effectiveBaseUrl, accessToken: pairResult.accessToken });
-              })
-              .catch((pairFailure: unknown) => {
-                setPairError(
-                  pairFailure instanceof Error ? pairFailure.message : String(pairFailure),
-                );
-              })
-              .finally(() => setPairing(false));
-          }}
-        >
-          {pairing ? "配对中…" : "配对并连接"}
-        </button>
-        {pairError !== null && <div className="error">{pairError}</div>}
-        <p className="hint-line">配对码一次性有效（15 分钟），在电脑端「Myzcode 桌面直连」弹窗生成。</p>
-        <details className="advanced">
-          <summary>更多选项</summary>
-          <label className="field">
-            <span>接入服务地址</span>
-            <input
-              value={baseUrl}
-              onChange={(event) => setBaseUrl(event.target.value)}
-              placeholder={DEFAULT_GATEWAY_URL}
-              autoCapitalize="none"
-            />
-          </label>
-          <label className="field">
-            <span>设备名称</span>
-            <input value={deviceName} onChange={(event) => setDeviceName(event.target.value)} />
-          </label>
-        </details>
       </div>
     </div>
   );

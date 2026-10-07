@@ -23,10 +23,11 @@ import {
   applyFrame,
   type ConversationState,
 } from "./conversationState.js";
-import { agentServiceOf } from "./sessions.js";
+import { agentServiceOf } from "./agentService.js";
 import { InteractionCard } from "./interactionCard.js";
 import { FileChangesCard } from "./fileChangesCard.js";
 import { MOBILE_CAPABILITIES } from "./mobileCapabilities.js";
+import { ArrowUpIcon, StopIcon } from "./ui.js";
 
 export interface ConversationTarget {
   node: string;
@@ -41,7 +42,6 @@ export function ConversationView(props: {
   target: ConversationTarget;
   sessionId: string | null;
   accessor: IServiceAccessor;
-  onBack: () => void;
 }): React.ReactElement {
   const { target: view, sessionId: initialSessionId } = props;
   const [transport, setTransport] = useState<ConversationTransport | null>(null);
@@ -55,9 +55,27 @@ export function ConversationView(props: {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 官方 composer 语义：agent 运行中显示停止，空闲显示发送。运行状态用投影
+  // 启发式判定——10 秒内有新行（流式中）或存在待处理交互即视为运行中。
+  const [lastRowAt, setLastRowAt] = useState(0);
+  const [, setTick] = useState(0);
   const stateRef = useRef(state);
   stateRef.current = state;
   const subscriptionRef = useRef<string | null>(null);
+
+  const rowCount = state.rows.length;
+  useEffect(() => {
+    if (rowCount > 0) setLastRowAt(Date.now());
+  }, [rowCount]);
+
+  const agentRunning =
+    state.sessionId !== null &&
+    (state.interactions.length > 0 || Date.now() - lastRowAt < 10_000);
+  useEffect(() => {
+    if (!agentRunning) return;
+    const timer = window.setInterval(() => setTick((tick) => tick + 1), 2_500);
+    return () => window.clearInterval(timer);
+  }, [agentRunning, lastRowAt]);
 
   useEffect(() => {
     window.sessionStorage.setItem(`zcode-draft:${view.workspaceIdentity}`, draft);
@@ -214,6 +232,7 @@ export function ConversationView(props: {
     const current = stateRef.current;
     if (activeTransport === null || current.sessionId === null) return;
     setBusy(true);
+    setLastRowAt(0); // 停止立即回到发送态，不等启发式窗口过期。
     try {
       const { ack, unconfirmed } = await sendCommandWithReconcile(activeTransport, {
         commandId: newCommandId(),
@@ -282,46 +301,20 @@ export function ConversationView(props: {
   );
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <button className="button secondary" onClick={props.onBack}>
-          ←
-        </button>
-        <h1>{state.sessionId === null ? "新任务" : view.title}</h1>
-        {state.sessionId !== null && (
-          <button className="button danger" disabled={busy} onClick={() => void stop()}>
-            停止
-          </button>
-        )}
-      </header>
-      {error !== null && <div className="error" style={{ padding: "0 16px" }}>{error}</div>}
-      <div className="content">
+    <div className="chat-main">
+      <div className="chat-rows">
+        {error !== null && <div className="error">{error}</div>}
         {transport === null && <p className="muted">正在建立数据通道…</p>}
         {state.modelLabel !== null && (
-          <p className="muted" style={{ textAlign: "left", padding: "4px 0" }}>
+          <p className="model-line">
             模型 {state.modelLabel}
             {state.mode !== null ? ` · 模式 ${MODE_LABELS[state.mode] ?? state.mode}` : ""}
           </p>
         )}
-        {MOBILE_CAPABILITIES.modeSwitch && state.sessionId !== null && (
-          <div className="answer" style={{ marginBottom: 8 }}>
-            {MODE_OPTIONS.map((mode) => (
-              <button
-                key={mode}
-                className={`button secondary`}
-                style={state.mode === mode ? { outline: "2px solid #4f7cff" } : undefined}
-                disabled={busy}
-                onClick={() => void switchMode(mode)}
-              >
-                {MODE_LABELS[mode]}
-              </button>
-            ))}
-          </div>
-        )}
         {MOBILE_CAPABILITIES.readonlyFileDiff &&
           fileChangeRows.length > 0 &&
           state.sessionId !== null && state.logEpoch !== null && state.revision !== null && (
-          <div style={{ marginBottom: 8 }}>
+          <div>
             {fileChangeRows.map((row) => (
               <FileChangesCard
                 key={`fc-${row.rowId}`}
@@ -336,17 +329,18 @@ export function ConversationView(props: {
             ))}
           </div>
         )}
-        <div className="rows">
-          {rendered.map((row) => (
-            <div
-              key={`${row.rowId}:${row.entityId}`}
-              className={`row ${row.kind.includes("input") ? "user" : row.kind.includes("tool") ? "tool" : ""}`}
-            >
-              <div className="kind">{row.kind}</div>
-              {row.text}
+        {rendered.map((row) => (
+          row.kind.includes("input") ? (
+            <div key={`${row.rowId}:${row.entityId}`} className="row-user">{row.text}</div>
+          ) : row.kind.includes("tool") ? (
+            <div key={`${row.rowId}:${row.entityId}`} className="row-tool">
+              <span className="row-kind">{row.kind}</span>
+              <span>{row.text}</span>
             </div>
-          ))}
-        </div>
+          ) : (
+            <div key={`${row.rowId}:${row.entityId}`} className="row-assistant">{row.text}</div>
+          )
+        ))}
         {MOBILE_CAPABILITIES.interactions
           ? state.interactions.map((interaction) => (
               <InteractionCard
@@ -362,7 +356,7 @@ export function ConversationView(props: {
               </p>
             )}
         {rendered.length === 0 && state.interactions.length === 0 && transport !== null && (
-          <p className="muted">
+          <p className="chat-empty">
             {state.sessionId === null ? "在下方输入开始一个任务。" : "暂无会话内容。"}
           </p>
         )}
@@ -372,10 +366,41 @@ export function ConversationView(props: {
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           placeholder={state.sessionId === null ? "描述任务…" : "继续对话…"}
+          rows={2}
         />
-        <button className="button" disabled={busy || draft.trim() === ""} onClick={() => void send()}>
-          发送
-        </button>
+        <div className="composer-row">
+          {MOBILE_CAPABILITIES.modeSwitch && state.sessionId !== null && (
+            <>
+              {MODE_OPTIONS.map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={state.mode === mode ? "mode-chip on" : "mode-chip"}
+                  disabled={busy}
+                  onClick={() => void switchMode(mode)}
+                >
+                  {MODE_LABELS[mode]}
+                </button>
+              ))}
+            </>
+          )}
+          {agentRunning && draft.trim() === "" ? (
+            <button type="button" className="stop-btn" disabled={busy} onClick={() => void stop()} aria-label="停止">
+              <StopIcon className="ic sm" />
+              停止
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="send-btn"
+              disabled={busy || draft.trim() === ""}
+              onClick={() => void send()}
+              aria-label="发送"
+            >
+              <ArrowUpIcon className="ic sm" />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

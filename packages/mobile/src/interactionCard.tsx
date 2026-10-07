@@ -1,10 +1,8 @@
-// 待处理交互卡：选项回答 + 自由文本/敏感输入（仅内存草稿）+ 多题/计划批准。
-// 独立模块原因：架构门禁单文件 400 行上限；conversation.tsx 只留命令提交。
+// 待处理交互卡：官方 mqt（权限/选项/自由文本/多题/计划批准）的卡片语言——
+// rounded-lg border bg-card + 标题 + 选项按钮组（primary 白底 / secondary 描边）。
+// 敏感输入只在内存；conversation.tsx 只留命令提交。
 import { useState } from "react";
-import {
-  buildElicitationAnswer,
-  type MobileInteraction,
-} from "./conversationState.js";
+import { buildElicitationAnswer, type MobileInteraction } from "./conversationState.js";
 
 export function InteractionCard(props: {
   interaction: MobileInteraction;
@@ -53,25 +51,24 @@ export function InteractionCard(props: {
   if (hasQuestions) {
     const plan = interaction.isPlanApproval;
     return (
-      <div className="row">
-        <div className="kind">{plan ? "计划批准" : interaction.kind}</div>
-        {interaction.prompt}
+      <div className="interaction-card">
+        <div className="ic-title">
+          <span className="row-kind">{plan ? "计划批准" : interaction.kind}</span>
+          {interaction.prompt}
+        </div>
         {interaction.questions.map((question) => (
-          <div key={question.question} style={{ marginTop: 6 }}>
-            {question.header !== "" && (
-              <div className="kind" style={{ marginTop: 4 }}>
-                {question.header}
-              </div>
-            )}
-            <div className="answer">
+          <div key={question.question}>
+            {question.header !== "" && <div className="ic-body">{question.header}</div>}
+            <div className="ic-actions">
               {question.options.map((option) => {
                 const selected = (selections[question.question] ?? []).includes(option.value);
                 return (
                   <button
                     key={option.value}
-                    className="button secondary"
+                    type="button"
+                    className="btn-secondary"
                     disabled={props.disabled}
-                    style={selected ? { outline: "2px solid #4f7cff" } : undefined}
+                    style={selected ? { outline: "2px solid var(--foreground-subtle)" } : undefined}
                     onClick={() => toggleOption(question.question, option.value, question.multiSelect)}
                   >
                     {option.label}
@@ -81,18 +78,20 @@ export function InteractionCard(props: {
             </div>
           </div>
         ))}
-        <div className="answer">
+        <div className="ic-actions">
           {plan ? (
             <>
               <button
-                className="button"
+                type="button"
+                className="btn-primary"
                 disabled={props.disabled}
                 onClick={() => void answerWith(buildElicitationAnswer(interaction.questions, selections))}
               >
                 批准
               </button>
               <button
-                className="button danger"
+                type="button"
+                className="btn-secondary danger"
                 disabled={props.disabled}
                 onClick={() => void answerWith({ action: "decline", content: {} })}
               >
@@ -101,7 +100,8 @@ export function InteractionCard(props: {
             </>
           ) : (
             <button
-              className="button"
+              type="button"
+              className="btn-primary"
               disabled={props.disabled}
               onClick={() => void answerWith(buildElicitationAnswer(interaction.questions, selections))}
             >
@@ -114,20 +114,23 @@ export function InteractionCard(props: {
   }
 
   return (
-    <div className="row">
-      <div className="kind">{interaction.kind}</div>
-      {interaction.prompt}
+    <div className="interaction-card">
+      <div className="ic-title">
+        <span className="row-kind">{interaction.kind}</span>
+        {interaction.prompt}
+      </div>
       {textApplies && (
-        <div className="answer" style={{ width: "100%" }}>
+        <div className="ic-text-row">
           <input
+            className="ic-input"
             type={interaction.sensitive ? "password" : "text"}
             value={text}
             onChange={(event) => setText(event.target.value)}
             placeholder={interaction.sensitive ? "输入敏感信息（不保存）" : "输入回答…"}
-            style={{ flex: 1, minWidth: 0 }}
           />
           <button
-            className="button"
+            type="button"
+            className="btn-primary"
             disabled={props.disabled || text.trim() === ""}
             onClick={() => void answerWith({ freeText: text.trim() })}
           >
@@ -135,11 +138,12 @@ export function InteractionCard(props: {
           </button>
         </div>
       )}
-      <div className="answer">
+      <div className="ic-actions">
         {interaction.options.map((option) => (
           <button
             key={option.optionId}
-            className="button secondary"
+            type="button"
+            className="btn-secondary"
             disabled={props.disabled}
             onClick={() =>
               void answerWith({

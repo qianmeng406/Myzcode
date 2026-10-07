@@ -1,14 +1,16 @@
-// 工作区容器：attach + relay 通道提升到工作区级（hub 不变量：每设备至多一个
-// attachment）。会话打开 = pushState 进历史（Android 返回键回列表不退出 App）；
-// 切换工作区 = detach 旧 attachment 后换目标；返回目录才统一 detach。
+// Chat 页容器：官方 WebRemoteControlMobileShell chat 分支的结构复刻
+// （extract/pretty.js 62520：h-11 顶栏 + workspace header 紧凑条 + 内容区 +
+// 加载浮层 + 重连 toast + 右侧滑入切换面板）。
+// attach/relay 生命周期不变：每设备至多一个 attachment；切换工作区先 detach
+// 旧目标再建新通道；返回首页统一 detach。
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IServiceAccessor } from "@zcode/services";
 import type { CompanionAttachResult, CompanionCatalogResult } from "@zcode/shared/companion-protocol";
 import type { CompanionClient } from "@zcode/companion/client";
 import type { ConversationTarget } from "./conversation.js";
 import { ConversationView } from "./conversation.js";
-import { SessionsListView } from "./sessions.js";
 import { MOBILE_CAPABILITIES } from "./mobileCapabilities.js";
+import { ArrowLeftIcon, RefreshIcon, ThemeMenu, type ThemeName } from "./ui.js";
 
 interface Attachment {
   attachResult: CompanionAttachResult;
@@ -16,36 +18,40 @@ interface Attachment {
   close: () => void;
 }
 
-interface SwitchCandidate {
+export interface SwitchCandidate {
   node: string;
   workspacePath: string;
   workspaceIdentity: string;
   title: string;
 }
 
-export function WorkspaceView(props: {
+export function ChatView(props: {
   target: ConversationTarget;
-  /** 目录任务直达：attach 成功后自动打开该会话（每目标只生效一次）。 */
+  /** 首页任务直达：attach 成功后自动打开该会话（"" = 新任务草稿）。 */
   initialSessionId: string | null;
   ensureClient: () => Promise<CompanionClient>;
   /** 连接代次：控制面掉线重连成功后 +1，触发 re-attach 与订阅重建。 */
   connectionEpoch: number;
-  onBackToCatalog: () => void;
+  /** history 栈耗尽时的直接回首页兜底。 */
+  onBackHome: () => void;
   onSwitchWorkspace: (candidate: SwitchCandidate) => void;
+  theme: ThemeName;
+  onThemeChange: (theme: ThemeName) => void;
 }): React.ReactElement {
   const { target } = props;
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // null = 会话列表（Home）；"" = 新任务；非空 = 打开的会话（Chat）。
-  const [openSessionId, setOpenSessionId] = useState<string | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [candidates, setCandidates] = useState<SwitchCandidate[] | null>(null);
   const attachRef = useRef<Attachment | null>(null);
   attachRef.current = attachment;
-  const openRef = useRef(openSessionId);
-  openRef.current = openSessionId;
-  const switcherRef = useRef(switcherOpen);
-  switcherRef.current = switcherOpen;
+
+  // Android 返回键优先关侧板（main.tsx backButton 接管后经此事件收口）。
+  useEffect(() => {
+    const close = (): void => setSwitcherOpen(false);
+    window.addEventListener("zcode-close-sheets", close);
+    return () => window.removeEventListener("zcode-close-sheets", close);
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -62,11 +68,11 @@ export function WorkspaceView(props: {
           channel.close();
           return;
         }
-        // relay 断开（含控制面掉线引发的 attachment 拆除）：呈现重连横幅；
+        // relay 断开（含控制面掉线引发的 attachment 拆除）：官方重连 toast；
         // 自动恢复由 connectionEpoch 变化触发本 effect 重跑（re-attach + 重建订阅）。
         channel.onClosed(() => {
           if (disposed) return;
-          setError("与工作区的连接已断开，正在自动恢复…");
+          setError("relay-closed");
         });
         const record: Attachment = {
           attachResult,
@@ -76,10 +82,6 @@ export function WorkspaceView(props: {
         attachRef.current = record;
         setAttachment(record);
         setError(null);
-        // 任务直达：从目录点具体任务进入时自动打开该会话（pushState 一次）。
-        if (props.initialSessionId !== null && openRef.current === null) {
-          openSessionRef.current?.(props.initialSessionId);
-        }
       } catch (attachError) {
         if (!disposed) {
           setError(attachError instanceof Error ? attachError.message : String(attachError));
@@ -88,40 +90,14 @@ export function WorkspaceView(props: {
     })();
     return () => {
       disposed = true;
-      // 只关 relay 通道；detach 由返回目录/切换工作区统一处理。
+      // 只关 relay 通道；detach 由返回首页/切换工作区统一处理。
       attachRef.current?.close();
       attachRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 每个工作区/每代连接建立一次
   }, [target.node, target.workspaceIdentity, props.connectionEpoch]);
 
-  // Home/Chat 历史导航：打开会话压栈，Android/浏览器返回键经 popstate 回列表
-  // （而非退出 App）；组件卸载时若栈里还留着 chat 项，交给宿主导航处理。
-  useEffect(() => {
-    const onPopState = (): void => {
-      if (openRef.current !== null) setOpenSessionId(null);
-      if (switcherRef.current) setSwitcherOpen(false);
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
-
-  const openSession = useCallback((sessionId: string): void => {
-    window.history.pushState({ view: "chat", sessionId }, "");
-    setOpenSessionId(sessionId);
-  }, []);
-  const openSessionRef = useRef<((sessionId: string) => void) | null>(null);
-  openSessionRef.current = openSession;
-
-  const backToSessions = useCallback((): void => {
-    if (window.history.state?.view === "chat") {
-      window.history.back(); // popstate 统一收口 setOpenSessionId(null)
-      return;
-    }
-    setOpenSessionId(null);
-  }, []);
-
-  /** detach 当前 attachment（切换工作区/返回目录共用）。 */
+  /** detach 当前 attachment（切换工作区/返回首页共用）。 */
   const detachCurrent = useCallback((): void => {
     const record = attachRef.current;
     void props
@@ -138,9 +114,14 @@ export function WorkspaceView(props: {
       });
   }, [props]);
 
-  const backToCatalog = useCallback((): void => {
+  const backHome = useCallback((): void => {
+    // 官方语义：优先 history.back()（popstate 在 App 层收口回首页）。
+    if (window.history.state?.zcodeMobilePage === "chat") {
+      window.history.back();
+      return;
+    }
     detachCurrent();
-    props.onBackToCatalog();
+    props.onBackHome();
   }, [detachCurrent, props]);
 
   const openSwitcher = useCallback(async (): Promise<void> => {
@@ -161,7 +142,7 @@ export function WorkspaceView(props: {
             node: node.nodeId,
             workspacePath: workspace.workspacePath,
             workspaceIdentity: workspace.workspaceIdentity,
-            title: `${node.displayName} · ${workspace.title}`,
+            title: workspace.title,
           });
         }
       }
@@ -174,55 +155,47 @@ export function WorkspaceView(props: {
   const switchWorkspace = useCallback(
     (candidate: SwitchCandidate): void => {
       setSwitcherOpen(false);
-      // 掉线恢复期间 attachment 可能不在：无 record 也要让目标切换生效。
-      if (openRef.current !== null) setOpenSessionId(null);
+      // 官方语义：跨工作区切换保持 chat 页，目标交换触发加载浮层。
       if (attachRef.current !== null) detachCurrent();
+      setAttachment(null);
+      setError(null);
       props.onSwitchWorkspace(candidate);
     },
     [detachCurrent, props],
   );
 
-  if (error !== null && attachment === null) {
-    // 无 attachment 的失败（attach 失败等）：整页错误，返回目录重试。
+  const themeMenu = <ThemeMenu theme={props.theme} onThemeChange={props.onThemeChange} />;
+
+  if (error !== null && error !== "relay-closed" && attachment === null) {
+    // attach 失败：整页错误（保留官方顶栏与 header 骨架）。
     return (
-      <div className="app">
-        <header className="topbar">
-          <button className="button secondary" onClick={backToCatalog}>
-            ←
+      <div className="chatpage">
+        <div className="chat-topbar">
+          <button type="button" className="iconbtn" onClick={backHome} aria-label="返回任务首页">
+            <ArrowLeftIcon />
           </button>
-          <h1>{target.title}</h1>
-        </header>
-        <div className="content">
-          <div className="error">{error}</div>
+          <span className="title">任务会话</span>
+          {themeMenu}
+        </div>
+        <div className="ws-header">
+          <div className="ws-head-main">
+            <div className="ws-head-title">{target.title}</div>
+            <div className="ws-head-path">{target.workspacePath}</div>
+          </div>
+        </div>
+        <div className="chat-body">
+          <div className="chat-rows">
+            <div className="error">{error}</div>
+          </div>
         </div>
       </div>
     );
   }
-  if (attachment === null) {
-    return (
-      <div className="app">
-        <header className="topbar">
-          <button className="button secondary" onClick={props.onBackToCatalog}>
-            ←
-          </button>
-          <h1>{target.title}</h1>
-        </header>
-        <div className="content">
-          <p className="muted">正在连接工作区…</p>
-        </div>
-      </div>
-    );
-  }
-  const banner =
-    error !== null ? (
-      <div className="error" style={{ padding: "0 16px" }}>
-        {error}
-      </div>
-    ) : null;
 
   const switcher = switcherOpen && MOBILE_CAPABILITIES.workspaceSwitch ? (
-    <div className="sheet-mask" onClick={() => setSwitcherOpen(false)}>
-      <div className="sheet" onClick={(event) => event.stopPropagation()}>
+    <>
+      <button type="button" className="sheet-mask" aria-label="收起侧边面板" onClick={() => setSwitcherOpen(false)} />
+      <div className="sheet">
         <div className="sheet-title">切换工作区</div>
         {candidates === null && <p className="muted">加载中…</p>}
         {candidates !== null && candidates.length === 0 && (
@@ -231,7 +204,8 @@ export function WorkspaceView(props: {
         {candidates?.map((candidate) => (
           <button
             key={`${candidate.node}:${candidate.workspaceIdentity}`}
-            className="card"
+            type="button"
+            className="card-btn"
             onClick={() => switchWorkspace(candidate)}
           >
             {candidate.title}
@@ -239,46 +213,61 @@ export function WorkspaceView(props: {
           </button>
         ))}
       </div>
-    </div>
+    </>
   ) : null;
 
-  if (openSessionId === null) {
-    return (
-      <div className="app">
-        {banner}
-        <header className="topbar">
-          <button className="button secondary" onClick={backToCatalog}>
-            ←
-          </button>
-          <h1>{target.title}</h1>
-          {MOBILE_CAPABILITIES.workspaceSwitch && (
-            <button className="button secondary" onClick={() => void openSwitcher()}>
-              切换
-            </button>
-          )}
-        </header>
-        <SessionsListView
-          accessor={attachment.accessor}
-          target={target}
-          openSessionId={openSessionId}
-          onOpen={openSession}
-          onNewTask={() => openSession("")}
-        />
-        {switcher}
-      </div>
-    );
-  }
   return (
-    <div className="app">
-      {banner}
-      {/* 会话层自带顶栏（返回/停止），切换入口在会话列表层 */}
-      <ConversationView
-        target={target}
-        sessionId={openSessionId === "" ? null : openSessionId}
-        accessor={attachment.accessor}
-        onBack={backToSessions}
-      />
-      {switcher}
+    <div className="chatpage">
+      <div className="chat-topbar">
+        <button type="button" className="iconbtn" onClick={backHome} aria-label="返回任务首页">
+          <ArrowLeftIcon />
+        </button>
+        <span className="title">任务会话</span>
+        {themeMenu}
+      </div>
+      <div className="ws-header">
+        <div className="ws-head-main">
+          <div className="ws-head-title">{target.title}</div>
+          <div className="ws-head-path">{target.workspacePath}</div>
+        </div>
+        {MOBILE_CAPABILITIES.workspaceSwitch && (
+          <button type="button" className="iconbtn" aria-label="切换工作区" onClick={() => void openSwitcher()}>
+            <RefreshIcon />
+          </button>
+        )}
+      </div>
+      <div className="chat-body">
+        {attachment === null ? (
+          <div className="chat-main">
+            <div className="chat-rows">
+              <p className="muted">正在连接工作区…</p>
+            </div>
+          </div>
+        ) : (
+          <ConversationView
+            target={target}
+            sessionId={props.initialSessionId === "" ? null : props.initialSessionId}
+            accessor={attachment.accessor}
+          />
+        )}
+        {switcher}
+        {attachment === null ? (
+          <div className="overlay-loading" aria-live="polite" aria-busy="true">
+            <div className="overlay-card">
+              <span className="spinner lg" />
+              加载中...
+            </div>
+          </div>
+        ) : null}
+        {error === "relay-closed" ? (
+          <div className="toast-reconnect" aria-live="polite" aria-busy="true">
+            <div>
+              <span className="spinner" />
+              <span>正在自动重连...</span>
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
