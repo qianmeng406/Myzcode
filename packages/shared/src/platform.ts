@@ -549,6 +549,12 @@ export interface IPlatformService {
     nodeToken?: string;
     allowedWorkspaces: string[];
   }): Promise<void>;
+  /** My zcode 桌面直连：用已存节点令牌索取一次性配对码；仅 Desktop 实现 */
+  requestCompanionPairingCode?(): Promise<{
+    code: string;
+    expiresAt: number;
+    displayName: string;
+  }>;
 
   /** 打开系统文件选择框，返回选中文件路径或 null */
   selectFile(): Promise<string | null>;

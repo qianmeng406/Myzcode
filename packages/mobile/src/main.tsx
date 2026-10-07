@@ -192,44 +192,78 @@ function ConfigView(props: {
   initial: CompanionConfig | null;
   onSaved: (config: CompanionConfig) => void;
 }): React.ReactElement {
-  // 个人自托管：接入服务默认指向已部署的公网入口；字段保留用于换环境，
-  // 留空提交时也回落默认值——日常配对只需填 6 位配对码。
+  // 个人自托管：接入服务默认指向已部署的公网入口；字段收进「更多选项」，
+  // 日常配对只需输入桌面端显示的 6 位配对码。
   const [baseUrl, setBaseUrl] = useState(props.initial?.baseUrl ?? DEFAULT_GATEWAY_URL);
-  const [deviceName, setDeviceName] = useState("My zcode 手机");
-  const [pairingCode, setPairingCode] = useState("");
+  const [deviceName, setDeviceName] = useState("Myzcode 手机");
+  const [digits, setDigits] = useState<string[]>(Array(6).fill(""));
   const [pairing, setPairing] = useState(false);
   const [pairError, setPairError] = useState<string | null>(null);
+  const inputsRef = useRef<Array<HTMLInputElement | null>>([]);
+
+  const code = digits.join("");
+  const codeComplete = code.length === 6 && !digits.some((digit) => digit === "");
+
+  const setDigit = (index: number, value: string): void => {
+    const clean = value.replace(/\D/g, "");
+    if (clean === "") {
+      setDigits((prev) => prev.map((digit, i) => (i === index ? "" : digit)));
+      return;
+    }
+    if (clean.length > 1) {
+      // 粘贴整段验证码：从当前格依次填充。
+      setDigits((prev) => {
+        const next = [...prev];
+        for (let offset = 0; offset < clean.length && index + offset < 6; offset += 1) {
+          next[index + offset] = clean[offset] ?? "";
+        }
+        return next;
+      });
+      const target = Math.min(index + clean.length, 5);
+      inputsRef.current[target]?.focus();
+      return;
+    }
+    setDigits((prev) => prev.map((digit, i) => (i === index ? clean : digit)));
+    if (index < 5) inputsRef.current[index + 1]?.focus();
+  };
+
+  const onDigitKeyDown = (index: number, event: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === "Backspace" && digits[index] === "" && index > 0) {
+      inputsRef.current[index - 1]?.focus();
+      setDigits((prev) => prev.map((digit, i) => (i === index - 1 ? "" : digit)));
+      event.preventDefault();
+    }
+  };
+
   return (
     <div className="app">
-      <header className="topbar">
-        <h1>接入设置</h1>
-      </header>
+      <div className="hero">
+        <div className="hero-icon">Z</div>
+        <h1>Myzcode</h1>
+        <p>输入电脑端显示的 6 位配对码，连接你的工作区</p>
+      </div>
       <div className="content">
-        <label className="field">
-          <span>接入服务地址</span>
-          <input
-            value={baseUrl}
-            onChange={(event) => setBaseUrl(event.target.value)}
-            placeholder={DEFAULT_GATEWAY_URL}
-            autoCapitalize="none"
-          />
-        </label>
-        <label className="field">
-          <span>设备名称</span>
-          <input value={deviceName} onChange={(event) => setDeviceName(event.target.value)} />
-        </label>
-        <label className="field">
-          <span>配对码（6 位数字，一次性）</span>
-          <input
-            value={pairingCode}
-            onChange={(event) => setPairingCode(event.target.value)}
-            inputMode="numeric"
-            autoCapitalize="none"
-          />
-        </label>
+        <div className="code-input" aria-label="配对码">
+          {digits.map((digit, index) => (
+            <input
+              key={index}
+              ref={(element) => {
+                inputsRef.current[index] = element;
+              }}
+              value={digit}
+              onChange={(event) => setDigit(index, event.target.value)}
+              onKeyDown={(event) => onDigitKeyDown(index, event)}
+              onFocus={(event) => event.currentTarget.select()}
+              inputMode="numeric"
+              autoComplete={index === 0 ? "one-time-code" : "off"}
+              maxLength={6}
+              className={digit === "" ? "" : "filled"}
+            />
+          ))}
+        </div>
         <button
-          className="button"
-          disabled={pairing || deviceName.trim() === "" || pairingCode.trim() === ""}
+          className="button primary-block"
+          disabled={pairing || !codeComplete || deviceName.trim() === ""}
           onClick={() => {
             setPairing(true);
             setPairError(null);
@@ -237,7 +271,7 @@ function ConfigView(props: {
             CompanionClient.pair({
               baseUrl: effectiveBaseUrl,
               deviceName: deviceName.trim(),
-              code: pairingCode.trim(),
+              code,
             })
               .then((pairResult) => {
                 props.onSaved({ baseUrl: effectiveBaseUrl, accessToken: pairResult.accessToken });
@@ -253,7 +287,23 @@ function ConfigView(props: {
           {pairing ? "配对中…" : "配对并连接"}
         </button>
         {pairError !== null && <div className="error">{pairError}</div>}
-        <p className="muted">配对码一次性有效（15 分钟）；配对成功后自动获得访问令牌。</p>
+        <p className="hint-line">配对码一次性有效（15 分钟），在电脑端「Myzcode 桌面直连」弹窗生成。</p>
+        <details className="advanced">
+          <summary>更多选项</summary>
+          <label className="field">
+            <span>接入服务地址</span>
+            <input
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              placeholder={DEFAULT_GATEWAY_URL}
+              autoCapitalize="none"
+            />
+          </label>
+          <label className="field">
+            <span>设备名称</span>
+            <input value={deviceName} onChange={(event) => setDeviceName(event.target.value)} />
+          </label>
+        </details>
       </div>
     </div>
   );
@@ -291,46 +341,75 @@ function CatalogView(props: {
       if (interval !== null) clearInterval(interval);
     };
   }, [props.ensureClient]);
+  const onlineCount = catalog?.nodes.filter((node) => node.online).length ?? 0;
+  const workspaceCount =
+    catalog?.nodes.reduce((sum, node) => sum + node.workspaces.length, 0) ?? 0;
   return (
     <div className="content">
       {error !== null && <div className="error">{error}</div>}
       <button
-        className="card"
-        style={{ marginBottom: 12, textAlign: "left" }}
+        className="feature-card"
         onClick={() => {
           // 完整 Web UI（同 WebView 子路径，sessionStorage 配置直接交接）。
           window.location.href = "webui/index.html?companion=1";
         }}
       >
-        打开完整界面
-        <div className="sub">桌面级完整 UI（工作区/差异/文件树），经同一接入服务</div>
+        <span className="feature-main">
+          <span className="feature-title">打开完整界面</span>
+          <span className="feature-sub">桌面级完整 UI · 工作区 / 差异 / 文件树</span>
+        </span>
+        <span className="feature-arrow">›</span>
       </button>
+
+      <div className="section-label">
+        <span>工作区</span>
+        {catalog !== null && (
+          <span className="section-meta">{onlineCount} 台在线 · {workspaceCount} 个工作区</span>
+        )}
+      </div>
+
       {catalog === null && <p className="muted">正在加载工作区…</p>}
+      {catalog !== null && catalog.nodes.length === 0 && (
+        <div className="empty-state">
+          <div className="empty-icon">⌘</div>
+          <p>还没有已连接的设备</p>
+          <p className="empty-sub">在电脑端「Myzcode 桌面直连」弹窗生成配对码</p>
+        </div>
+      )}
       {catalog?.nodes.map((node) => (
-        <div key={node.nodeId}>
-          <p className="muted" style={{ padding: "8px 0", textAlign: "left" }}>
+        <div key={node.nodeId} className="node-group">
+          <div className="node-header">
             <span className={node.online ? "dot on" : "dot off"} />
-            {node.displayName}（{node.kind === "cloud" ? "云端" : "电脑"}）
-          </p>
+            <span className="node-name">{node.displayName}</span>
+            <span className={node.kind === "cloud" ? "node-chip cloud" : "node-chip desktop"}>
+              {node.kind === "cloud" ? "云端" : "电脑"}
+            </span>
+            <span className={node.online ? "node-state on" : "node-state off"}>
+              {node.online ? "在线" : "离线"}
+            </span>
+          </div>
           {node.workspaces.map((workspace) => (
             <button
               key={`${node.nodeId}:${workspace.workspaceIdentity}`}
-              className="card"
+              className="ws-row"
               disabled={!node.online || !workspace.available}
               onClick={() =>
                 props.onOpen(node.nodeId, workspace.workspacePath, workspace.workspaceIdentity, workspace.title)
               }
             >
-              {workspace.title}
-              <div className="sub">
-                {workspace.available ? "可用" : "运行端不可用"} · {workspace.workspacePath}
-              </div>
+              <span className="ws-icon">▣</span>
+              <span className="ws-main">
+                <span className="ws-title">{workspace.title}</span>
+                <span className="ws-path">{workspace.workspacePath}</span>
+              </span>
+              <span className={workspace.available && node.online ? "ws-badge ok" : "ws-badge off"}>
+                {workspace.available ? (node.online ? "可用" : "离线") : "不可用"}
+              </span>
+              <span className="ws-arrow">›</span>
             </button>
           ))}
           {node.online && node.workspaces.length === 0 && (
-            <p className="muted" style={{ textAlign: "left", padding: "4px 0" }}>
-              该节点未开放工作区
-            </p>
+            <p className="node-empty">该节点未开放工作区</p>
           )}
         </div>
       ))}

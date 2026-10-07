@@ -146,6 +146,33 @@ export async function startCompanionGatewayServer(
     }
   });
 
+  // 节点侧配对码签发：桌面连接器用节点令牌（Bearer）为用户索取 6 位配对码，
+  // 免去在桌面 UI 手工保管/粘贴令牌。令牌只比对 sha256 指纹，日志不落明文。
+  app.post("/companion/nodes/pair-code", requireCsrf, async (c) => {
+    const authorization = c.req.header("authorization") ?? "";
+    const rawToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+    if (rawToken === "") {
+      return c.json({ error: { code: "unauthorized", message: "missing node token" } }, 401);
+    }
+    const fingerprint = secrets.sha256Hex(rawToken);
+    const nodes = await store.listNodes();
+    const node = nodes.find(
+      (candidate) => candidate.tokenFingerprint === fingerprint && candidate.revokedAt === undefined,
+    );
+    if (!node) {
+      logger.warn("companion node pair-code rejected", { fingerprint });
+      return c.json({ error: { code: "unauthorized", message: "node token rejected" } }, 401);
+    }
+    const issued = await pairing.createPairingCode();
+    logger.info("companion node pair-code issued", { nodeId: node.nodeId });
+    return c.json({
+      code: issued.code,
+      expiresAt: issued.expiresAt,
+      nodeId: node.nodeId,
+      displayName: node.displayName,
+    });
+  });
+
   app.post("/companion/refresh", requireCsrf, async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { refreshToken?: unknown };
     const cookieToken = readCookie(c.req.header("cookie"), REFRESH_COOKIE);

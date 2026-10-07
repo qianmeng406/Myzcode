@@ -118,6 +118,8 @@ export function registerPlatformIpcHandlers(options: {
       nodeToken?: string;
       allowedWorkspaces: string[];
     }): Promise<void>;
+    /** 用已存节点令牌向 gateway 索取一次性配对码（弹窗直接展示）。 */
+    requestPairingCode(): Promise<{ code: string; expiresAt: number; displayName: string }>;
   };
 }) {
   ipcMain.handle(PlatformChannels.CompanionGetConfig, async () => {
@@ -152,6 +154,12 @@ export function registerPlatformIpcHandlers(options: {
       return { ok: true };
     },
   );
+  ipcMain.handle(PlatformChannels.CompanionPairingCode, async () => {
+    if (!options.companionHandlers?.requestPairingCode) {
+      throw new Error("companion handlers unavailable");
+    }
+    return options.companionHandlers.requestPairingCode();
+  });
   ipcMain.handle(PlatformChannels.SelectDirectory, async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openDirectory", "createDirectory"],

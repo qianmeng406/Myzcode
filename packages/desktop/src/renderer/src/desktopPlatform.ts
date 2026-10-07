@@ -16,6 +16,9 @@ export function createDesktopPlatform(options: {
     setCompanionConfig: window.zcode.setCompanionConfig
       ? (input) => window.zcode.setCompanionConfig!(input)
       : undefined,
+    requestCompanionPairingCode: window.zcode.requestCompanionPairingCode
+      ? () => window.zcode.requestCompanionPairingCode!()
+      : undefined,
     selectDirectory: () => window.zcode.selectDirectory(),
     selectFile: () => window.zcode.selectFile(),
     selectFiles: () => window.zcode.selectFiles?.() ?? Promise.resolve([]),

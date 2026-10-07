@@ -290,6 +290,13 @@ contextBridge.exposeInMainWorld("zcode", {
     ipcRenderer.invoke(PlatformChannels.SelectDirectory),
   /** My zcode 桌面直连：读取配置（nodeToken 不出主进程） */
   getCompanionConfig: () => ipcRenderer.invoke(PlatformChannels.CompanionGetConfig),
+  /** My zcode 桌面直连：用已存节点令牌索取一次性配对码 */
+  requestCompanionPairingCode: () =>
+    ipcRenderer.invoke(PlatformChannels.CompanionPairingCode) as Promise<{
+      code: string;
+      expiresAt: number;
+      displayName: string;
+    }>,
   /** My zcode 桌面直连：更新配置并重连/断开 */
   setCompanionConfig: (input: {
     enabled: boolean;

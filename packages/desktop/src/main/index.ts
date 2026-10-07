@@ -199,6 +199,7 @@ import {
   saveCompanionConfig,
   type DesktopCompanionConfig,
 } from "./companion/companionConfig.js";
+import { requestCompanionPairingCode } from "./companion/desktopPairing.js";
 import {
   reportRemoteConnectionStateChangedToArms,
   reportRemoteDisconnectToArms,
@@ -2209,6 +2210,18 @@ app.whenReady().then(async () => {
           nodeToken: input.nodeToken ?? current.nodeToken,
           allowedWorkspaces: input.allowedWorkspaces,
         });
+      },
+      requestPairingCode: async () => {
+        const config = companionConfigCache ?? (await loadCompanionConfig(app.getPath("userData")));
+        const issued = await requestCompanionPairingCode({
+          gatewayUrl: config.gatewayUrl,
+          nodeToken: config.nodeToken,
+        });
+        return {
+          code: issued.code,
+          expiresAt: issued.expiresAt,
+          displayName: issued.displayName,
+        };
       },
     },
     // CDP-on-guest pivot：renderer `<webview>` dom-ready 上报 guest webContentsId → attach。
