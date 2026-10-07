@@ -8,6 +8,7 @@
 // 完整投影/历史分页/模型切换是后续增量（模型选项面未开放，见 spec §9.1）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { IServiceAccessor } from "@zcode/services";
+import type { CommandAck, CommandEnvelope } from "@zcode/shared/zcode-protocol-v4";
 import {
   createAgentConversationTransport,
   type ConversationTransport,
@@ -108,6 +109,30 @@ export function ConversationView(props: {
     [],
   );
 
+  /**
+   * 命令发送 + ACK 丢失对账：断线/超时时发送结局不确定，先 queryCommands
+   * 查真实结局——accepted 按成功继续，unknown 显示"未确认"且不自动重发
+   * （避免重复建任务/重复输入；对账本身失败也按未确认处理）。
+   */
+  const sendCommandWithReconcile = useCallback(
+    async (
+      activeTransport: ConversationTransport,
+      envelope: CommandEnvelope,
+    ): Promise<{ ack: CommandAck | null; unconfirmed: boolean }> => {
+      try {
+        return { ack: await activeTransport.sendCommand(envelope), unconfirmed: false };
+      } catch {
+        const item = await activeTransport
+          .queryCommands({ commands: [{ sessionId: envelope.sessionId, commandId: envelope.commandId }] })
+          .then((result) => result.results[0]?.result ?? null)
+          .catch(() => null);
+        if (item !== null && item !== "unknown") return { ack: item, unconfirmed: false };
+        return { ack: null, unconfirmed: true };
+      }
+    },
+    [],
+  );
+
   const send = useCallback(async (): Promise<void> => {
     const activeTransport = transport;
     const text = draft.trim();
@@ -118,7 +143,7 @@ export function ConversationView(props: {
       const current = stateRef.current;
       if (current.sessionId === null) {
         // 首条输入：createSession（sessionId=null），ACK result 带回新会话 id。
-        const ack = await activeTransport.sendCommand({
+        const { ack, unconfirmed } = await sendCommandWithReconcile(activeTransport, {
           commandId: newCommandId(),
           clientId: getV4ClientId(),
           sessionId: null,
@@ -129,11 +154,16 @@ export function ConversationView(props: {
           },
           issuedAt: Date.now(),
         });
-        if (ack.status !== "accepted") {
-          setError(`任务未被接受：${ack.reasonCode ?? ack.status}`);
+        if (unconfirmed) {
+          // 不自动重发：任务可能已在桌面落定，重复提交会产生两个任务。
+          setError("网络中断，任务提交结果未确认；请返回列表查看是否已创建，勿重复发送。");
           return;
         }
-        const result = ack.result;
+        if (ack!.status !== "accepted") {
+          setError(`任务未被接受：${ack!.reasonCode ?? ack!.status}`);
+          return;
+        }
+        const result = ack!.result;
         const sessionId =
           result !== undefined && result.type === "createSession" ? result.sessionId : null;
         if (sessionId === null) {
@@ -151,7 +181,7 @@ export function ConversationView(props: {
         activeTransport.activate(subscribeResult.ack.subscriptionId);
         return;
       }
-      const ack = await activeTransport.sendCommand({
+      const { ack, unconfirmed } = await sendCommandWithReconcile(activeTransport, {
         commandId: newCommandId(),
         clientId: getV4ClientId(),
         sessionId: current.sessionId,
@@ -159,8 +189,12 @@ export function ConversationView(props: {
         payload: { text, displayText: text },
         issuedAt: Date.now(),
       });
-      if (ack.status !== "accepted") {
-        setError(`输入未被接受：${ack.reasonCode ?? ack.status}`);
+      if (unconfirmed) {
+        setError("网络中断，发送结果未确认；请稍后在会话中确认，勿重复发送。");
+        return;
+      }
+      if (ack!.status !== "accepted") {
+        setError(`输入未被接受：${ack!.reasonCode ?? ack!.status}`);
         return;
       }
       window.sessionStorage.removeItem(`zcode-draft:${view.workspaceIdentity}`);
@@ -170,7 +204,7 @@ export function ConversationView(props: {
     } finally {
       setBusy(false);
     }
-  }, [transport, draft, view.workspaceIdentity, newCommandId]);
+  }, [transport, draft, view.workspaceIdentity, newCommandId, sendCommandWithReconcile]);
 
   const stop = useCallback(async (): Promise<void> => {
     const activeTransport = transport;
@@ -178,7 +212,7 @@ export function ConversationView(props: {
     if (activeTransport === null || current.sessionId === null) return;
     setBusy(true);
     try {
-      await activeTransport.sendCommand({
+      const { ack, unconfirmed } = await sendCommandWithReconcile(activeTransport, {
         commandId: newCommandId(),
         clientId: getV4ClientId(),
         sessionId: current.sessionId,
@@ -186,12 +220,16 @@ export function ConversationView(props: {
         payload: {},
         issuedAt: Date.now(),
       });
+      // 停止语义幂等且结果由权威快照收口：未确认时静默，不误导也不重发。
+      if (!unconfirmed && ack !== null && ack.status === "rejected") {
+        setError(`停止未被接受：${ack.reasonCode ?? ack.status}`);
+      }
     } catch (stopError) {
       setError(stopError instanceof Error ? stopError.message : String(stopError));
     } finally {
       setBusy(false);
     }
-  }, [transport, newCommandId]);
+  }, [transport, newCommandId, sendCommandWithReconcile]);
 
   const answerInteraction = useCallback(
     async (interactionId: string, optionId: string): Promise<void> => {
