@@ -122,23 +122,41 @@ export class CompanionPairingService {
     return { device, ...issued };
   }
 
+  /**
+   * 已轮换 refresh 的重放宽限窗：窗口内的并发重放（双标签页同 Cookie）按
+   * 单纯失败处理；窗口外的重放说明旧凭证已失窃/被留存复制 → 整个设备
+   * 的 refresh 家族失效（强制重新配对），access 按自身 TTL 存活到过期。
+   */
+  static readonly REFRESH_REUSE_GRACE_MS = 30_000;
+
   async refreshAccess(rawRefreshToken: string): Promise<
     | { ok: true; accessToken: string; refreshToken: string; accessExpiresAt: number; deviceId: string }
     | { ok: false }
   > {
     const hash = this.deps.secrets.sha256Hex(rawRefreshToken);
+    const now = this.deps.clock.now();
     const devices = await this.deps.store.listDevices();
     for (const device of devices) {
       if (device.revokedAt !== undefined) continue;
       const refreshSecrets = await this.deps.store.listSecrets(device.deviceId, "refresh");
       const hit = refreshSecrets.find((secret) => secret.hash === hash);
       if (!hit) continue;
-      if (hit.expiresAt <= this.deps.clock.now()) {
+      if (hit.expiresAt <= now) {
         return { ok: false };
       }
-      // 轮换：原子单次消费被使用的这条 refresh（并发重放只有一个赢家），
-      // 消费成功才签发新对；同设备其他表面积不受影响。
-      const consumed = await this.deps.store.consumeSecret(device.deviceId, "refresh", hash);
+      if (hit.consumedAt !== undefined) {
+        // 已轮换 token 的重放：宽限窗外按失窃处置，吊销整个 refresh 家族。
+        if (now - hit.consumedAt > CompanionPairingService.REFRESH_REUSE_GRACE_MS) {
+          this.deps.logger.warn("companion refresh reuse detected: killing family", {
+            deviceId: device.deviceId,
+          });
+          await this.deps.store.deleteSecrets(device.deviceId);
+        }
+        return { ok: false };
+      }
+      // 轮换：原子单次消费（并发重放只有一个赢家），消费成功才签发新对；
+      // 同设备其他表面积不受影响。
+      const consumed = await this.deps.store.consumeSecret(device.deviceId, "refresh", hash, now);
       if (!consumed) return { ok: false };
       const issued = await this.issueSecrets(device.deviceId);
       return { ok: true, deviceId: device.deviceId, ...issued };
@@ -161,6 +179,12 @@ export class CompanionPairingService {
     accessExpiresAt: number;
   }> {
     const now = this.deps.clock.now();
+    // 清理已过期且已消费的旧 refresh：重放检测窗口随过期失去意义，不留积压。
+    for (const secret of await this.deps.store.listSecrets(deviceId, "refresh")) {
+      if (secret.consumedAt !== undefined && secret.expiresAt <= now) {
+        await this.deps.store.deleteSecret(deviceId, "refresh", secret.hash);
+      }
+    }
     const accessToken = this.deps.secrets.randomToken(32);
     const refreshToken = this.deps.secrets.randomToken(32);
     await this.deps.store.putSecret({

@@ -159,6 +159,36 @@ test("refresh 并发重放：原子轮换下只有一个赢家", async () => {
   assert.equal((await pairing.refreshAccess(paired.refreshToken)).ok, false);
 });
 
+test("refresh 宽限窗外重放：整个家族失效（强制重新配对）", async () => {
+  const store = new MemoryControlStore();
+  const secrets = new NodeSecretBox();
+  let now = 1_000_000;
+  const pairing = new CompanionPairingService({
+    store,
+    secrets,
+    clock: { now: () => now },
+    logger: noopLogger,
+  });
+  await store.saveNode({ nodeId: "cloud-1", kind: "cloud", displayName: "本机云端", tokenFingerprint: "fp", createdAt: 1 });
+  const issued = await pairing.createPairingCode();
+  const paired = await pairing.pairDevice("dev", issued.code);
+
+  // 正常轮换一次；30 秒宽限窗内的旧 token 重放只被拒绝。
+  const rotated = await pairing.refreshAccess(paired.refreshToken);
+  assert.ok(rotated.ok);
+  now += 10_000;
+  assert.equal((await pairing.refreshAccess(paired.refreshToken)).ok, false);
+
+  // 宽限窗外的重放 = 失窃信号：整个 refresh 家族失效、access 一并吊销。
+  now += 60_000;
+  assert.equal((await pairing.refreshAccess(paired.refreshToken)).ok, false);
+  assert.ok(rotated.ok);
+  if (rotated.ok) {
+    assert.equal((await pairing.refreshAccess(rotated.refreshToken)).ok, false);
+    assert.equal(await pairing.authenticateAccessToken(rotated.accessToken), null);
+  }
+});
+
 test("节点签发的配对码只授予该节点（含工作区范围）", async () => {
   const store = new MemoryControlStore();
   const secrets = new NodeSecretBox();

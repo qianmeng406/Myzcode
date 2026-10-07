@@ -36,7 +36,10 @@ function resolveCompanionConfig(): CompanionWebConfig | null {
   const params = new URLSearchParams(window.location.search);
   const gateway = params.get("companionGateway");
   const token = params.get("companionToken");
-  if (gateway && token) {
+  // 发布面禁用 URL 直传 token：URL 会进浏览器历史/同步/服务器日志，成为可
+  // 重放的注入面。开发联调必须显式携带 ?companionDebug=1 才启用该入口；
+  // 正常路径是轻量 App 配对后经 sessionStorage 同源交接。
+  if (gateway && token && params.has("companionDebug")) {
     // 开发联调用 URL 直传：只写 sessionStorage（会话级）且立刻从地址栏清除
     // 参数——带 token 的 URL 进浏览器历史/同步会变成可长期重放的注入面，
     // 持久化进 localStorage 还会让后续访问被固定到该网关（网关注入）。

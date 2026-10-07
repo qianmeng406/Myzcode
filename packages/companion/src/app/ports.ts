@@ -29,6 +29,8 @@ export interface DeviceSecretRecord {
   /** sha256 指纹；明文永不落盘。 */
   hash: string;
   expiresAt: number;
+  /** refresh 轮换消费时间；保留已消费指纹供重放检测（reuse → 家族失效）。 */
+  consumedAt?: number;
 }
 
 export interface PairingCodeRecord {
@@ -69,8 +71,11 @@ export interface ControlStore {
   putSecret(record: DeviceSecretRecord): Promise<void>;
   /** 精确删除一条秘密（撤销/清理用）；deleteSecrets 撤销时级联清空。 */
   deleteSecret(deviceId: string, kind: DeviceSecretKind, hash: string): Promise<void>;
-  /** 原子单次消费：删除成功（changes===1）才返回 true；refresh 轮换防并发重放。 */
-  consumeSecret(deviceId: string, kind: DeviceSecretKind, hash: string): Promise<boolean>;
+  /**
+   * 原子单次消费：未消费的命中标记 consumedAt 并返回 true；并发重放只有一个赢家。
+   * 已消费的命中返回 false（record 保留供重放检测；见 listSecrets 的 consumedAt）。
+   */
+  consumeSecret(deviceId: string, kind: DeviceSecretKind, hash: string, consumedAt: number): Promise<boolean>;
   deleteSecrets(deviceId: string): Promise<void>;
 
   putPairingCode(record: PairingCodeRecord): Promise<void>;

@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS device_secrets (
   device_id TEXT NOT NULL,
   kind TEXT NOT NULL,
   hash TEXT PRIMARY KEY,
-  expires_at INTEGER NOT NULL
+  expires_at INTEGER NOT NULL,
+  consumed_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS nodes (
   node_id TEXT PRIMARY KEY,
@@ -57,6 +58,7 @@ export class SqliteControlStore implements ControlStore {
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec(SCHEMA);
     this.migratePairingCodeBinding();
+    this.migrateSecretConsumedAt();
   }
 
   /** 既有库升级：pairing_codes 补签发绑定两列（CREATE IF NOT EXISTS 不会改旧表）。 */
@@ -68,6 +70,14 @@ export class SqliteControlStore implements ControlStore {
     }
     if (!names.has("scope_workspace_identities")) {
       this.db.exec("ALTER TABLE pairing_codes ADD COLUMN scope_workspace_identities TEXT");
+    }
+  }
+
+  /** 既有库升级：device_secrets 补 consumed_at 列（refresh 重放检测用）。 */
+  private migrateSecretConsumedAt(): void {
+    const columns = this.db.prepare("PRAGMA table_info(device_secrets)").all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === "consumed_at")) {
+      this.db.exec("ALTER TABLE device_secrets ADD COLUMN consumed_at INTEGER");
     }
   }
 
@@ -181,20 +191,23 @@ export class SqliteControlStore implements ControlStore {
 
   async listSecrets(deviceId: string, kind: DeviceSecretKind): Promise<DeviceSecretRecord[]> {
     const rows = this.db
-      .prepare("SELECT device_id, kind, hash, expires_at FROM device_secrets WHERE device_id = ? AND kind = ?")
-      .all(deviceId, kind) as Array<{ device_id: string; kind: string; hash: string; expires_at: number }>;
+      .prepare("SELECT device_id, kind, hash, expires_at, consumed_at FROM device_secrets WHERE device_id = ? AND kind = ?")
+      .all(deviceId, kind) as Array<{ device_id: string; kind: string; hash: string; expires_at: number; consumed_at: number | null }>;
     return rows.map((row) => ({
       deviceId: row.device_id,
       kind: row.kind === "refresh" ? "refresh" : "access",
       hash: row.hash,
       expiresAt: row.expires_at,
+      ...(row.consumed_at !== null ? { consumedAt: row.consumed_at } : {}),
     }));
   }
 
   async putSecret(record: DeviceSecretRecord): Promise<void> {
     this.db
-      .prepare("INSERT OR REPLACE INTO device_secrets (device_id, kind, hash, expires_at) VALUES (?, ?, ?, ?)")
-      .run(record.deviceId, record.kind, record.hash, record.expiresAt);
+      .prepare(
+        "INSERT OR REPLACE INTO device_secrets (device_id, kind, hash, expires_at, consumed_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(record.deviceId, record.kind, record.hash, record.expiresAt, record.consumedAt ?? null);
   }
 
   async deleteSecret(deviceId: string, kind: DeviceSecretKind, hash: string): Promise<void> {
@@ -203,12 +216,18 @@ export class SqliteControlStore implements ControlStore {
       .run(deviceId, kind, hash);
   }
 
-  async consumeSecret(deviceId: string, kind: DeviceSecretKind, hash: string): Promise<boolean> {
-    // 原子单次消费：DELETE 带 WHERE 条件，changes===1 才算本次调用者消费成功。
-    // 并发重放同一 refresh 时只有一个请求删得掉，其余按失效处理。
+  async consumeSecret(
+    deviceId: string,
+    kind: DeviceSecretKind,
+    hash: string,
+    consumedAt: number,
+  ): Promise<boolean> {
+    // 原子单次消费：未消费的命中标记 consumed_at（changes===1 = 本次调用者赢家）；
+    // 已消费的命中 UPDATE 落空返回 false，但指纹保留——refreshAccess 据此区分
+    // 「从未存在」与「已轮换后重放」（后者触发家族失效）。
     const result = this.db
-      .prepare("DELETE FROM device_secrets WHERE device_id = ? AND kind = ? AND hash = ?")
-      .run(deviceId, kind, hash);
+      .prepare("UPDATE device_secrets SET consumed_at = ? WHERE device_id = ? AND kind = ? AND hash = ? AND consumed_at IS NULL")
+      .run(consumedAt, deviceId, kind, hash);
     return Number(result.changes) === 1;
   }
 
