@@ -7,7 +7,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "oxlint",
-    "lint:fix": "oxlint --fix"
+    "lint:fix": "oxlint --fix",
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@capacitor/android": "^7.6.9",

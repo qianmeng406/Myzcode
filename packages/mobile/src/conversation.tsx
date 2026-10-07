@@ -234,7 +234,7 @@ export function ConversationView(props: {
   }, [transport, newCommandId, sendCommandWithReconcile]);
 
   const answerInteraction = useCallback(
-    async (interactionId: string, answer: { optionId?: string; freeText?: string }): Promise<void> => {
+    async (interactionId: string, answer: { optionId?: string; freeText?: string; action?: "accept" | "decline" | "cancel"; content?: Record<string, unknown> }): Promise<void> => {
       const activeTransport = transport;
       const current = stateRef.current;
       if (activeTransport === null || current.sessionId === null) return;

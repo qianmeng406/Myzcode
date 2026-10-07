@@ -18,6 +18,13 @@ export interface MobileRow {
   fileChanges: MobileFileChangesSummary | null;
 }
 
+export interface MobileElicitationQuestion {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options: Array<{ value: string; label: string }>;
+}
+
 export interface MobileInteraction {
   interactionId: string;
   kind: string;
@@ -27,6 +34,10 @@ export interface MobileInteraction {
   freeText: boolean;
   /** 敏感输入：按密码框渲染，只留内存、不入草稿/历史。 */
   sensitive: boolean;
+  /** AskUserQuestion/计划批准的多题结构；空数组 = 普通单题交互。 */
+  questions: MobileElicitationQuestion[];
+  /** 计划批准（schema.interaction = plan_approval）：提交走 accept/decline。 */
+  isPlanApproval: boolean;
 }
 
 function rowText(raw: Record<string, unknown>): string {
@@ -83,10 +94,14 @@ function describeInteraction(raw: Record<string, unknown>): MobileInteraction | 
         .filter((option) => option.optionId !== ""),
       freeText: payload.freeText === true,
       sensitive: payload.sensitive === true,
+      questions: [],
+      isPlanApproval: false,
     };
   }
   if (kind === "userInput") {
     const options = Array.isArray(payload.options) ? payload.options : [];
+    const questions = Array.isArray(payload.questions) ? payload.questions : [];
+    const schema = (payload.schema ?? payload.input ?? null) as Record<string, unknown> | null;
     return {
       interactionId,
       kind,
@@ -100,10 +115,39 @@ function describeInteraction(raw: Record<string, unknown>): MobileInteraction | 
         .filter((option) => option.optionId !== ""),
       freeText: payload.freeText === true,
       sensitive: payload.sensitive === true,
+      questions: questions
+        .filter((question): question is Record<string, unknown> => question !== null && typeof question === "object")
+        .map((question) => ({
+          question: typeof question.question === "string" ? question.question : "",
+          header: typeof question.header === "string" ? question.header : "",
+          multiSelect: question.multiSelect === true,
+          options: (Array.isArray(question.options) ? question.options : [])
+            .filter((option): option is Record<string, unknown> => option !== null && typeof option === "object")
+            .map((option) => ({
+              value: String(option.value ?? ""),
+              label: String(option.label ?? option.value ?? ""),
+            }))
+            .filter((option) => option.value !== ""),
+        })),
+      // 计划批准： elicitation 收敛路径以 schema 标记（与桌面 ElicitationDialog 同判据）。
+      isPlanApproval:
+        schema !== null &&
+        typeof schema === "object" &&
+        schema.interaction === "plan_approval" &&
+        schema.toolName === "ExitPlanMode",
     };
   }
   // workspaceHookReview 等其余类型：v1 只展示，不提供手机侧按钮（命令面未开放）。
-  return { interactionId, kind, prompt: "待处理项（请在电脑端处理）", options: [], freeText: false, sensitive: false };
+  return {
+    interactionId,
+    kind,
+    prompt: "待处理项（请在电脑端处理）",
+    options: [],
+    freeText: false,
+    sensitive: false,
+    questions: [],
+    isPlanApproval: false,
+  };
 }
 
 export interface ConversationState {
@@ -191,6 +235,32 @@ export function applyFrame(state: ConversationState, frame: ConversationTopicFra
     // workflowRun.*：v1 渲染不消费。
   }
   return { sessionId, rows, interactions, mode, modelLabel, logEpoch: state.logEpoch, revision: frame.toSeq };
+}
+
+/**
+ * 多题答案 → resolveInteraction 的 content（与桌面 ElicitationDialog 同语义）：
+ * answers 按"选项标签 join"承载；answer_i / 单题 answer 兼容新旧 agent 读取路径。
+ * 只提交用户真实作答的题（AskUserQuestion 是可选澄清，不用空串伪造）。
+ */
+export function buildElicitationAnswer(
+  questions: MobileElicitationQuestion[],
+  selections: Readonly<Record<string, string[]>>,
+): { action: "accept"; content: Record<string, unknown> } {
+  const answersOf = (question: MobileElicitationQuestion): string[] =>
+    (selections[question.question] ?? []).filter((value) => value !== "");
+  const answered = questions
+    .map((question) => ({ question, values: answersOf(question) }))
+    .filter((entry) => entry.values.length > 0);
+  const content: Record<string, unknown> = {
+    answers: Object.fromEntries(answered.map((entry) => [entry.question.question, entry.values.join(", ")])),
+  };
+  answered.forEach((entry, index) => {
+    content[`answer_${index}`] = entry.question.multiSelect ? entry.values : entry.values[0]!;
+  });
+  if (questions.length === 1 && answered.length === 1) {
+    content.answer = questions[0]!.multiSelect ? answered[0]!.values : answered[0]!.values[0]!;
+  }
+  return { action: "accept", content };
 }
 
 export const MODE_LABELS: Record<string, string> = {
