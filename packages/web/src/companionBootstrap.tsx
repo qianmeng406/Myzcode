@@ -30,8 +30,9 @@ function mountMobileCompat(): void {
 
   const MENU_ICON =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>';
+  // 收起态 ☰（展开侧栏）、展开态 ×（关闭侧栏）——展开时按钮移到抽屉右侧，× 语义更明确。
   const CLOSE_ICON =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg>';
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 
   const scrim = document.createElement("div");
   scrim.id = "companion-scrim";

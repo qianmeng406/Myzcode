@@ -52,11 +52,14 @@ html.compact-remote { --companion-statusbar-pad: env(safe-area-inset-top, 0px); 
   }
   #companion-scrim.visible { opacity: 1; }
 
-  /* 抽屉开关（顶条左侧悬浮）：始终位于抽屉之上，打开后即「关闭按钮」。 */
+  /* 抽屉开关：收起态位于 WebUI 左上工具条（后退/前进/新建任务，占 y 10–46）
+     下方的空白行（y 52–88），不遮挡任何 WebUI 自带控件；展开态必须移到抽屉
+     覆盖范围（宽 min(85vw,20rem)）的右缘之外——否则会压住抽屉首项「新建任务」。
+     z 70 使其始终位于抽屉（z 60）之上，展开后仍是可见的关闭按钮。 */
   #companion-nav-btn {
     display: inline-flex;
     position: fixed;
-    top: 8px;
+    top: 52px;
     left: 10px;
     z-index: 70;
     width: 36px;
@@ -68,7 +71,10 @@ html.compact-remote { --companion-statusbar-pad: env(safe-area-inset-top, 0px); 
     background: var(--header, #202020);
     color: var(--foreground, #d4d4d4);
     cursor: pointer;
+    transition: left 0.22s ease-out;
   }
+  /* aria-expanded 由 companionBootstrap 的 setDrawer 维护，与抽屉同源。 */
+  #companion-nav-btn[aria-expanded="true"] { left: calc(min(85vw, 20rem) + 8px); }
   #companion-nav-btn svg { width: 18px; height: 18px; }
 
   /* ── 主内容：全宽，预留顶条高度；桌面内缩进去除 ── */
