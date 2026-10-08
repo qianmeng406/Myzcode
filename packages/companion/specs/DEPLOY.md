@@ -98,6 +98,27 @@ location ^~ /companion/ {
 - **手机**：App「配对码」输入 6 位一次性码（桌面弹窗生成，或服务器 CLI `pair-code`）。外网可用，不要求与服务器同网。
 - **电脑（桌面连接器）**：先在服务器登记 desktop 节点并保存令牌（`node zcode-companion.cjs register-node --id desktop-main --name 家里电脑 --kind desktop`；`--kind` 缺省 cloud），桌面「Myzcode 桌面直连」高级设置填 `wss://<服务器IP>` + 令牌并保存启用；此后日常配对直接在弹窗点「生成配对码」（用已存令牌向网关索取，令牌无需再动）。
 
+### 6.1 桌面测试构建（Preview 身份）
+
+与已安装正式版并排运行的测试包必须以 Preview 身份构建：**`ZCODE_PREVIEW_IDENTITY=1` 在编译与打包两步都要设**——
+
+```sh
+cd packages/desktop
+ZCODE_PREVIEW_IDENTITY=1 pnpm run build:no-runtime-assets   # tsup 把 flavor 编进 main bundle
+ZCODE_PREVIEW_IDENTITY=1 pnpm exec electron-builder --config electron-builder.config.js --win --x64 --dir
+```
+
+只给 electron-builder 设是不够的：`__ZCODE_PRODUCT_FLAVOR__` 由 tsup 编译期注入（`tsup.config.ts`），漏设会烤成 production——`app.name="ZCode"`、userData 落到正式版目录，被正在运行的正式版持单实例锁后**打包态启动即静默退出**（无窗口、无错误日志、exit 0）。排查这类「打了包起不来」的问题时，先核对 `app.name` 与 `userData` 路径是否为 `ZCode Preview`。
+
+### 6.2 反代保活（nginx）
+
+节点控制通道与 relay 数据面都经 nginx 反代；空闲连接会被 `proxy_read_timeout`（默认 60s）静默摘除。网关与连接器已内置保活，无需 nginx 侧配置：
+
+- 节点/手机控制面：应用层心跳（10s ping，30s watchdog 判半开并重连）。
+- relay 数据面：网关对每条 relay ws 周期 10s 发协议层 ping，对端按 RFC 6455 自动回 pong。
+
+若仍见 WS 频繁断开，确认站点配置未覆盖 `proxy_read_timeout` 为更小值，且 `proxy_http_version 1.1` + Upgrade 头齐全。
+
 ## 7. 安全边界（如实）
 
 - 传输安全依赖站点 TLS；配对码 15 分钟单次有效，`/companion/pair` 有每来源限速（15 分钟 10 次）。
@@ -115,4 +136,5 @@ location ^~ /companion/ {
 | 手机「无法连接接入服务」 | 先开手机浏览器访问 `https://<IP>/companion/health`：不通是网络/证书，通则是 App 配置 |
 | 会话列表失败「runtime is not running」 | 正常——订阅为 start-if-needed 会自动拉起 agent；持续失败看 `runtime/daemon.log` 的 spawn preflight |
 | agent 启动失败 | `runtime/daemon.log`；确认 `ZCODE_AGENT_SERVER_COMMAND/ARGS_JSON` 与 `agents/glm/zcode.cjs` 存在可执行 |
+| 手机 attach 报 `node_offline ... timed out` | 桌面 connector 掉线（半开连接）：新版本有心跳+自动重连，等待数秒重试即可；持续出现检查桌面端网络与网关 `logs/serve.log` |
 | WS 频繁断开 | nginx 是否带 Upgrade 头与 24h read timeout；`logs/serve.log` 的断线重连日志 |
