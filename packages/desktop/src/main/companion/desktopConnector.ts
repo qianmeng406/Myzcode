@@ -26,10 +26,17 @@ export interface OpenWorkspaceEntry {
   remoteSessionId?: string;
 }
 
-/** MessagePortMain 形状的端口（测试用普通对象即可）。 */
+/**
+ * MessagePort 形状的端口（测试用普通对象即可）。
+ * 注意：Electron 的 MessagePortMain 实为 Node EventEmitter（on/off），并不提供
+ * DOM 风格的 addEventListener/removeEventListener——真实端口由
+ * wrapCompanionPort 统一适配成 MessagePortLike 再交给 MessagePortProtocol。
+ */
 export interface CompanionPortLike {
-  addEventListener(type: "message", listener: (event: { data: unknown }) => void): void;
+  addEventListener?(type: "message", listener: (event: { data: unknown }) => void): void;
   removeEventListener?(type: "message", listener: (event: { data: unknown }) => void): void;
+  on?(type: "message", listener: (event: { data: unknown }) => void): unknown;
+  off?(type: "message", listener: (event: { data: unknown }) => void): unknown;
   postMessage(message: unknown, transfer?: unknown[]): void;
   start?(): void;
   close(): void;
@@ -229,12 +236,41 @@ export async function startDesktopCompanionConnector(
   };
 }
 
+/**
+ * CompanionPortLike → RPC MessagePortLike 适配：Electron MessagePortMain 走
+ * Node EventEmitter 订阅（on/off），其 'message' 事件参数带 .data，与 DOM
+ * MessageEvent 形状兼容，这里只做订阅 API 归一；测试对象若已提供 DOM 风格
+ * addEventListener 则原样透传。
+ */
+function wrapCompanionPort(port: CompanionPortLike): import("@zcode/rpc").MessagePortLike {
+  if (typeof port.addEventListener === "function") {
+    return {
+      addEventListener: (type, listener) => port.addEventListener?.(type, listener),
+      removeEventListener: (type, listener) => port.removeEventListener?.(type, listener),
+      postMessage: (message) => port.postMessage(message),
+      start: () => port.start?.(),
+      close: () => port.close(),
+    };
+  }
+  return {
+    addEventListener: (type, listener) => {
+      port.on?.(type, listener);
+    },
+    removeEventListener: (type, listener) => {
+      port.off?.(type, listener);
+    },
+    postMessage: (message) => port.postMessage(message),
+    start: () => port.start?.(),
+    close: () => port.close(),
+  };
+}
+
 /** MessagePortMain → 窄化 facade 的 upstream channel（消息面 = 裸 Uint8Array + 流控对象）。 */
 function createPortUpstream(port: CompanionPortLike): {
   channel: IChannel;
   dispose: () => void;
 } {
-  const protocol = new MessagePortProtocol(port as unknown as import("@zcode/rpc").MessagePortLike);
+  const protocol = new MessagePortProtocol(wrapCompanionPort(port));
   const client = new ChannelClient(protocol);
   return {
     channelClient: client,
