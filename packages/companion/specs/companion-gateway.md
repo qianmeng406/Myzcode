@@ -178,7 +178,8 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 | `bots` | T1 | 启动提档（状态读取）：getStatus/getConfig/listWorkspaceRefs/getUserConfigOptions/listBots/getBotStates；syncAppRuntimePreferences 是写方法且作用面为全部 Bot 远端 runtime，永 T0；注册/保存/删除/测试/绑定/自动化处置永 T0 |
 | `onboarding-record` | T1 | 启动提档（被拒会让 Root 引导判定回退成“需要引导”拦住主界面）：仅只读判定面 shouldOnboard/getLatestEntry/getRecords/syncSettingsFromRecord；append/record/dismiss/clear 等写方法永 T0 |
 | `oauth` | T0→按启动实测提档 | 登录态读取若为启动必需，提 T1 只读并在此登记；登录/登出写操作永 T0 |
-| `terminal` / `credential` / `cua-permission` / `cua-pip-session` / `window-controller` / `provider-provisioning-target` | T0 | 高权限面，永不下发 |
+| `terminal` / `credential` / `cua-permission` / `cua-pip-session` / `provider-provisioning-target` | T0 | 高权限面，永不下发 |
+| `window-controller` | T1 | 仅 `listTaskList`（只读任务列表，磁盘 tasks-index 链路，见 §11.4.1）；`mutateTask`/`deleteArchivedTask(s)` 等写方法永 T0；事件面显式为空——`subscribeControllerV4`/`onDynamicControllerFrame` 的 controller 帧是宿主跨工作区投影，会把未共享工作区的任务事实推给手机 |
 | `settings-sync` | T1 | 启动提档（被拒会让首启提示每次启动循环出现）：仅 getFirstRunPromptState（读）与 markFirstRunPromptHandled（“提示已读”UI 簿记写，写入内容不含用户数据）；其余同步写方法永 T0 |
 | `skills` / `skill-sync` / `mcp-sync` / `plugin-sync` / `plugins` / `plugin-management` / `subagents` / `commands` / `hooks` / `memory` / `off-peak-task` | T0 | 写宿主用户目录/插件/自动化面，首版不下发 |
 | `conversation-share` / `prompt-attachment-transfer` / `feedback` / `usage-stats` / `client-config` / `client-scenes` | T0→按启动实测提档 | 完整 UI 启动链若硬依赖其中只读面，逐个提 T1 只读并在此表登记 |
@@ -194,20 +195,46 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 ### 11.4 workspace 绑定（全频道强制）
 
 - T1/T2 频道的**每个入参**都按 attachment 绑定塑形（`shapeArgsWithScope`）：
-  顶层 `workspacePath`/`workspaceIdentity` 强制覆写为绑定值（客户端声明一律覆盖）；
+  顶层 `workspacePath`/`workspaceIdentity` 默认强制覆写为绑定值（客户端声明一律覆盖）；
   顶层 `path`/`rootPath`/`paths[]` 必须落在绑定工作区之内，越界即拒绝
   （`companion facade: path escapes workspace`），路径归一（反斜杠/大小写/尾斜杠）后比较。
 - 没有这层，file/git 等只读白名单会退化成宿主任意路径读取原语（审查发现并已封堵）。
 - zcode-agent 由既有窄 facade 注入，语义相同。
 
+#### 11.4.1 共享工作区集合（跨工作区只读列举的唯一放宽口）
+
+手机侧栏要为**每个已共享工作区**各读一次只读任务摘要；把目标一律坍缩到 attachment
+绑定工作区，会让除已 attach 工作区外的所有共享工作区永远显示「暂无任务」（真机复现并修复）。
+因此 attachment 的 scope 携带 `sharedWorkspaces`——**connector 是"哪些工作区已共享"的权威**
+（桌面 = 已打开且在共享白名单内；云端 = 已登记云工作区）——并只在这两处受控放宽：
+
+| 位置 | 规则 |
+| --- | --- |
+| `workspaceScopes[]`（zcode-task 列表/分组、`window-controller.listTaskList`） | 逐项收窄：命中共享集合则原样保留，未命中整项丢弃并留痕 |
+| zcode-task 只读列表方法的**顶层** `workspacePath`（`listTasks`/`listPinnedTasks`/`listArchivedTasks`/`listDeletedTaskIds`） | 命中共享集合则原样放行，未命中仍改写成绑定工作区 |
+| 其余全部（file/git/agent 的顶层目标、一切写方法与按 taskId 的操作） | 不变：强制绑定值 / 拒绝 |
+
+- `allowSharedTopLevelWorkspace` 默认关闭，且**只允许** zcode-task 的只读列表方法开启。
+- 写方法与按 taskId 的操作**不得**借只读索引跨工作区：`TaskScopedChannel` 的允许集仍然
+  只学习绑定工作区内的 taskId，跨工作区操作必须先 attach 到该工作区（fail-closed）。
+- 集合未知（scope 未带 `sharedWorkspaces`）时全部退回旧行为，不放宽任何范围。
+- 未命中的 scope 留痕 `[companion-facade] scope outside shared set: <path>`——
+  静默丢弃会让"某工作区一直空列表"无从定位。
+
 ### 11.4a 只读任务索引（目录层跨工作区聚合）
 
 - op：手机 `workspace-tasks {nodeId, workspaceIdentity}` → hub（grants 裁决与 attach 同一
   函数 + 30s TTL 缓存）→ 节点 `workspace-tasks` → connector。
-- connector 执行 `readWorkspaceTaskSummary`：对既有运行时开**临时上游**（云端 = daemon
-  loopback TCP；桌面 = 窗口 Host 临时 attachment 端口），v4 握手后以
-  `runtimePolicy: "existing-only"` 订阅 sessions-index，取首个权威快照即退订并释放——
-  **不新建执行者**（start-if-needed 只属于手机显式进入工作区路径）。
+- connector 执行 `readWorkspaceTaskSummary`，**两条读面**（单靠第一条会让"本会话尚未启动
+  运行时"的共享工作区连目录层也读不到历史）：
+  1. sessions-index（优先，含实时 `sessionEnded`/`pendingInteractionSummary`）：对既有运行时开
+     **临时上游**（云端 = daemon loopback TCP；桌面 = 窗口 Host 临时 attachment 端口），v4 握手后以
+     `runtimePolicy: "existing-only"` 订阅，取首个权威快照即退订并释放；
+  2. 磁盘任务读面（兜底）：同一临时端口上 `IZCodeTaskService.listTasks` 直读 tasks-index 持久化。
+- **两条都是只读、都不新建执行者。** 注意 `existing-only` 在"该工作区 agent 运行时未启动"时
+  必然不可用（Host 端 `getReadOnlyClient` 语义，抛 `ZCode Agent runtime is not running.`）——
+  这不是错误，此时必须走磁盘读面，否则一律 `available:false`（start-if-needed 只属于手机显式
+  进入工作区路径）。sessions-index 尝试只拿预算上限内的一段，剩余时间留给磁盘兜底。
 - 摘要只含目录展示最小字段（sessionId/title/ended/pendingCount/lastActivityAt，≤20 条，
   title 截断 200 字）；不携带正文/命令/答案。全程硬超时，失败返回 `available:false`。
 - 任务权威永远在执行端；gateway 缓存只是展示摘要，随 grants 收缩由裁决路径即时拒绝。
