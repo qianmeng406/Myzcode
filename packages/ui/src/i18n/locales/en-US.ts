@@ -2235,6 +2235,9 @@ const enUS: Record<string, string> = {
   "settings.uiFontSize": "UI font size",
   "settings.uiFontSizeDescription":
     "Adjust interface text without changing icons or layout dimensions.",
+  "settings.conversationTurnNavigator": "Conversation turn navigator",
+  "settings.conversationTurnNavigatorDescription":
+    "Show the turn index beside the chat and auto-load full history. Turn off for long sessions to reduce loading and computation.",
   "settings.systemTitle": "General",
   "settings.systemDescription": "These preferences affect the current window experience.",
   "settings.locale": "Language",

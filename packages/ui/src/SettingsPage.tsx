@@ -343,6 +343,12 @@ export function SettingsPage({
   const setCodePreviewSettings = useZCodeStore((state) => state.setCodePreviewSettings);
   const uiFontSizePx = useZCodeStore((state) => state.uiFontSizePx);
   const setUiFontSizePx = useZCodeStore((state) => state.setUiFontSizePx);
+  const conversationTurnNavigatorEnabled = useZCodeStore(
+    (state) => state.conversationTurnNavigatorEnabled,
+  );
+  const setConversationTurnNavigatorEnabled = useZCodeStore(
+    (state) => state.setConversationTurnNavigatorEnabled,
+  );
   const notificationEnabled = useZCodeStore((state) => state.notificationEnabled);
   const setNotificationEnabled = useZCodeStore((state) => state.setNotificationEnabled);
   const notificationSoundEnabled = useZCodeStore((state) => state.notificationSoundEnabled);
@@ -1817,6 +1823,22 @@ export function SettingsPage({
                                 completed: {
                                   resultSource: "local_commit",
                                   valueAfter: String(fontSizePx),
+                                },
+                                failureStage: "local_commit",
+                              })
+                            }
+                            conversationTurnNavigatorEnabled={conversationTurnNavigatorEnabled}
+                            setConversationTurnNavigatorEnabled={(enabled) =>
+                              runUserAction({
+                                input: {
+                                  featureId: "settings.appearance",
+                                  action: "toggle_conversation_turn_navigator",
+                                  trigger: "switch",
+                                },
+                                operation: () => setConversationTurnNavigatorEnabled(enabled),
+                                completed: {
+                                  resultSource: "local_commit",
+                                  valueAfter: enabled ? "enabled" : "disabled",
                                 },
                                 failureStage: "local_commit",
                               })

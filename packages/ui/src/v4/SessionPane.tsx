@@ -1404,6 +1404,12 @@ export function SessionPane({
     (state) => state.codePreviewSettings,
     DEFAULT_CODE_PREVIEW_SETTINGS,
   );
+  // 会话回合导航开关（默认关闭）：false 时 Timeline 停用 rail、导航专属索引与
+  // 目录补拉；分享与普通向上分页不受影响。
+  const conversationTurnNavigatorEnabled = useZCodeStoreWithDefault(
+    (state) => state.conversationTurnNavigatorEnabled,
+    false,
+  );
   // Tier 1 fork 跳转：点 child 会话的 forkNotice → 把当前 pane 原地切到父会话，复用 fork
   // 落地同款 onSessionCreated（primary→setActiveTaskId、分屏→bindPaneSession）。rowId 预留
   // Tier 2 精确滚动——当前 forkNotice.parentRowId 恒为 0 占位，此处忽略。
@@ -3658,25 +3664,44 @@ export function SessionPane({
     return lease?.store.loadOlder();
   }, [lease]);
 
-  const handleLoadAllOlder = useCallback(() => {
-    return lease
-      ? lease.store.loadAllOlder()
-      : Promise.resolve({
-          status: "stale" as const,
-          logEpoch: snapshot?.logEpoch ?? "unknown",
-        });
-  }, [lease, snapshot?.logEpoch]);
+  // 导航目录补拉：以 navigator 身份持有需求；signal 由 Timeline per-attempt
+  // controller 提供，资格撤销/卸载即 abort，store 据此停止后续分页。
+  const handleLoadAllOlder = useCallback(
+    (signal: AbortSignal) => {
+      return lease
+        ? lease.store.loadAllOlder({ consumer: "navigator", signal })
+        : Promise.resolve({
+            status: "stale" as const,
+            logEpoch: snapshot?.logEpoch ?? "unknown",
+          });
+    },
+    [lease, snapshot?.logEpoch],
+  );
 
   useEffect(() => {
     if (!shareActive || !sessionId || !hasOlderRows(snapshot)) return;
     const key = `${sessionId}:${snapshot?.logEpoch ?? "unknown"}`;
     if (shareHydratedSessionRef.current === key) return;
+    // 分享是独立需求方（consumer: "share"）：导航关闭/退出不能取消分享补齐；
+    // 且只有确认完整历史已就绪（hydrated）才保留成功标记——旧实现先记账后清理，
+    // busy/stale 返回时会把未完成的补齐误标成已加载。
     shareHydratedSessionRef.current = key;
-    void handleLoadAllOlder().catch((error) => {
-      shareHydratedSessionRef.current = null;
-      logger.warn("[conversation-share] 补齐分享目录失败", { error });
+    const controller = new AbortController();
+    void (lease
+      ? lease.store.loadAllOlder({ consumer: "share", signal: controller.signal })
+      : Promise.resolve({
+          status: "stale" as const,
+          logEpoch: snapshot?.logEpoch ?? "unknown",
+        })
+    ).then((result) => {
+      if (controller.signal.aborted) return;
+      if (result.status === "hydrated") return;
+      // stale / retryable-failure / not-enough-queries：不留成功标记，
+      // 依赖变化后重试；新一次 job 携 share owner 时会完整提交。
+      if (shareHydratedSessionRef.current === key) shareHydratedSessionRef.current = null;
     });
-  }, [handleLoadAllOlder, sessionId, shareActive, snapshot]);
+    return () => controller.abort();
+  }, [lease, sessionId, shareActive, snapshot]);
 
   useEffect(() => {
     if (
@@ -4813,6 +4838,7 @@ export function SessionPane({
               turnNavigatorDirectoryRevision={state.turnNavigatorDirectoryRevision}
               bottomDock={conversationBottomDock}
               hideTurnNavigator={shareActive && shareInSelectionStage}
+              turnNavigatorEnabled={conversationTurnNavigatorEnabled}
               backgroundScrollLocked={resolveConversationShareBackgroundScrollLocked({
                 partialShareActive: shareActive,
                 stage: shareDraft?.stage ?? "selection",

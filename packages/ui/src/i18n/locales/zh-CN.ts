@@ -2100,6 +2100,9 @@ const zhCN: Record<string, string> = {
   "settings.appearance.codeDescription": "设置代码内容的主题、字号和显示方式，不受界面字号影响。",
   "settings.uiFontSize": "界面字号",
   "settings.uiFontSizeDescription": "调整应用界面的文字大小，图标和布局尺寸不受影响。",
+  "settings.conversationTurnNavigator": "会话回合导航",
+  "settings.conversationTurnNavigatorDescription":
+    "在聊天左侧显示回合索引，并自动补齐完整历史。长会话中关闭可减少加载与计算开销。",
   "settings.systemTitle": "常规",
   "settings.systemDescription": "这些设置会影响当前窗口的显示与交互。",
   "settings.locale": "界面语言",
