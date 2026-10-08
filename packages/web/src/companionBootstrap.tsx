@@ -42,24 +42,31 @@ function mountMobileCompat(): void {
   document.body.append(scrim, nav);
 
   const sidebar = (): HTMLElement | null => document.getElementById("sidebar");
-  const isOpen = (): boolean => sidebar()?.classList.contains("companion-open") === true;
+  // 开合状态自持（不回读 DOM）：WebUI 在工作区不可用等回退页会卸载 #sidebar，
+  // 若以 sidebar.classList 为准，缺失时 isOpen() 恒 false，每次点击都会
+  // setDrawer(true)——按钮永久卡在展开位（真机实测踩中）。
+  let drawerOpen = false;
   const setDrawer = (open: boolean): void => {
+    drawerOpen = open;
     sidebar()?.classList.toggle("companion-open", open);
     scrim.classList.toggle("visible", open);
-    // 打开时按钮即「关闭」控件（图标 ←，提示可收起）。
+    // 打开时按钮即「关闭」控件（图标 ×，移到抽屉右缘外）。
     nav.innerHTML = open ? CLOSE_ICON : MENU_ICON;
     nav.setAttribute("aria-label", open ? "收起侧栏" : "展开侧栏");
     nav.setAttribute("aria-expanded", open ? "true" : "false");
   };
   setDrawer(false);
 
-  nav.addEventListener("click", () => setDrawer(!isOpen()));
+  nav.addEventListener("click", () => {
+    // #sidebar 不存在（回退页）时无从展开，钳制为收起态，避免状态与视觉脱钩。
+    setDrawer(sidebar() !== null && !drawerOpen);
+  });
   // 指针按下即判定（capture 阶段最早）：点抽屉外任意处关闭；点抽屉内条目
   // 延迟收起以让 WebUI 先处理导航。
   document.addEventListener(
     "pointerdown",
     (event) => {
-      if (!isOpen()) return;
+      if (!drawerOpen) return;
       const target = event.target as HTMLElement | null;
       if (target === null) return;
       if (target.closest("#sidebar") === null && target.closest("#companion-nav-btn") === null) {
@@ -71,7 +78,7 @@ function mountMobileCompat(): void {
   document.addEventListener(
     "click",
     (event) => {
-      if (!isOpen()) return;
+      if (!drawerOpen) return;
       const target = event.target as HTMLElement | null;
       if (target !== null && target.closest("#sidebar") !== null) {
         window.setTimeout(() => setDrawer(false), 350);
@@ -79,6 +86,11 @@ function mountMobileCompat(): void {
     },
     true,
   );
+  // 展开中 #sidebar 被卸载（导航/回退页重渲染）→ 视觉抽屉已消失，状态同步归零，
+  // 否则遮罩与 × 按钮残留且遮罩挡住整页交互。
+  new MutationObserver(() => {
+    if (drawerOpen && sidebar() === null) setDrawer(false);
+  }).observe(document.body, { childList: true, subtree: true });
 }
 
 interface CompanionWebConfig {
