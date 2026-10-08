@@ -195,23 +195,26 @@ function scopeIdentityKey(workspacePath: string, workspaceIdentity?: string): st
   return normalizePath(workspaceIdentity?.trim() ? workspaceIdentity : workspacePath);
 }
 
+/** workspaceScopes[] / 顶层 workspace 目标是否命中共享集合（路径 + 身份完全一致）。 */
+function isSharedWorkspaceTarget(path: string, identity: string | undefined, scope: PolicyWorkspaceScope): boolean {
+  const shared = scope.sharedWorkspaces;
+  if (!shared || shared.length === 0) return false;
+  if (path === "") return false;
+  return shared.some(
+    (entry) =>
+      normalizePath(entry.workspacePath) === normalizePath(path) &&
+      scopeIdentityKey(entry.workspacePath, entry.workspaceIdentity) === scopeIdentityKey(path, identity),
+  );
+}
+
 /**
  * workspaceScopes[] 单条的授权判定：必须与 connector 共享集合中的某一项
  * （路径 + 身份）完全一致。集合未知时返回 false——调用方据此回退旧行为。
  */
 function isSharedWorkspaceScope(item: Record<string, unknown>, scope: PolicyWorkspaceScope): boolean {
-  const shared = scope.sharedWorkspaces;
-  if (!shared || shared.length === 0) return false;
   const path = typeof item.workspacePath === "string" ? item.workspacePath : "";
-  if (path === "") return false;
   const identity = typeof item.workspaceIdentity === "string" ? item.workspaceIdentity : undefined;
-  const candidatePath = normalizePath(path);
-  const candidateIdentity = scopeIdentityKey(path, identity);
-  return shared.some(
-    (entry) =>
-      normalizePath(entry.workspacePath) === candidatePath &&
-      scopeIdentityKey(entry.workspacePath, entry.workspaceIdentity) === candidateIdentity,
-  );
+  return isSharedWorkspaceTarget(path, identity, scope);
 }
 
 /** 深度遍历 JSON 值，命中即回调（深度受限，防止大响应全树遍历的开销失控）。 */
@@ -245,25 +248,45 @@ function maskSecrets(value: unknown, depth = 0): unknown {
 }
 
 /**
- * workspace 绑定塑形（specs §11.5）：T1/T2 频道的入参一律以 attachment 绑定为
- * 准——顶层 workspacePath/workspaceIdentity 强制覆写；嵌套 workspaceScopes[]
+ * workspace 绑定塑形（specs §11.5）：T1/T2 频道的入参以 attachment 绑定为准——
+ * 顶层 workspacePath/workspaceIdentity 强制覆写；嵌套 workspaceScopes[]
  * （zcode-task 列表/分组视图、window-controller.listTaskList）按共享集合逐项收窄；
  * 顶层 path/rootPath 与 paths[] 必须落在工作区之内，越界即拒绝。没有这层，
  * file/git 等只读白名单会退化成宿主任意路径读取原语。
+ *
+ * allowSharedTopLevelWorkspace：仅任务索引类只读频道（zcode-task）开启——它们的
+ * 每工作区成员查询（listTasks/listPinnedTasks/listArchivedTasks/listDeletedTaskIds）
+ * 把目标放在**顶层 workspacePath** 而不是 workspaceScopes[]，若一律改写成绑定工作区，
+ * 除已 attach 工作区外的所有共享工作区都读不到任务成员（手机端表现为「暂无任务」）。
+ * 开启后：请求的顶层目标命中共享集合则原样放行，未命中仍改写成绑定工作区（fail-closed）。
+ * 文件/git/agent 面**不得**开启，它们的读内容必须留在所选 attachment 内。
  */
-export function shapeArgsWithScope(arg: unknown, scope: PolicyWorkspaceScope): unknown {
+export function shapeArgsWithScope(
+  arg: unknown,
+  scope: PolicyWorkspaceScope,
+  onDroppedScope?: (workspacePath: string) => void,
+  options?: { allowSharedTopLevelWorkspace?: boolean },
+): unknown {
   if (Array.isArray(arg)) {
     const [first] = arg;
     if (first && typeof first === "object" && !Array.isArray(first)) {
-      return [shapeArgsWithScope(first, scope), ...arg.slice(1)];
+      return [shapeArgsWithScope(first, scope, onDroppedScope, options), ...arg.slice(1)];
     }
     return arg;
   }
   if (!arg || typeof arg !== "object") return arg;
   const source = arg as Record<string, unknown>;
   const shaped: Record<string, unknown> = { ...source };
-  shaped.workspacePath = scope.workspacePath;
-  shaped.workspaceIdentity = scope.workspaceIdentity;
+  const requestedPath = typeof source.workspacePath === "string" ? source.workspacePath : "";
+  const requestedIdentity =
+    typeof source.workspaceIdentity === "string" ? source.workspaceIdentity : undefined;
+  const keepTopLevel =
+    options?.allowSharedTopLevelWorkspace === true &&
+    isSharedWorkspaceTarget(requestedPath, requestedIdentity, scope);
+  if (!keepTopLevel) {
+    shaped.workspacePath = scope.workspacePath;
+    shaped.workspaceIdentity = scope.workspaceIdentity;
+  }
   if (Array.isArray(shaped.workspaceScopes)) {
     const sharedKnown = (scope.sharedWorkspaces?.length ?? 0) > 0;
     shaped.workspaceScopes = shaped.workspaceScopes
@@ -282,7 +305,12 @@ export function shapeArgsWithScope(arg: unknown, scope: PolicyWorkspaceScope): u
               workspaceIdentity: scope.workspaceIdentity,
             },
       )
-      .filter((item) => !sharedKnown || isSharedWorkspaceScope(item, scope));
+      .filter((item) => {
+        if (!sharedKnown || isSharedWorkspaceScope(item, scope)) return true;
+        // 静默丢弃会让"手机端某工作区一直空列表"无从定位，这里留痕（只含路径）。
+        onDroppedScope?.(typeof item.workspacePath === "string" ? item.workspacePath : "");
+        return false;
+      });
   }
   const assertInside = (key: string, value: unknown): void => {
     if (typeof value !== "string" || value.length === 0) return;
@@ -312,6 +340,19 @@ function neverEvent<T>(): Event<T> {
  */
 class TaskScopedChannel implements IServerChannel {
   private readonly allowedTaskIds = new Set<string>();
+
+  /**
+   * 允许以"共享集合内的其它工作区"为目标的**只读**方法（specs §11.4 只读任务索引）：
+   * 手机侧栏要为每个共享工作区各查一次成员/归档/pin 摘要。写方法与按 taskId 的操作
+   * 不在此列——它们必须留在 attachment 绑定的工作区内，跨工作区操作需先 attach。
+   */
+  private static readonly SHARED_SCOPE_READ_METHODS = new Set<string>([
+    "listTasks",
+    "listPinnedTasks",
+    "listArchivedTasks",
+    "listDeletedTaskIds",
+    "listTaskList",
+  ]);
 
   constructor(
     private readonly upstream: IChannel,
@@ -353,13 +394,26 @@ class TaskScopedChannel implements IServerChannel {
 
   async call<T>(_ctx: unknown, command: string, arg?: unknown): Promise<T> {
     this.assertTaskAllowed(arg);
-    const result = await this.upstream.call<T>(command, shapeArgsWithScope(arg, this.scope));
+    const result = await this.upstream.call<T>(
+      command,
+      shapeArgsWithScope(
+        arg,
+        this.scope,
+        (workspacePath) => this.logReject(`scope outside shared set: ${workspacePath}`),
+        { allowSharedTopLevelWorkspace: TaskScopedChannel.SHARED_SCOPE_READ_METHODS.has(command) },
+      ),
+    );
     this.learnFrom(result);
     return result;
   }
 
   listen<T>(_ctx: unknown, event: string, arg?: unknown): Event<T> {
-    const inner = this.upstream.listen<T>(event, shapeArgsWithScope(arg, this.scope));
+    const inner = this.upstream.listen<T>(
+      event,
+      shapeArgsWithScope(arg, this.scope, (workspacePath) =>
+        this.logReject(`scope outside shared set: ${workspacePath}`),
+      ),
+    );
     return ((listener: (value: T) => void) =>
       inner((value: T) => {
         this.learnFrom(value);
@@ -403,7 +457,12 @@ export function createPolicyChannel(options: {
         throw new Error(`companion facade: method not allowed: ${channelName}.${command}`);
       }
       try {
-        const result = await upstream.call<T>(command, shapeArgsWithScope(arg, scope));
+        const result = await upstream.call<T>(
+          command,
+          shapeArgsWithScope(arg, scope, (workspacePath) =>
+            logReject(`scope outside shared set: ${workspacePath}`),
+          ),
+        );
         return maskResponse ? (maskSecrets(result) as T) : result;
       } catch (error) {
         if (error instanceof Error && error.message.includes("path escapes workspace")) {

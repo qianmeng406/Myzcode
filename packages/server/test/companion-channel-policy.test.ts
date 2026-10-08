@@ -376,6 +376,47 @@ test("zcode-task：共享集合已知时 workspaceScopes 逐项收窄（不坍�
   );
 });
 
+test("zcode-task：只读列表方法可指向共享集合内其它工作区；写方法与未共享目标仍绑回", async () => {
+  const { upstream, calls } = createRecordingUpstream();
+  const scope = {
+    workspacePath: "/srv/ws",
+    workspaceIdentity: "/srv/ws",
+    sharedWorkspaces: [
+      { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
+      { workspacePath: "/srv/other", workspaceIdentity: "/srv/other" },
+    ],
+  };
+  const channel = createPolicyChannel({
+    channelName: "zcode-task",
+    upstream,
+    policy: { kind: "task-scoped" },
+    scope,
+  });
+
+  // 只读成员查询：共享工作区保持原目标（否则手机侧其它共享工作区永远空列表）
+  await channel.call("ctx", "listTasks", {
+    workspacePath: "/srv/other",
+    workspaceIdentity: "/srv/other",
+  });
+  const readArg = calls[0]!.arg as { workspacePath: string };
+  assert.equal(readArg.workspacePath, "/srv/other", "共享工作区的只读列表目标必须保留");
+
+  // 未共享目标：改写成绑定工作区（fail-closed，不放宽读取范围）
+  await channel.call("ctx", "listTasks", { workspacePath: "/etc", workspaceIdentity: "/etc" });
+  assert.equal((calls[1]!.arg as { workspacePath: string }).workspacePath, "/srv/ws");
+
+  // 写方法即使是共享工作区也必须绑回绑定工作区（只读索引不等于跨工作区写入）
+  await channel.call("ctx", "createTask", {
+    workspacePath: "/srv/other",
+    workspaceIdentity: "/srv/other",
+  });
+  assert.equal(
+    (calls[2]!.arg as { workspacePath: string }).workspacePath,
+    "/srv/ws",
+    "跨工作区创建任务必须被绑回 attachment 工作区",
+  );
+});
+
 test("window-controller：只放行 listTaskList；订阅帧与写方法仍 T0", async () => {
   const { upstream, calls } = createRecordingUpstream();
   const scope = {
