@@ -162,9 +162,11 @@ test("workspace 绑定：path 越界拒绝、workspacePath 强制覆写、paths 
     (error: unknown) =>
       error instanceof Error && error.message.includes("path escapes workspace"),
   );
-  // 反斜杠/大小写归一后仍越界
+  // 反斜杠归一后仍越界：UNC 风格的 `\\srv\ws-evildir` 经 normalizePath 统一为
+  // `/srv/ws-evildir`，与工作区 `/srv/ws` 同级（前缀边界），必须拒绝。
+  // 用 String.raw 表达字面反斜杠，避免 `\s`/`\w` 这类无效转义触发 lint。
   await assert.rejects(
-    () => channel.call("ctx", "readdir", { path: "\srv\ws-evildir" }),
+    () => channel.call("ctx", "readdir", { path: String.raw`\\srv\ws-evildir` }),
     (error: unknown) => error instanceof Error && error.message.includes("escapes workspace"),
   );
   // paths 数组包含越界项 → 整体拒绝
