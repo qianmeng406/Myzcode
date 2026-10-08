@@ -3,6 +3,15 @@
 import { WebSocket } from "ws";
 
 const CONTROL_AUTH_TIMEOUT_MS = 10_000;
+/**
+ * 应用层心跳：间隔 10s 发 ping，30s 无回包判定半开连接并主动断开
+ * （交给上层监督重连）。经反代的长连在目录无变化时完全静默——nginx
+ * proxy_read_timeout 会把空闲连接摘掉且对端不感知，attach 只能等到
+ * 退避重连后才恢复（真机实测 node_offline）。ping 往返同时复位双向
+ * 空闲计时，与手机端 CompanionClient 心跳同一策略。
+ */
+const CONTROL_HEARTBEAT_INTERVAL_MS = 10_000;
+const CONTROL_HEARTBEAT_WATCHDOG_MS = 30_000;
 
 export type HubRequestResult =
   | { ok: true; result?: unknown }
@@ -20,17 +29,62 @@ export interface ControlChannel {
   close(): void;
 }
 
+export interface ControlChannelHeartbeatOptions {
+  intervalMs?: number;
+  watchdogMs?: number;
+}
+
 /** 连接 gateway 节点控制面；鉴权失败/超时 reject，建立后断开经 onDisconnected 通知。 */
 export function connectControlChannel(
   gatewayUrl: string,
   nodeToken: string,
   onDisconnected: (reason: string) => void,
+  heartbeat?: ControlChannelHeartbeatOptions | null,
 ): Promise<ControlChannel> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`${gatewayUrl}/companion/node`);
+    const heartbeatIntervalMs = heartbeat?.intervalMs ?? CONTROL_HEARTBEAT_INTERVAL_MS;
+    const heartbeatWatchdogMs = heartbeat?.watchdogMs ?? CONTROL_HEARTBEAT_WATCHDOG_MS;
     const pending = new Map<string, (value: HubRequestResult) => void>();
     const requestHandlerRef: { current: HubRequestHandler | null } = { current: null };
     let established = false;
+    let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+    let pingInFlight = false;
+    let nextPingId = 0;
+
+    const stopHeartbeat = (): void => {
+      if (heartbeatTimer !== null) {
+        clearTimeout(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+    };
+    const scheduleHeartbeat = (): void => {
+      stopHeartbeat();
+      heartbeatTimer = setTimeout(() => {
+        if (!established || ws.readyState !== ws.OPEN || pingInFlight) {
+          scheduleHeartbeat();
+          return;
+        }
+        pingInFlight = true;
+        const id = `ping-${++nextPingId}`;
+        pending.set(id, (result) => {
+          pingInFlight = false;
+          if (!result.ok) {
+            // 网关不识别 ping（旧版本）也不应断链：按回包失败处理并继续调度。
+          }
+          if (established) scheduleHeartbeat();
+        });
+        setTimeout(() => {
+          if (pending.delete(id)) {
+            pingInFlight = false;
+            // watchdog：半开/已死连接（反代静默摘除）。terminate 立即触发 close
+            // → onDisconnected → 上层监督退避重连；不 terminate 则永远等不到回包。
+            ws.terminate();
+          }
+        }, heartbeatWatchdogMs).unref?.();
+      }, heartbeatIntervalMs);
+      heartbeatTimer.unref?.();
+    };
 
     ws.on("open", () => {
       ws.send(JSON.stringify({ v: 1, id: "auth", op: "auth", params: { nodeToken } }));
@@ -47,6 +101,7 @@ export function connectControlChannel(
       if (record.id === "auth") {
         if (record.ok === true) {
           established = true;
+          scheduleHeartbeat();
           resolve({
             send: (frame) => ws.send(JSON.stringify(frame)),
             onRequest: (handler) => {
@@ -110,6 +165,7 @@ export function connectControlChannel(
     // 触发两次，监督层若据此各起一条重启链就会互相踢连接（振荡）。
     let disconnectReported = false;
     const reportDisconnected = (reason: string): void => {
+      stopHeartbeat();
       if (disconnectReported) return;
       disconnectReported = true;
       onDisconnected(reason);

@@ -23,6 +23,8 @@ export { CONTROL_FRAME_MAX_BYTES };
 export const RELAY_BUFFER_LIMIT = 64;
 /** relay bind 前缓冲按字节限总量（帧数限制挡不住 64×大帧的内存堆积）。 */
 export const RELAY_BUFFER_MAX_BYTES = 2 * 1024 * 1024;
+/** relay 协议层 ping 间隔（双腿空闲超时保活；pong 自动回，无需对端实现）。 */
+export const RELAY_KEEPALIVE_PING_INTERVAL_MS = 10_000;
 
 type ControlFrame =
   | { kind: "request"; id: string; op: string; params?: unknown }
@@ -175,6 +177,17 @@ export function createNodeLink(options: NodeLinkOptions): NodeLink {
       );
       return;
     }
+    if (frame.kind === "request") {
+      // 节点侧应用层心跳：connector 经反代（nginx）长连时，空闲静默会被
+      // proxy_read_timeout 摘除——attach 只能等退避重连（node_offline）。
+      // ping 往返让两个方向的空闲计时都复位；未知 op 快速失败，不静默丢弃。
+      if (frame.op === "ping") {
+        sendJson(ws, { v: 1, id: frame.id, ok: true });
+      } else {
+        sendJson(ws, { v: 1, id: frame.id, ok: false, error: { code: "unknown_op", message: `unsupported node op: ${frame.op}` } });
+      }
+      return;
+    }
     if (frame.kind === "event" && frame.event === "workspacesChanged") {
       const parsed = companionWorkspaceEventSchema.safeParse({
         event: frame.event,
@@ -208,6 +221,8 @@ interface RelaySocketOptions {
   ws: WebSocket;
   attachmentId: string;
   hub: CompanionHub;
+  /** 测试注入用的 ping 间隔；缺省 RELAY_KEEPALIVE_PING_INTERVAL_MS。 */
+  keepaliveIntervalMs?: number;
 }
 
 /**
@@ -277,6 +292,26 @@ export function attachRelaySocket(options: RelaySocketOptions): void {
       for (const listener of binaryListeners) listener(bytes);
     }
     // 鉴权后的文本帧忽略（协议保留）。
+  });
+  // relay 保活：rpc 字节流在长任务静默期（长工具执行、无流式分片）可能数分钟
+  // 无数据，经反代的两条腿都会被空闲超时摘除且任务中断。浏览器端无法主动
+  // ping（WebSocket API 不暴露），由网关对每条 relay ws 周期发协议层 ping——
+  // 浏览器/Node 端按 RFC 6455 自动回 pong，往返流量同时复位两个方向的计时。
+  const pingTimer = setInterval(() => {
+    if (closed) return;
+    if (ws.readyState === ws.OPEN) {
+      try {
+        ws.ping();
+      } catch {
+        // 发送失败由 close/error 监听统一清理。
+      }
+    }
+  }, options.keepaliveIntervalMs ?? RELAY_KEEPALIVE_PING_INTERVAL_MS);
+  ws.on("close", () => {
+    clearInterval(pingTimer);
+  });
+  ws.on("error", () => {
+    clearInterval(pingTimer);
   });
   ws.on("close", () => {
     if (closed) return;
