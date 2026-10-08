@@ -67,16 +67,25 @@ export function connectControlChannel(
         }
         pingInFlight = true;
         const id = `ping-${++nextPingId}`;
+        if (process.env.ZCODE_CONTROL_HB_DEBUG === "1") console.error(`[hb] send ${id} t=${Date.now() % 100000}`);
         pending.set(id, (result) => {
           pingInFlight = false;
+          if (process.env.ZCODE_CONTROL_HB_DEBUG === "1") console.error(`[hb] recv ${id} ok=${result.ok}`);
           if (!result.ok) {
             // 网关不识别 ping（旧版本）也不应断链：按回包失败处理并继续调度。
           }
           if (established) scheduleHeartbeat();
         });
+        // 发出 ping 请求帧（应用层心跳本体；网关 createNodeLink 回 ok 回执）。
+        try {
+          ws.send(JSON.stringify({ v: 1, id, op: "ping" }));
+        } catch {
+          // 发送失败（连接正在关闭）：交给 close 路径与 watchdog 兜底。
+        }
         setTimeout(() => {
           if (pending.delete(id)) {
             pingInFlight = false;
+            if (process.env.ZCODE_CONTROL_HB_DEBUG === "1") console.error(`[hb] WATCHDOG ${id} -> terminate`);
             // watchdog：半开/已死连接（反代静默摘除）。terminate 立即触发 close
             // → onDisconnected → 上层监督退避重连；不 terminate 则永远等不到回包。
             ws.terminate();

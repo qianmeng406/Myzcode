@@ -1,5 +1,6 @@
 // 节点控制通道心跳测试：ping 往返保活 + watchdog 半开连接主动断开。
-// 用真实 WebSocketServer 走完整 wire（首帧 auth → 心跳 ping/pong）。
+// 用真实 WebSocketServer 走完整 wire（首帧 auth → 心跳 ping/pong），
+// 并断言 ping 帧确实到达服务端（防止「从未发送→空洞通过」）。
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -8,13 +9,16 @@ import { connectControlChannel } from "../src/companion/controlChannel.js";
 interface ServerHarness {
   url: string;
   close(): Promise<void>;
-  /** 控制是否应答节点 ping；返回当前模式。 */
+  /** 控制是否应答节点 ping。 */
   setAnswerPing(answer: boolean): void;
+  /** 服务端收到的 ping 帧次数。 */
+  pingCount(): number;
 }
 
 async function startGatewayLikeServer(): Promise<ServerHarness> {
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   let answerPing = true;
+  let pings = 0;
   server.on("connection", (socket: WebSocket) => {
     socket.on("message", (data) => {
       let frame: { id?: unknown; op?: unknown };
@@ -28,6 +32,7 @@ async function startGatewayLikeServer(): Promise<ServerHarness> {
         return;
       }
       if (frame.op === "ping") {
+        pings += 1;
         if (answerPing) socket.send(JSON.stringify({ v: 1, id: frame.id, ok: true }));
         // 不应答 = 模拟反代静默摘除后的半开连接。
         return;
@@ -44,6 +49,7 @@ async function startGatewayLikeServer(): Promise<ServerHarness> {
     setAnswerPing: (answer: boolean) => {
       answerPing = answer;
     },
+    pingCount: () => pings,
     close: () =>
       new Promise<void>((resolve) => {
         for (const client of server.clients) client.terminate();
@@ -52,7 +58,7 @@ async function startGatewayLikeServer(): Promise<ServerHarness> {
   };
 }
 
-test("心跳：ping 收到回包则连接保持", async () => {
+test("心跳：ping 帧确实发出且收到回包，连接保持", async () => {
   const harness = await startGatewayLikeServer();
   try {
     let disconnected: string | null = null;
@@ -67,6 +73,8 @@ test("心跳：ping 收到回包则连接保持", async () => {
     // 心跳跑 ~10 个周期，全部正常应答 → 不应断开。
     await new Promise((resolve) => setTimeout(resolve, 250));
     assert.equal(disconnected, null);
+    // 非空洞断言：服务端必须真的收到多帧 ping（250ms / 20ms ≥ 5）。
+    assert.ok(harness.pingCount() >= 5, `expect >=5 pings at server, got ${harness.pingCount()}`);
     control.close();
   } finally {
     await harness.close();
@@ -84,7 +92,6 @@ test("watchdog：ping 无回包（半开/被反代摘除）→ 主动断开并�
         (reason) => resolve(reason),
         { intervalMs: 20, watchdogMs: 120 },
       ).then((control) => {
-        // 保留引用供断言后清理；watchdog 触发 terminate 由 close 事件路径完成。
         assert.equal(typeof control.send, "function");
       });
     });
@@ -93,6 +100,8 @@ test("watchdog：ping 无回包（半开/被反代摘除）→ 主动断开并�
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("watchdog 未触发")), 3000)),
     ]);
     assert.ok(reason.length > 0, "onDisconnected 必须携带原因");
+    // 半开判定前提：ping 确实发出过（否则是别的原因断开）。
+    assert.ok(harness.pingCount() >= 1, "ping 帧应已发出");
   } finally {
     await harness.close();
   }
