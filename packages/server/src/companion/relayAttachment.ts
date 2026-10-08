@@ -7,7 +7,11 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { IZCodeAgentService } from "@zcode/services";
 import { ServiceChannels } from "@zcode/shared";
 import { createNarrowingAgentFacade } from "./narrowingFacade.js";
-import { createPolicyChannel, policyForChannel } from "./channelPolicy.js";
+import {
+  createPolicyChannel,
+  policyForChannel,
+  type PolicyWorkspaceScope,
+} from "./channelPolicy.js";
 
 export interface RelayAttachmentParams {
   attachmentId: string;
@@ -38,7 +42,12 @@ export interface CompanionLogger {
 export async function openCompanionRelayAttachment(options: {
   gatewayUrl: string;
   params: RelayAttachmentParams;
-  scope: { workspacePath: string; workspaceIdentity: string };
+  /**
+   * 绑定工作区 + 本 attachment 允许只读列举的共享工作区集合（跨工作区任务索引）。
+   * connector 是"哪些工作区已共享"的权威：桌面 = 已打开且在白名单内的窗口工作区，
+   * 云端 = 已登记云工作区。
+   */
+  scope: PolicyWorkspaceScope;
   createUpstream: () => Promise<RelayAttachmentUpstream>;
   log: CompanionLogger;
 }): Promise<() => Promise<void>> {

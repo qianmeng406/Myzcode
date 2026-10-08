@@ -7,7 +7,16 @@ import { ServiceChannels } from "@zcode/shared";
 
 export type ChannelPolicy =
   | { kind: "passthrough" }
-  | { kind: "allow-calls"; calls: ReadonlySet<string> }
+  | {
+      kind: "allow-calls";
+      calls: ReadonlySet<string>;
+      /**
+       * 事件面白名单。缺省 = 沿用既有语义（事件原样转发），仅用于既有 T1 只读频道；
+       * 显式给出空集合 = 该频道不得建立任何事件转发。window-controller 必须用空集合：
+       * 它的 controller 帧是宿主投影的跨工作区事实流，会带上未共享工作区的任务元数据。
+       */
+      events?: ReadonlySet<string>;
+    }
   | { kind: "task-scoped" }
   | { kind: "deny" };
 
@@ -94,6 +103,18 @@ export const COMPANION_CHANNEL_POLICIES: Readonly<Record<string, ChannelPolicy>>
       "getBotStates",
     ]),
   },
+  // window-controller：只放行**只读任务列表**（specs §11.4 只读任务索引的手机侧读面）。
+  // 侧栏的每工作区任务行来自这条磁盘链路（tasks-index 持久化，不需要该工作区的
+  // agent 运行时在跑）；被整体拒绝时手机上除已 attach 工作区外全部显示「暂无任务」。
+  // 写方法（mutateTask / deleteArchivedTask(s)）与跨工作区事件订阅
+  // （subscribeControllerV4 / onDynamicControllerFrame）一律 T0：前者是宿主写面，
+  // 后者会把未共享工作区的任务事实推给手机。listTaskList 的响应范围由
+  // shapeArgsWithScope 收窄到 attachment 的共享工作区集合。
+  [ServiceChannels.WindowController]: {
+    kind: "allow-calls",
+    calls: new Set(["listTaskList"]),
+    events: new Set([]),
+  },
   // onboarding-record：只读判定面（shouldOnboard/getLatestEntry/getRecords/
   // syncSettingsFromRecord）。被拒会让 Root 的引导判定回退成“需要引导”，
   // 把主界面拦在向导上。record/append/dismiss/clear 等写方法永 T0
@@ -118,6 +139,18 @@ export function policyForChannel(channelName: string): ChannelPolicy {
 export interface PolicyWorkspaceScope {
   workspacePath: string;
   workspaceIdentity: string;
+  /**
+   * 本 attachment 允许**只读列举**的共享工作区集合（connector 的"已打开且已共享"
+   * 目录，云端为已登记云工作区）。缺省 = 未知，此时 workspaceScopes[] 退回旧行为
+   * （整体改写成绑定工作区），不会放宽任何范围。
+   *
+   * 为什么需要它：任务列表（zcode-task.listTasks / window-controller.listTaskList）
+   * 是跨工作区的只读查询，手机侧栏要为每个共享工作区各查一次。若一律改写成绑定
+   * 工作区，除已 attach 的工作区外全部显示「暂无任务」（会话/任务无法同步）；若完全
+   * 不校验，手机就能凭任意路径读取未共享工作区的任务元数据。这里按 connector 的
+   * 共享集合逐项收窄：集合内的原样放行，集合外的整项丢弃（fail-closed）。
+   */
+  sharedWorkspaces?: ReadonlyArray<{ workspacePath: string; workspaceIdentity: string }>;
 }
 
 /**
@@ -157,6 +190,30 @@ function isUnderWorkspace(path: string, scope: PolicyWorkspaceScope): boolean {
   return candidate === root || candidate.startsWith(`${root}/`);
 }
 
+/** 本地工作区语义：identity 缺省即路径本身（与 desktopConnector.localWorkspaceIdentity 一致）。 */
+function scopeIdentityKey(workspacePath: string, workspaceIdentity?: string): string {
+  return normalizePath(workspaceIdentity?.trim() ? workspaceIdentity : workspacePath);
+}
+
+/**
+ * workspaceScopes[] 单条的授权判定：必须与 connector 共享集合中的某一项
+ * （路径 + 身份）完全一致。集合未知时返回 false——调用方据此回退旧行为。
+ */
+function isSharedWorkspaceScope(item: Record<string, unknown>, scope: PolicyWorkspaceScope): boolean {
+  const shared = scope.sharedWorkspaces;
+  if (!shared || shared.length === 0) return false;
+  const path = typeof item.workspacePath === "string" ? item.workspacePath : "";
+  if (path === "") return false;
+  const identity = typeof item.workspaceIdentity === "string" ? item.workspaceIdentity : undefined;
+  const candidatePath = normalizePath(path);
+  const candidateIdentity = scopeIdentityKey(path, identity);
+  return shared.some(
+    (entry) =>
+      normalizePath(entry.workspacePath) === candidatePath &&
+      scopeIdentityKey(entry.workspacePath, entry.workspaceIdentity) === candidateIdentity,
+  );
+}
+
 /** 深度遍历 JSON 值，命中即回调（深度受限，防止大响应全树遍历的开销失控）。 */
 function walkJson(value: unknown, visit: (node: Record<string, unknown>) => void, depth = 0): void {
   if (depth > 8 || !value || typeof value !== "object") return;
@@ -190,9 +247,9 @@ function maskSecrets(value: unknown, depth = 0): unknown {
 /**
  * workspace 绑定塑形（specs §11.5）：T1/T2 频道的入参一律以 attachment 绑定为
  * 准——顶层 workspacePath/workspaceIdentity 强制覆写；嵌套 workspaceScopes[]
- * （zcode-task 列表/分组视图）逐项覆写；顶层 path/rootPath 与 paths[] 必须
- * 落在工作区之内，越界即拒绝。没有这层，file/git 等只读白名单会退化成
- * 宿主任意路径读取原语。
+ * （zcode-task 列表/分组视图、window-controller.listTaskList）按共享集合逐项收窄；
+ * 顶层 path/rootPath 与 paths[] 必须落在工作区之内，越界即拒绝。没有这层，
+ * file/git 等只读白名单会退化成宿主任意路径读取原语。
  */
 export function shapeArgsWithScope(arg: unknown, scope: PolicyWorkspaceScope): unknown {
   if (Array.isArray(arg)) {
@@ -208,11 +265,24 @@ export function shapeArgsWithScope(arg: unknown, scope: PolicyWorkspaceScope): u
   shaped.workspacePath = scope.workspacePath;
   shaped.workspaceIdentity = scope.workspaceIdentity;
   if (Array.isArray(shaped.workspaceScopes)) {
-    shaped.workspaceScopes = shaped.workspaceScopes.map((item) =>
-      item && typeof item === "object" && !Array.isArray(item)
-        ? { ...(item as Record<string, unknown>), workspacePath: scope.workspacePath, workspaceIdentity: scope.workspaceIdentity }
-        : item,
-    );
+    const sharedKnown = (scope.sharedWorkspaces?.length ?? 0) > 0;
+    shaped.workspaceScopes = shaped.workspaceScopes
+      .filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item),
+      )
+      .map((item) =>
+        sharedKnown
+          ? // 共享集合已知：集合内的原样保留（跨工作区只读列举），集合外整项丢弃。
+            item
+          : // 集合未知：保持旧行为，把每个 scope 改写成绑定工作区（不放宽范围）。
+            {
+              ...item,
+              workspacePath: scope.workspacePath,
+              workspaceIdentity: scope.workspaceIdentity,
+            },
+      )
+      .filter((item) => !sharedKnown || isSharedWorkspaceScope(item, scope));
   }
   const assertInside = (key: string, value: unknown): void => {
     if (typeof value !== "string" || value.length === 0) return;
@@ -343,6 +413,12 @@ export function createPolicyChannel(options: {
       }
     },
     listen<T>(_ctx: unknown, event: string, arg?: unknown): Event<T> {
+      // allow-calls 频道可显式声明事件面白名单；声明了就按白名单收口（空集合 = 无事件），
+      // 未声明则沿用既有只读数据面（T1 事件本就是只读事实，如 broadcast.onMessage）。
+      if (policy.kind === "allow-calls" && policy.events && !policy.events.has(event)) {
+        logReject(`event not allowed: ${channelName}.${event}`);
+        return neverEvent<T>();
+      }
       // T1/T2 的事件是只读事实（onDidChange 等），监听参数同样过绑定塑形。
       try {
         return upstream.listen<T>(event, shapeArgsWithScope(arg, scope));

@@ -14,6 +14,7 @@ import { readWorkspaceTaskSummary } from "@zcode/server/companion-task-index";
 import {
   openCompanionRelayAttachment,
   type CompanionLogger,
+  type RelayAttachmentUpstream,
 } from "@zcode/server/companion-relay";
 
 export interface OpenWorkspaceEntry {
@@ -158,6 +159,12 @@ export async function startDesktopCompanionConnector(
         scope: {
           workspacePath: entry.workspacePath,
           workspaceIdentity: entry.workspaceIdentity,
+          // 共享集合：手机侧栏要为每个共享工作区读取只读任务列表（跨工作区摘要），
+          // 但不得读取未共享工作区。这里是该集合的唯一权威点。
+          sharedWorkspaces: buildCatalogEntries().map((candidate) => ({
+            workspacePath: candidate.workspacePath,
+            workspaceIdentity: candidate.workspaceIdentity,
+          })),
         },
         createUpstream: async () => {
           const port = options.deps.resolveAttachmentPort(entry, params.attachmentId);
@@ -266,10 +273,7 @@ function wrapCompanionPort(port: CompanionPortLike): import("@zcode/rpc").Messag
 }
 
 /** MessagePortMain → 窄化 facade 的 upstream channel（消息面 = 裸 Uint8Array + 流控对象）。 */
-function createPortUpstream(port: CompanionPortLike): {
-  channel: IChannel;
-  dispose: () => void;
-} {
+function createPortUpstream(port: CompanionPortLike): RelayAttachmentUpstream {
   const protocol = new MessagePortProtocol(wrapCompanionPort(port));
   const client = new ChannelClient(protocol);
   return {

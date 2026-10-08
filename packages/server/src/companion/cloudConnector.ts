@@ -195,6 +195,11 @@ async function openRelayAttachment(
     scope: {
       workspacePath: params.workspacePath,
       workspaceIdentity: params.workspaceIdentity,
+      // 共享集合 = 已登记云工作区白名单：手机侧栏据此读取各云工作区的只读任务列表。
+      sharedWorkspaces: options.workspaces.map((workspace) => ({
+        workspacePath: workspace.workspacePath,
+        workspaceIdentity: cloudWorkspaceIdentity(workspace.workspacePath),
+      })),
     },
     createUpstream: async () => {
       const tcp = await connectLoopbackPort(status.port);

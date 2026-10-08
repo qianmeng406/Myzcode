@@ -123,9 +123,15 @@ test("T0 全拒：call 快速失败、listen 永不触发", async () => {
 
 test("未登记频道默认 T0；裁决表覆盖既定频道", () => {
   assert.equal(policyForChannel("credential").kind, "deny");
-  assert.equal(policyForChannel("window-controller").kind, "deny");
   assert.equal(policyForChannel("skills").kind, "deny");
   assert.equal(policyForChannel("nonexistent-channel").kind, "deny");
+  // window-controller 只放行只读任务列表（跨工作区摘要的手机侧读面）。
+  const controllerPolicy = policyForChannel("window-controller");
+  assert.equal(controllerPolicy.kind, "allow-calls");
+  assert.deepEqual(
+    controllerPolicy.kind === "allow-calls" ? [...controllerPolicy.calls] : [],
+    ["listTaskList"],
+  );
   assert.equal(policyForChannel("zcode-task").kind, "task-scoped");
   assert.equal(policyForChannel("bots").kind, "allow-calls");
   assert.equal(policyForChannel("model-selection").kind, "passthrough");
@@ -336,6 +342,93 @@ test("zcode-task：数组参数形态（真实 ProxyChannel 传输形）同样�
     () => channel.call("ctx", "sendPrompt", [{ taskId: "task-in-ws" }, { taskId: "task-foreign" }]),
     (error: unknown) => error instanceof Error && error.message.includes("task not in attached workspace"),
   );
+});
+
+test("zcode-task：共享集合已知时 workspaceScopes 逐项收窄（不坍缩、不放宽）", async () => {
+  const { upstream, calls } = createRecordingUpstream();
+  const scope = {
+    workspacePath: "/srv/ws",
+    workspaceIdentity: "/srv/ws",
+    sharedWorkspaces: [
+      { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
+      { workspacePath: "/srv/other", workspaceIdentity: "/srv/other" },
+    ],
+  };
+  const channel = createPolicyChannel({
+    channelName: "zcode-task",
+    upstream,
+    policy: { kind: "task-scoped" },
+    scope,
+  });
+  await channel.call("ctx", "listTaskList", {
+    workspaceScopes: [
+      { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
+      { workspacePath: "/srv/other", workspaceIdentity: "/srv/other" },
+      // 未共享：必须整项丢弃（否则手机能凭任意路径读未共享工作区的任务元数据）
+      { workspacePath: "/etc", workspaceIdentity: "/etc" },
+    ],
+  });
+  const forwarded = calls[0]!.arg as { workspaceScopes: Array<{ workspacePath: string }> };
+  assert.deepEqual(
+    forwarded.workspaceScopes.map((entry) => entry.workspacePath),
+    ["/srv/ws", "/srv/other"],
+    "共享工作区必须保留原样（跨工作区只读列举），未共享项丢弃",
+  );
+});
+
+test("window-controller：只放行 listTaskList；订阅帧与写方法仍 T0", async () => {
+  const { upstream, calls } = createRecordingUpstream();
+  const scope = {
+    workspacePath: "/srv/ws",
+    workspaceIdentity: "/srv/ws",
+    sharedWorkspaces: [
+      { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
+      { workspacePath: "/srv/other", workspaceIdentity: "/srv/other" },
+    ],
+  };
+  const channel = createPolicyChannel({
+    channelName: "window-controller",
+    upstream,
+    policy: policyForChannel("window-controller"),
+    scope,
+  });
+
+  await channel.call("ctx", "listTaskList", {
+    workspaceScopes: [
+      { workspacePath: "/srv/other", workspaceIdentity: "/srv/other" },
+      { workspacePath: "/etc", workspaceIdentity: "/etc" },
+    ],
+  });
+  const forwarded = calls[0]!.arg as { workspaceScopes: Array<{ workspacePath: string }> };
+  assert.deepEqual(
+    forwarded.workspaceScopes.map((entry) => entry.workspacePath),
+    ["/srv/other"],
+  );
+
+  // 跨工作区事件帧会把未共享工作区的任务事实推给手机 → 必须整体拒绝。
+  await assert.rejects(
+    () => channel.call("ctx", "subscribeControllerV4", { topic: "controller/tasks-index" }),
+    (error: unknown) => error instanceof Error && error.message.includes("not allowed"),
+  );
+  // 写面永不下发手机。
+  await assert.rejects(
+    () => channel.call("ctx", "mutateTask", { address: { workspacePath: "/srv/ws", taskId: "t1" } }),
+    (error: unknown) => error instanceof Error && error.message.includes("not allowed"),
+  );
+  await assert.rejects(
+    () => channel.call("ctx", "deleteArchivedTasks", { taskIds: ["t1"] }),
+    (error: unknown) => error instanceof Error && error.message.includes("not allowed"),
+  );
+  assert.equal(calls.length, 1, "仅 listTaskList 到达上游");
+  // 事件面同样关闭：未白名单的事件不得建立转发。
+  const listener = channel.listen("ctx", "onDynamicControllerFrame", undefined) as unknown as {
+    (fn: (value: unknown) => void): { dispose(): void };
+  };
+  let fired = false;
+  listener(() => {
+    fired = true;
+  }).dispose();
+  assert.equal(fired, false);
 });
 
 test("provider-settings：响应中的明文 apiKey 脱敏后下发", async () => {
