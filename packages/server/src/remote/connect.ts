@@ -165,6 +165,14 @@ async function connectRemoteUnchecked(
   // 3. Launch server
   log("launching remote server...");
   const resident = options?.resident === true;
+  // 常驻依赖本仓库远端 server bundle 的 resident 入口；「远端服务器下载」拉取的是官方产物，
+  // 没有这些改动。这里 fail-fast 并给出明确改法，而不是让远端启动到一半才报未知错误。
+  if (resident && options?.assetInstallMode === "remote-download") {
+    throw new Error(
+      "[connect] 常驻运行不支持「远端服务器下载」资源方式：该模式拉取 ZCode 官方产物，" +
+        "不含本定制版的 resident 入口。请把资源方式改为「本地上传（随包资源）」后再使用常驻运行。",
+    );
+  }
   const remoteRuntimeEnvPrefix = buildRemoteRuntimeEnvPrefix(options, remoteRuntimeNetwork);
   const stream = resident
     ? await launchResidentBridge(backend, remoteRuntimeEnvPrefix, log)
@@ -334,4 +342,3 @@ async function resolveRemoteRuntimeNetwork(
     return network;
   }
 }
-

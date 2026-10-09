@@ -154,9 +154,12 @@ const enUS: Record<string, string> = {
   "chat.composer.optimizePromptFailed": "Failed to optimize the prompt. Try again later",
   "chat.composer.optimizePromptNoModel": "No model available. Select one in model settings first",
   "chat.composer.optimizePromptViewLoading": "Model list is still loading. Try again in a moment",
-  "chat.composer.optimizePromptUnknownModel": "The selected optimization model is unavailable. Pick another in model settings",
-  "chat.composer.optimizePromptTooLong": "Draft is too long to optimize at once. Shorten or split it first",
-  "chat.composer.optimizePromptParseFailed": "Could not parse the optimized result; your draft was kept",
+  "chat.composer.optimizePromptUnknownModel":
+    "The selected optimization model is unavailable. Pick another in model settings",
+  "chat.composer.optimizePromptTooLong":
+    "Draft is too long to optimize at once. Shorten or split it first",
+  "chat.composer.optimizePromptParseFailed":
+    "Could not parse the optimized result; your draft was kept",
   "chat.composer.optimizeOptions": "Optimization settings",
   "chat.composer.optimizeMode": "Mode",
   "chat.composer.optimizeModePolish": "Light polish",
@@ -172,10 +175,13 @@ const enUS: Record<string, string> = {
   "chat.composer.optimizeDismiss": "Discard",
   "chat.composer.optimizeUndo": "Undo replace",
   "chat.composer.optimizeUnchanged": "Identical to the draft; no change needed",
-  "chat.composer.optimizeStale": "This result is based on an earlier draft. Re-run optimization before replacing",
-  "chat.composer.optimizeRichDisabled": "Draft has references or attachments; auto-replace is disabled, copy manually",
+  "chat.composer.optimizeStale":
+    "This result is based on an earlier draft. Re-run optimization before replacing",
+  "chat.composer.optimizeRichDisabled":
+    "Draft has references or attachments; auto-replace is disabled, copy manually",
   "chat.composer.optimizeWarnExpanded": "Result is notably longer. Confirm nothing new was added",
-  "chat.composer.optimizeWarnLiteral": "Some paths, commands or versions from the draft may be missing. Please verify",
+  "chat.composer.optimizeWarnLiteral":
+    "Some paths, commands or versions from the draft may be missing. Please verify",
   "chat.composer.oracleReview": "Review last turn",
   "chat.composer.oracleDepth": "Review mode",
   "chat.composer.oracleModel": "Oracle review model",
@@ -1773,10 +1779,12 @@ const enUS: Record<string, string> = {
   "ssh.auth.password": "Password",
   "ssh.auth.privateKey": "Private key",
   "ssh.assetInstallMode": "Resource download method",
-  "ssh.assetInstallMode.local-download-upload": "Download locally, then upload",
+  "ssh.assetInstallMode.local-download-upload": "Upload local resources",
   "ssh.assetInstallMode.remote-download": "Download on remote server",
   "ssh.assetInstallModeDescription":
-    "Remote server download reduces upload waiting, but the server must reach the ZCode CDN and have download, extract, and checksum tools.",
+    "Default: upload the remote runtime resources shipped with the app — no CDN is contacted. Remote server download pulls official ZCode artifacts directly on the server (it needs download, extract, and checksum tools); this fork's remote changes, including resident mode, are unavailable in that mode.",
+  "ssh.residentMode.remoteDownloadUnsupported":
+    'Resident mode requires this fork\'s remote server artifacts. "Download on remote server" pulls official ZCode artifacts and is incompatible with it — switch the resource method back to "Upload local resources".',
   "ssh.residentMode": "Execution mode",
   "ssh.residentMode.standard": "Standard session",
   "ssh.residentMode.resident": "Resident",
@@ -1824,9 +1832,11 @@ const enUS: Record<string, string> = {
     "We are establishing the {method} connection. You can follow the live setup progress here.",
   "companionDirect.title": "My zcode desktop link",
   "companionDirect.openSettings": "Configure desktop link",
-  "companionDirect.description": "Control desktop workspaces that are open here from the My zcode mobile app via your self-hosted gateway.",
+  "companionDirect.description":
+    "Control desktop workspaces that are open here from the My zcode mobile app via your self-hosted gateway.",
   "companionDirect.enabled": "Enable desktop link",
-  "companionDirect.enabledHint": "The desktop connects out to the gateway; closing a window immediately revokes phone access to its workspaces.",
+  "companionDirect.enabledHint":
+    "The desktop connects out to the gateway; closing a window immediately revokes phone access to its workspaces.",
   "companionDirect.gatewayUrl": "Gateway URL",
   "companionDirect.nodeToken": "Node token",
   "companionDirect.nodeTokenSaved": "Configured — leave empty to keep",
@@ -1838,15 +1848,17 @@ const enUS: Record<string, string> = {
   "companionDirect.saved": "Saved",
   "companionDirect.notAvailable": "Desktop link is only available in the desktop app.",
   "companionDirect.pairingTitle": "Pair with phone",
-  "companionDirect.pairingHint": "Enter this code in the Myzcode app to connect. One-time use, refreshes in {seconds}s.",
+  "companionDirect.pairingHint":
+    "Enter this code in the Myzcode app to connect. One-time use, refreshes in {seconds}s.",
   "companionDirect.pairingGenerate": "Generate pairing code",
   "companionDirect.pairingRegenerate": "Regenerate",
   "companionDirect.pairingFailed": "Failed to get pairing code",
   "companionDirect.pairingIdle": "Generate a code, then enter it in the mobile app to connect.",
   "companionDirect.saveFirst": "Save advanced changes before generating a code.",
-  "companionDirect.pairingNode": "Will connect to node: {name}",  "companionDirect.advanced": "Advanced (gateway URL / node token)",
+  "companionDirect.pairingNode": "Will connect to node: {name}",
+  "companionDirect.advanced": "Advanced (gateway URL / node token)",
   "companionDirect.notConfigured": "Gateway not configured yet — expand Advanced to set it up.",
-    "webRemoteControl.trigger": "Mobile remote control",
+  "webRemoteControl.trigger": "Mobile remote control",
   "webRemoteControl.title": "Mobile remote control",
   "webRemoteControl.description": "Control ZCode workspaces through chat bots.",
   "webRemoteControl.botChannel.title": "Use a bot channel",

@@ -524,17 +524,28 @@ export function RemoteConnectionFields({
             <div className="inline-flex w-full max-w-md flex-col items-stretch rounded-lg border border-input-border bg-input p-[3px] sm:w-fit sm:flex-row sm:items-center">
               {([false, true] as const).map((value) => {
                 const selected = resident === value;
+                // 常驻运行依赖本仓库的远端 server bundle（resident 入口）；
+                // 「远端服务器下载」拉取的是官方产物，两者不兼容，直接禁用而不是连上后才报错。
+                const residentUnavailableWithRemoteDownload =
+                  value && assetInstallMode === "remote-download";
 
                 return (
                   <button
                     key={String(value)}
                     type="button"
+                    disabled={residentUnavailableWithRemoteDownload}
                     onClick={() => setResident(value)}
+                    title={
+                      residentUnavailableWithRemoteDownload
+                        ? intl.formatMessage({ id: "ssh.residentMode.remoteDownloadUnsupported" })
+                        : undefined
+                    }
                     className={cn(
                       "inline-flex min-h-7 min-w-0 flex-1 items-center justify-center rounded-md px-3 py-1 text-center text-ui-base font-medium transition-colors sm:flex-none",
                       selected
                         ? "bg-background text-foreground"
                         : "text-foreground-subtle hover:text-foreground",
+                      residentUnavailableWithRemoteDownload && "cursor-not-allowed opacity-50",
                     )}
                   >
                     <span className="min-w-0 break-words">
@@ -547,7 +558,12 @@ export function RemoteConnectionFields({
               })}
             </div>
             <p className="mt-1 text-ui-base text-foreground-subtle">
-              {intl.formatMessage({ id: "ssh.residentModeDescription" })}
+              {intl.formatMessage({
+                id:
+                  resident && assetInstallMode === "remote-download"
+                    ? "ssh.residentMode.remoteDownloadUnsupported"
+                    : "ssh.residentModeDescription",
+              })}
             </p>
           </div>
         </div>
