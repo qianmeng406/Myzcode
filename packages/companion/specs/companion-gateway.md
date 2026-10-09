@@ -179,7 +179,7 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 | `onboarding-record` | T1 | 启动提档（被拒会让 Root 引导判定回退成“需要引导”拦住主界面）：仅只读判定面 shouldOnboard/getLatestEntry/getRecords/syncSettingsFromRecord；append/record/dismiss/clear 等写方法永 T0 |
 | `oauth` | T0→按启动实测提档 | 登录态读取若为启动必需，提 T1 只读并在此登记；登录/登出写操作永 T0 |
 | `terminal` / `credential` / `cua-permission` / `cua-pip-session` / `provider-provisioning-target` | T0 | 高权限面，永不下发 |
-| `window-controller` | T1 | 仅 `listTaskList`（只读任务列表，磁盘 tasks-index 链路，见 §11.4.1）；`mutateTask`/`deleteArchivedTask(s)` 等写方法永 T0；事件面显式为空——`subscribeControllerV4`/`onDynamicControllerFrame` 的 controller 帧是宿主跨工作区投影，会把未共享工作区的任务事实推给手机 |
+| `window-controller` | T1（`controller-readonly`） | 只读任务列表 + 任务索引帧流（手机侧栏跨工作区活度的实时源，详见 §11.4.1）；写方法永 T0 |
 | `settings-sync` | T1 | 启动提档（被拒会让首启提示每次启动循环出现）：仅 getFirstRunPromptState（读）与 markFirstRunPromptHandled（“提示已读”UI 簿记写，写入内容不含用户数据）；其余同步写方法永 T0 |
 | `skills` / `skill-sync` / `mcp-sync` / `plugin-sync` / `plugins` / `plugin-management` / `subagents` / `commands` / `hooks` / `memory` / `off-peak-task` | T0 | 写宿主用户目录/插件/自动化面，首版不下发 |
 | `conversation-share` / `prompt-attachment-transfer` / `feedback` / `usage-stats` / `client-config` / `client-scenes` | T0→按启动实测提档 | 完整 UI 启动链若硬依赖其中只读面，逐个提 T1 只读并在此表登记 |
@@ -212,6 +212,8 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 | --- | --- |
 | `workspaceScopes[]`（zcode-task 列表/分组、`window-controller.listTaskList`） | 逐项收窄：命中共享集合则原样保留，未命中整项丢弃并留痕 |
 | zcode-task 只读列表方法的**顶层** `workspacePath`（`listTasks`/`listPinnedTasks`/`listArchivedTasks`/`listDeletedTaskIds`） | 命中共享集合则原样放行，未命中仍改写成绑定工作区 |
+| zcode-task 事件订阅（`onDynamicWorkspaceEvent`）的顶层目标 | 同上：命中共享集合则原样订阅，未命中仍改写成绑定工作区。侧栏跨工作区活度（归档/置顶/未读的 `workspace_task_list_changed`→bump→重读左表）依赖它，改写会让手机永远收不到其它共享工作区的变化（真机复现） |
+| window-controller（`controller-readonly`） | 只读方法 `listTaskList` + 订阅/续订/退订；帧（`onDynamicControllerFrame`）经 `filterControllerFrameToShared` 逐帧按共享集合过滤后才下发，帧封套（subscriptionId/logEpoch/fromSeq/toSeq）原样保留（seq 连续性是 gap 检测与 resync 的依据），全滤空的增量仍以空增量转发；无共享集合时拒绝订阅；`mutateTask`/`deleteArchivedTask(s)` 与其它事件永 T0；刻意不从帧学习 taskId 允许集（跨工作区操作仍须先 attach） |
 | 其余全部（file/git/agent 的顶层目标、一切写方法与按 taskId 的操作） | 不变：强制绑定值 / 拒绝 |
 
 - `allowSharedTopLevelWorkspace` 默认关闭，且**只允许** zcode-task 的只读列表方法开启。

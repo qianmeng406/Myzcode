@@ -137,6 +137,7 @@ ZCODE_PREVIEW_IDENTITY=1 pnpm exec electron-builder --config electron-builder.co
 | 会话列表失败「runtime is not running」 | 正常——订阅为 start-if-needed 会自动拉起 agent；持续失败看 `runtime/daemon.log` 的 spawn preflight |
 | agent 启动失败 | `runtime/daemon.log`；确认 `ZCODE_AGENT_SERVER_COMMAND/ARGS_JSON` 与 `agents/glm/zcode.cjs` 存在可执行 |
 | 手机 attach 报 `node_offline ... timed out` | 桌面 connector 掉线（半开连接）：新版本有心跳+自动重连，等待数秒重试即可；持续出现检查桌面端网络与网关 `logs/serve.log` |
-| 手机侧栏某工作区一直显示「暂无任务」 | 三种成因按顺序排查：①**该工作区未共享**（桌面远控共享白名单里没勾）——只有已共享工作区才会同步任务，未共享的必然为空；②桌面 `logs` 里出现 `[companion-facade] scope outside shared set: <path>`——请求的目标不在共享集合内，被按 §11.4.1 收窄丢弃；③桌面 `logs` 出现 `workspace task summary sessions-index unavailable` 属正常（该工作区 agent 运行时未启动），此时应随后出现 `workspace task summary read {source: "task-index"}`；若两者都没有，说明磁盘兜底读面也不可用 |
+| 手机侧栏某工作区一直显示「暂无任务」 | 三种成因按顺序排查：①**该工作区未共享**（桌面远控共享白名单里没勾）——只有已共享工作区才会同步任务，未共享的不可见也不该出现；②桌面 `logs` 里出现 `[companion-facade] scope outside shared set: <path>`——请求的目标不在共享集合内，被按 §11.4.1 收窄丢弃；③桌面 `logs` 出现 `workspace task summary sessions-index unavailable` 属正常（该工作区 agent 运行时未启动），此时应随后出现 `workspace task summary read {source: "task-index"}`；若两者都没有，说明磁盘兜底读面也不可用 |
+| 手机列表与桌面不同步（重载后才变化） | 活度断链：桌面 `logs` 查 `reject.*scope outside shared set` 与 `reject.*window-controller`；手机侧栏的实时性依赖 zcode-task 事件订阅与 window-controller 帧流都落在**共享集合内**的目标上（§11.4.1）；两者都正常仍不同步时，抓桌面与手机两端截图并核对 `subscribeControllerV4`/`onDynamicWorkspaceEvent` 是否到达 Host |
 | 网关 `workspace-tasks` 返回 `available:false` 或 `node_offline` | 节点在线但两条读面都失败：桌面看窗口 Host 是否在跑（关窗即无临时端口），云端看 `runtime/daemon.log`；`node_offline` 是控制面断开（心跳 watchdog 生效后应自动重连） |
 | WS 频繁断开 | nginx 是否带 Upgrade 头与 24h read timeout；`logs/serve.log` 的断线重连日志 |
