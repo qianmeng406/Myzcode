@@ -1,25 +1,68 @@
-# ZCode
+# Myzcode
+
+> **本仓库是基于官方 ZCode 开源项目二次开发的定制分支（fork），不是官方发行版。**
+>
+> 本项目与智谱 Z.ai / ZCode 官方团队**没有隶属、合作、授权或背书关系**，仓库中出现的 "ZCode" 名称与图标仅用于说明继承自上游的代码来源。使用前请务必阅读文末的[二次开发声明](#二次开发声明)与[免责声明](#免责声明)。
 
 <div align="center">
   <img src="public/logo/icons/1024x1024.png" alt="ZCode" width="128" height="128" />
 </div>
-<p align="center">
-  <a href="https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=47ag983c-8fcb-4d6d-814b-5395193a712c&amp;qr_code=true">飞书社群</a> ·
-  <a href="https://discord.gg/z9aBcQXZQ3">Discord</a>
-</p>
-<p align="center">
-  简体中文 | <a href="README.en.md">English</a>
-</p>
 
+Myzcode 在官方 ZCode 的基础上做面向个人使用的二次开发，主要方向是**「让手机也能远程操控电脑上运行的 ZCode」**，并额外扩展了模型渠道、模型审查与若干交互能力。
 
+| 项目 | 说明 |
+| --- | --- |
+| 上游项目 | [zai-org/ZCode](https://github.com/zai-org/ZCode)（Apache-2.0） |
+| 本仓库 | [qianmeng406/Myzcode](https://github.com/qianmeng406/Myzcode) |
+| 定制主线分支 | `custom/command-code-channel`（全部定制内容与修复所在分支） |
+| 桌面端 | 基于官方 ZCode 桌面版二次构建（Preview 构建身份，产物名 `ZCode Preview`） |
+| 移动端 | 「Myzcode」Android App，包名 `com.zcode.myzcode`，版本 `0.1.0` |
+| 许可证 | Apache-2.0（继承上游，见 [LICENSE](LICENSE)、[NOTICE.md](NOTICE.md)） |
 
-ZCode 是 AI 编程工作台，提供桌面应用、浏览器界面和终端 Agent。本仓库包含客户端、后端服务、共享 UI，以及 Agent CLI 与运行时源码。
+## 本定制版的新增与改动
 
-## 更新
+以下内容均为本仓库相对上游 `origin/main` 的**新增**改动（已逐项与上游代码比对确认）。
 
-- 2026-9-23：更新至 ZCode v3.14.3 版本。
+### 一、手机远控（Companion）——本定制版的主要改动
 
-## 初始化
+让手机以**同一套 WebUI**（窄视口适配）附着到电脑上**已经打开并显式共享**的工作区，实时镜像任务、会话与执行结果；不在手机侧新开第二个执行者。
+
+- **自托管接入与转发服务**：新增 `packages/companion`，含设备配对、节点登记、授权（grants）、attachment 注册与一次性 capability、控制面/数据面分离的 gateway（Hono + ws），数据面为字节透传，gateway 不解释、不缓存、不重排。
+- **节点连接器**：新增 `packages/server/src/companion`，桌面端由 Electron Main 出站连接并附着本机已打开工作区；云端由 resident 守护进程出站连接。手机附着到**既有**运行时，不隐式启动新运行时。
+- **频道收窄裁决**：`narrowingFacade` + `channelPolicy` 对手机暴露收窄后的 `IZCodeAgentService` 频道（T0 全拒 / T1 只读 / T2 受限），跨工作区只读任务列表与事件订阅按「已共享工作区集合」逐项放行，其余一律强制绑定或拒绝，fail-closed。
+- **手机端只读任务索引**：跨共享工作区的任务摘要聚合；sessions-index 不可用时回退磁盘 tasks-index，gateway 只做临时聚合，不持有任务权威。
+- **配对与设备授权**：6 位数字配对码 + 二维码/链接、一次性 capability、设备授权查看/收缩/撤销，凭证以哈希存储。
+- **连接恢复**：心跳 + watchdog、指数退避重连、`ConnectionSession` 代次恢复、命令 ACK 丢失先对账（不盲目重发创建/输入/审批）。
+- **移动端 App**：新增 `packages/mobile`（Capacitor Android），应用名 Myzcode，复用同一套 Web UI 资源，而非另写一套手机界面。
+- **自托管部署文档**：见 [packages/companion/specs/companion-gateway.md](packages/companion/specs/companion-gateway.md) 与 [packages/companion/specs/DEPLOY.md](packages/companion/specs/DEPLOY.md)。
+
+### 二、其余新增功能
+
+- **自定义模型渠道（Command Code）**：新增内置渠道，模型由用户自行管理而非预置，附按 key 的额度与上下文用量展示。
+- **双模型审查（Oracle）**：回合结束后自动复审本轮 diff，也支持手动重审；含深度审查（派发只读子代理多轮取证）、审查进度展示、一键修复与审查结果持久化。
+- **计划批准时选择执行模型与推理等级**：退出计划模式时可直接指定后续执行所用的模型与推理档位。
+- **会话回合导航**：按回合在长会话中快速跳转，配套设置开关与全量历史加载协调。
+- **权限/协作模式扩展**：新增 **资料查询（research）只读模式**（内置多个免密钥检索渠道）、`minimal`、`zcodeUpdate` 等模式。
+- **提示词优化器**：输入区新增提示词优化入口，可指定优化所用模型。
+- **远端资源自建发布管线与 SSH 常驻工作区**：可自建远端资源发布树（`packages/server/build-remote.ts` 等），并支持 SSH 远程工作区**断开不终止任务、重连接回同一运行时**。
+
+### 三、与官方版的差异边界（明确不做的事）
+
+- **不接入官方私有 relay**，不复用官方账号后端；远控链路完全自托管。
+- **不复制官方压缩代码**，不声称与官方通信协议兼容、不声称获得官方认证。
+- **执行权威唯一**：任务执行始终发生在原 Host/运行时，手机与 gateway 都不创建第二个执行者。
+- 手机首版**不可**进行凭据管理、任意文件系统访问、终端、服务端配置等特权操作。
+
+## 分支说明
+
+- `custom/command-code-channel`：**定制主线分支**，包含上述全部定制内容与后续修复。
+- `main`：保留了早期「项目开发模式（workflow）」相关提交作为历史线；该模式已在定制主线的后续提交中移除，不再属于当前定制版功能。
+
+## 上游 ZCode 使用说明
+
+以下初始化、开发、构建命令继承自上游 ZCode，命令本身未作改动；本定制版的新增能力（手机远控、自定义渠道等）按上文各章节的说明使用。
+
+### 初始化
 
 准备 Git、Node.js **24.14.0** 和 pnpm **10.33.2**，版本以 [mise.toml](mise.toml) 为准。以下开发和打包命令均在仓库根目录执行。
 
@@ -43,9 +86,9 @@ Agent CLI 与运行时源码位于 [apps/zcode-cli/](apps/zcode-cli/)，作为�
 
 默认 `bootstrap` 跳过远程资源准备，适合本地桌面开发。使用远程工作区或验证远程发行资源时，再运行对应准备命令。
 
-## 开发与运行
+### 开发与运行
 
-### 桌面版
+#### 桌面版
 
 ```bash
 pnpm dev:desktop
@@ -62,11 +105,20 @@ pnpm dev:desktop:test
 ZCODE_DATA_BASE_DIR="$HOME/.zcode-dev-home" pnpm dev:desktop:test
 ```
 
-### 远程功能（SSH/WSL）
+#### 移动端（Android，本定制版新增）
+
+```bash
+# 构建 Web UI → 同步到 Android 工程 → 产出 debug APK
+pnpm --filter @zcode/mobile run apk:debug
+```
+
+需要 JDK 21 与 Android SDK；`JAVA_HOME` 指向 JDK 21（Android Studio 自带 JBR 即可）。产物位于 `packages/mobile/android/app/build/outputs/apk/debug/`。
+
+#### 远程功能（SSH/WSL）
 
 先执行 `pnpm bootstrap:with-remote` 准备远程资源（mock-cdn），再 `pnpm dev:desktop`；连接远程项目时资源选择「本地下载后上传」。开发态资源取自本地 `packages/desktop/mock-cdn` 和本地构建产物，经 SFTP 上传到远程，不访问 CDN。
 
-### Web 开发
+#### Web 开发
 
 修改 Web 或后端源码时，使用开发模式：
 
@@ -81,7 +133,7 @@ ZCODE_SERVER_WORKSPACE=/path/to/project pnpm dev:web
 
 Agent 源码修改后，执行 `pnpm --filter @zcode/cli... build` 并重启服务。需要验证完整发行包时，按下方“ZCode 命令行版”打包章节解压运行。
 
-### ZCode 命令行版
+#### ZCode 命令行版
 
 命令行发行包包含 TUI、Web 和 Agent，统一使用 `zcode` 启动：无参数进入 TUI；第一个参数为 `--web` 时启动 Web；其他参数交给现有 Agent CLI 处理。两种模式都在本机运行，无需 Electron。
 
@@ -106,7 +158,7 @@ Web 模式默认工作目录为当前目录，监听 `127.0.0.1`，默认不启�
 
 构建方式见下方打包章节。`pnpm build:zcode` 只生成发行包，不会替换 `PATH` 中已有的 `zcode`。如果命令仍指向旧安装或其他源码目录，macOS / Linux 可用 `command -v zcode` 检查，Windows 可用 `where.exe zcode` 检查。
 
-### CLI 源码开发
+#### CLI 源码开发
 
 直接开发 TUI 或 Agent 时，运行源码入口：
 
@@ -121,7 +173,7 @@ node apps/zcode-cli/packages/cli/dist/zcode.cjs --help
 
 这个入口直接运行 Agent CLI，不经过发行包的 `--web` 分流。开发 Web 用 `pnpm dev:web`；验证统一的 `zcode` 命令，用下方解压后的 `bin/zcode.mjs`。
 
-## 配置
+### 配置
 
 根目录 [.env.example](.env.example) 提供服务地址与构建配置示例，可按需复制到 `.env`，本地覆盖放入 `.env.local`。Desktop 的开发环境通过 `dev:desktop:test` / `dev:desktop:prod` 选择。
 
@@ -134,11 +186,13 @@ node apps/zcode-cli/packages/cli/dist/zcode.cjs --help
 
 运行时变量可在启动命令的环境中显式设置。随客户端发布的默认配置见 [config/README.md](config/README.md)。
 
-## 打包
+> 注意：请勿把任何令牌、密钥或个人凭据提交到仓库；本定制版的远控部署涉及自建服务器凭据，请只放在本地未跟踪文件中。
+
+### 打包
 
 第三方声明生成、发行校验流程及声明在发行物中的位置见 [third-party/README.md](third-party/README.md)。
 
-### 桌面版
+#### 桌面版
 
 ```bash
 pnpm bundle:desktop
@@ -157,7 +211,7 @@ pnpm bundle:desktop -- --help
 sudo xattr -rd com.apple.quarantine /Applications/ZCode.app
 ```
 
-### ZCode 命令行版
+#### ZCode 命令行版
 
 构建入口为 `pnpm build:zcode`。脚本会依次构建 CLI/TUI、后端和 Web，收集 TUI 的原生库、worker 与运行时依赖，再组装发行包；运行发行包仍需要 Node.js，版本以 `mise.toml` 为准。
 
@@ -205,11 +259,15 @@ node dist/zcode/debug/zcode/bin/zcode.mjs --web \
 
 ## 仓库结构
 
+上游结构如下，`本定制版新增` 列出的目录为本仓库新增。
+
 | 目录                                                 | 职责                                       |
 | ---------------------------------------------------- | ------------------------------------------ |
+| `packages/companion`                                 | **本定制版新增**：手机远控的 gateway、协议、配对与授权 |
+| `packages/mobile`                                    | **本定制版新增**：Myzcode Android App（Capacitor） |
 | `packages/desktop`                                   | Electron Main、Host、Renderer 与桌面打包   |
 | `packages/web`                                       | Web 客户端                                 |
-| `packages/server`                                    | HTTP / WebSocket 服务与远程连接            |
+| `packages/server`                                    | HTTP / WebSocket 服务与远程连接（含 `src/companion` 节点连接器） |
 | `packages/zcode-server-cli`                          | 独立 Server 启动与进程管理                 |
 | `packages/ui`                                        | 共享 React 组件、hooks 与 Zustand 状态     |
 | `packages/services`                                  | 业务服务与持久化                           |
@@ -218,6 +276,26 @@ node dist/zcode/debug/zcode/bin/zcode.mjs --web \
 | `apps/zcode-cli`                                     | Agent CLI、TUI、运行时与工具               |
 | `scripts`、`config`、`third-party`                   | 构建维护脚本、内置配置与第三方声明材料     |
 
+## 二次开发声明
+
+1. **来源**：本项目是基于 [zai-org/ZCode](https://github.com/zai-org/ZCode) 开源代码的**二次开发（fork）**，遵循上游 Apache-2.0 许可证。上游原始代码、文档与资源的著作权归其原作者与 zai-org/ZCode 项目所有。
+2. **非官方**：本项目由个人维护，**不是**官方产品，与 Z.ai、智谱、ZCode 官方团队**无任何隶属、赞助、合作或背书关系**。本项目产出的安装包、APK、bundle 均非官方发行物。
+3. **改动范围**：本仓库在上游基础上新增了手机远控（Companion）、移动端 App、自定义模型渠道、双模型审查等功能，并修改了部分既有模块。改动清单见上文「本定制版的新增与改动」。
+4. **协议与兼容**：本项目**不复制**官方压缩/混淆代码，**不接入**官方私有中继（relay）或账号后端，也**不声称**与官方协议兼容或通过官方认证。请勿将本项目描述为官方发行版或官方合作产品。
+5. **名称与标识**：仓库中出现的 "ZCode" 名称、图标等仅用于说明代码来源与用途，不代表官方授权。
+
+## 免责声明
+
+1. **无担保**：本项目按「现状」（AS IS）提供，不附带任何明示或默示担保，包括但不限于适销性、特定用途适用性与不侵权担保。作者不对因使用或无法使用本项目而产生的任何直接或间接损失（含数据丢失、服务中断、设备损坏、收益损失）承担责任。
+2. **自担风险**：本定制版包含**远程控制**能力，可让手机端对电脑上运行的 ZCode 发起有副作用的操作（创建任务、发送输入、停止执行、处理审批等）。使用前你应自行评估风险，务必只在**你自己的设备**与**你拥有合法授权**的环境上启用，并妥善保管配对码、令牌与服务器凭据。因误用、配置不当或凭据泄露造成的后果由使用者自行承担。
+3. **不上传、不采集**：本项目不提供任何官方后端服务，作者不会收集你的数据。远控链路需你**自行搭建**服务器与网络环境，该环境中产生的日志、数据与流量由你自行管理并承担合规责任。
+4. **合法使用**：使用者须自行确保其使用行为符合所在地区的法律法规、上游项目条款及第三方服务（模型供应商、云服务商等）的使用协议。**严禁**将本项目用于未经授权的入侵、监控、数据窃取或其他违法用途。
+5. **模型与费用**：本项目可能调用第三方模型服务，相关账号、额度、费用与内容合规由使用者自行负责；本仓库不预置任何官方密钥或额度。
+6. **与上游的关系**：本项目可能滞后于上游、包含上游尚未合并或已被移除的改动，也可能存在缺陷。请勿因本项目的问题向上游项目或官方团队追责。
+7. **无维护承诺**：作者不承诺持续维护、及时修复或长期兼容任何上游版本。
+
+> 若你不同意上述任一条款，请立即停止使用并删除本项目全部副本。
+
 ## 项目声明
 
-功能与优惠范围、维护规则、执行与数据风险，以及许可和第三方版权说明，详见 [NOTICE.md](NOTICE.md)。
+功能与优惠范围、维护规则、执行与数据风险，以及许可和第三方版权说明，详见 [NOTICE.md](NOTICE.md)（继承自上游）。
