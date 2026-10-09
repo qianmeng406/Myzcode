@@ -66,6 +66,7 @@ export function RemoteConnectionFields({
   username,
   sshAuthMethod,
   assetInstallMode,
+  resident,
   password,
   privateKeyPath,
   privateKeyPassphrase,
@@ -90,6 +91,7 @@ export function RemoteConnectionFields({
   setUsername,
   setSshAuthMethod,
   setAssetInstallMode,
+  setResident,
   setPassword,
   setPrivateKeyPath,
   setPrivateKeyPassphrase,
@@ -104,6 +106,7 @@ export function RemoteConnectionFields({
   username: string;
   sshAuthMethod: SSHAuthMethod;
   assetInstallMode: RemoteAssetInstallMode;
+  resident: boolean;
   password: string;
   privateKeyPath: string;
   privateKeyPassphrase: string;
@@ -128,6 +131,7 @@ export function RemoteConnectionFields({
   setUsername: (value: string) => void;
   setSshAuthMethod: (value: SSHAuthMethod) => void;
   setAssetInstallMode: (value: RemoteAssetInstallMode) => void;
+  setResident: (value: boolean) => void;
   setPassword: (value: string) => void;
   setPrivateKeyPath: (value: string) => void;
   setPrivateKeyPassphrase: (value: string) => void;
@@ -510,6 +514,40 @@ export function RemoteConnectionFields({
             </div>
             <p className="mt-1 text-ui-base text-foreground-subtle">
               {intl.formatMessage({ id: "ssh.assetInstallModeDescription" })}
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-ui-base text-foreground-subtle">
+              {intl.formatMessage({ id: "ssh.residentMode" })}
+            </label>
+            <div className="inline-flex w-full max-w-md flex-col items-stretch rounded-lg border border-input-border bg-input p-[3px] sm:w-fit sm:flex-row sm:items-center">
+              {([false, true] as const).map((value) => {
+                const selected = resident === value;
+
+                return (
+                  <button
+                    key={String(value)}
+                    type="button"
+                    onClick={() => setResident(value)}
+                    className={cn(
+                      "inline-flex min-h-7 min-w-0 flex-1 items-center justify-center rounded-md px-3 py-1 text-center text-ui-base font-medium transition-colors sm:flex-none",
+                      selected
+                        ? "bg-background text-foreground"
+                        : "text-foreground-subtle hover:text-foreground",
+                    )}
+                  >
+                    <span className="min-w-0 break-words">
+                      {intl.formatMessage({
+                        id: value ? "ssh.residentMode.resident" : "ssh.residentMode.standard",
+                      })}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1 text-ui-base text-foreground-subtle">
+              {intl.formatMessage({ id: "ssh.residentModeDescription" })}
             </p>
           </div>
         </div>

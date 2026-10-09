@@ -30,7 +30,6 @@ import {
   openWorkflowRunSidePane,
   replaceWorkflowRunSidePane,
   openWorkflowRunDirectorySidePane,
-  openWorkflowStageSidePane,
   openWorkflowActorSessionSidePane,
   openWorkflowWorkspaceSidePane,
   openWorkflowArtifactSidePane,
@@ -45,6 +44,7 @@ import {
   openCodeViewerSidePane,
   openCodeViewerSidePanes,
   activateGitSidePane,
+  openFileExplorerSidePane,
   getActiveSidePaneTab,
   getVisibleSidePaneTabs,
   sidePaneOwnerKey,
@@ -68,7 +68,6 @@ import {
   type OpenScopedPlanDetailSideTabRequest,
   type OpenScopedWorkflowRunSideTabRequest,
   type OpenScopedWorkflowRunDirectorySideTabRequest,
-  type OpenScopedWorkflowStageSideTabRequest,
   type OpenScopedWorkflowActorSessionSideTabRequest,
   type OpenScopedWorkflowArtifactSideTabRequest,
   type OpenScopedWorkflowWorkspaceSideTabRequest,
@@ -79,6 +78,7 @@ import { isSidePaneTabVisibleForParent } from "@/lib/workspaceSidePane.js";
 import { logger } from "@/logger.js";
 import { getPathLeaf, joinFilePath, toFileUrl } from "@/lib/path.js";
 import { shouldOpenWorkflowArtifactInBrowser } from "@/lib/workflowArtifactOpen.js";
+import { registerEmbeddedBrowserOpener } from "@/lib/embeddedBrowserOpenBridge.js";
 import { useWhiteboardStore } from "@/store/whiteboardStore.js";
 import { useModelTrajectoryOpenBridge } from "@/hooks/useModelTrajectoryOpenBridge.js";
 import { useServices } from "@/hooks/useServices.js";
@@ -530,6 +530,17 @@ export function useAppPanels(options: {
     });
   }, [handleOpenBrowserUrl, isDesktop, platform, supportsEmbeddedBrowser, workspaceAbsPath]);
 
+  // 把「在内置浏览器打开 URL」的能力注册给设置页等兄弟分支（见 embeddedBrowserOpenBridge）。
+  // 只在壳层真的支持内嵌浏览器时注册，未注册时调用方会自行回退系统浏览器。
+  useEffect(() => {
+    if (!supportsEmbeddedBrowser) {
+      return;
+    }
+    return registerEmbeddedBrowserOpener((url) => {
+      handleOpenBrowserUrl(url);
+    });
+  }, [handleOpenBrowserUrl, supportsEmbeddedBrowser]);
+
   // Browser Use 事件携带创建时冻结的 workspace/session，迟到事件只后台挂载，不能抢当前对话焦点。
   const handleBrowserViewReady = useCallback(
     (
@@ -811,6 +822,17 @@ export function useAppPanels(options: {
     workspaceRemoteSessionId,
   ]);
 
+  const handleOpenFileExplorerTab = useCallback(() => {
+    revealSidePaneForCurrentOwner();
+    commitOpenedSidePaneState((current) => {
+      const next = openFileExplorerSidePane(current);
+      logger.info(
+        `[App] 打开右侧文件标签 workspace=${workspaceAbsPath} tabs=${next.tabs.length}`,
+      );
+      return next;
+    });
+  }, [commitOpenedSidePaneState, revealSidePaneForCurrentOwner, workspaceAbsPath]);
+
   const handleOpenModelTrajectory = useCallback(
     (params: { taskId: string; title?: string | null }) => {
       if (!params.taskId) {
@@ -972,24 +994,6 @@ export function useAppPanels(options: {
         }),
       );
       logger.debug("[App] 打开工作流运行目录右侧 tab", {
-        parentSessionId: request.parentSessionId,
-        workspaceKey,
-      });
-    },
-    [commitOpenedSidePaneState],
-  );
-
-  const handleOpenWorkflowStage = useCallback(
-    (request: OpenScopedWorkflowStageSideTabRequest) => {
-      const workspaceKey = request.workspaceIdentity?.trim() || request.workspacePath;
-      setIsSidePaneCollapsed(false);
-      commitOpenedSidePaneState((current) =>
-        openWorkflowStageSidePane(current, {
-          ...request,
-          workspaceKey,
-        }),
-      );
-      logger.debug("[App] 打开项目开发模式阶段右侧 tab", {
         parentSessionId: request.parentSessionId,
         workspaceKey,
       });
@@ -1608,6 +1612,7 @@ export function useAppPanels(options: {
     handleOpenWhiteboard,
     handleOpenDeveloperTools,
     handleOpenTerminalTab,
+    handleOpenFileExplorerTab,
     handleOpenModelTrajectory,
     handleOpenSubagentSession,
     handleOpenBackgroundBash,
@@ -1617,7 +1622,6 @@ export function useAppPanels(options: {
     handleOpenPlanDetail,
     handleOpenWorkflowRun,
     handleOpenWorkflowRunDirectory,
-    handleOpenWorkflowStage,
     handleOpenWorkflowActorSession,
     handleOpenWorkflowWorkspace,
     handleOpenWorkflowArtifact,

@@ -288,6 +288,22 @@ contextBridge.exposeInMainWorld("zcode", {
   /** 打开系统目录选择框，返回选中路径或 null */
   selectDirectory: (): Promise<string | null> =>
     ipcRenderer.invoke(PlatformChannels.SelectDirectory),
+  /** My zcode 桌面直连：读取配置（nodeToken 不出主进程） */
+  getCompanionConfig: () => ipcRenderer.invoke(PlatformChannels.CompanionGetConfig),
+  /** My zcode 桌面直连：用已存节点令牌索取一次性配对码 */
+  requestCompanionPairingCode: () =>
+    ipcRenderer.invoke(PlatformChannels.CompanionPairingCode) as Promise<{
+      code: string;
+      expiresAt: number;
+      displayName: string;
+    }>,
+  /** My zcode 桌面直连：更新配置并重连/断开 */
+  setCompanionConfig: (input: {
+    enabled: boolean;
+    gatewayUrl: string;
+    nodeToken?: string;
+    allowedWorkspaces: string[];
+  }) => ipcRenderer.invoke(PlatformChannels.CompanionSetConfig, input),
   /** 打开系统文件选择框，返回选中文件路径或 null */
   selectFile: (): Promise<string | null> => ipcRenderer.invoke(PlatformChannels.SelectFile),
   /** 打开系统多文件选择框，返回选中文件路径；取消时返回空数组 */
@@ -587,6 +603,9 @@ contextBridge.exposeInMainWorld("zcode", {
   openInFileManager: (path: string) => ipcRenderer.invoke(PlatformChannels.OpenInFileManager, path),
   /** 使用系统默认应用打开本地文件 */
   openExternalFile: (path: string) => ipcRenderer.invoke(PlatformChannels.OpenExternalFile, path),
+  /** 把本地文件复制进系统剪贴板（可在文件管理器粘贴） */
+  copyFileToClipboard: (path: string) =>
+    ipcRenderer.invoke(PlatformChannels.CopyFileToClipboard, path),
   /** 打开 ZCode Computer Use 完整权限引导 */
   openCuaPermissionOnboarding: (options?: OpenCuaPermissionOnboardingOptions) =>
     ipcRenderer.invoke(PlatformChannels.OpenCuaPermissionOnboarding, options),

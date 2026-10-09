@@ -42,6 +42,7 @@ import {
   type OffPeakCreateTaskSummary,
 } from "@/ToolCallBlocks/renderers/offpeak-create.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { isOracleReviewableTurnState } from "@/v4/oracleReview/oracleReviewMaterial.js";
 import type { AssistantPreviewCard } from "@/lib/assistantPreviewCards.js";
 import { useAssistantCodeCommentFeatureEnabled } from "@/AssistantCodeCommentFeatureProvider.js";
 import {
@@ -1197,6 +1198,14 @@ function ConversationTurnGroupImpl({
     () => (unit.isRunning ? [] : resolveOffPeakTurnCards(unit.assistantWorkRows)),
     [unit.assistantWorkRows, unit.isRunning],
   );
+  // 标准/深度两个审查按钮共用的唯一准入判定：显隐规则改动只改这一处。
+  // v2 对话审查：准入 = 对话终态（成功/被中断/失败）+ 有持久实体 + 非 controlOnly；
+  // 不再要求有文件改动或工具活动——纯对话回合同样可审，diff 只是辅助证据。
+  const canReviewThisTurn =
+    context.reviewTurn !== undefined &&
+    unit.header?.entityId !== undefined &&
+    unit.header.executionKind !== "controlOnly" &&
+    isOracleReviewableTurnState(unit.header.state);
   const canRenderAssistantActions =
     !unit.timelineOnly &&
     latestAssistantTextRow?.state === "complete" &&
@@ -1424,6 +1433,25 @@ function ConversationTurnGroupImpl({
               onFork={canForkLatestAssistant ? onFork : undefined}
               onRetry={canRetryLatestAssistant ? onRetry : undefined}
               onFeedbackChange={onFeedbackChange}
+              reviewPending={context.oracleReviewPending ?? false}
+              // 审查这一回合：成功结束且未撤销的回合都提供入口。除「有文件改动」外，
+              // 还包含「本轮有工具活动」的回合——改动可能由脚本/命令完成，checkpoint
+              // 不记录工具级改动（fileChanges 为空），漏掉它们会让脚本回合无法审查。
+              // 结果统一显示在 composer 上方的 Oracle 横幅，一次只保留最近一次审查。
+              onReviewTurn={
+                canReviewThisTurn
+                  ? () => {
+                      if (unit.header) context.reviewTurn?.(unit.header);
+                    }
+                  : undefined
+              }
+              onReviewTurnDeep={
+                canReviewThisTurn && context.reviewTurnDeep
+                  ? () => {
+                      if (unit.header) context.reviewTurnDeep?.(unit.header);
+                    }
+                  : undefined
+              }
               hookInvocations={unit.hookInvocations}
               turnId={unit.turnId}
               className="opacity-0 transition-opacity group-hover/assistant-turn:opacity-100 focus-within:opacity-100"

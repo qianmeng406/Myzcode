@@ -533,6 +533,29 @@ export interface IPlatformService {
   /** 打开系统目录选择框，返回选中路径或 null */
   selectDirectory(): Promise<string | null>;
 
+  /** My zcode 桌面直连：读取配置（nodeToken 不出主进程，只回 hasNodeToken）；仅 Desktop 实现 */
+  getCompanionConfig?(): Promise<{
+    enabled: boolean;
+    gatewayUrl: string;
+    hasNodeToken: boolean;
+    allowedWorkspaces: string[];
+  }>;
+
+  /** My zcode 桌面直连：更新配置并重连/断开；仅 Desktop 实现 */
+  setCompanionConfig?(input: {
+    enabled: boolean;
+    gatewayUrl: string;
+    /** 缺省保留已存令牌 */
+    nodeToken?: string;
+    allowedWorkspaces: string[];
+  }): Promise<void>;
+  /** My zcode 桌面直连：用已存节点令牌索取一次性配对码；仅 Desktop 实现 */
+  requestCompanionPairingCode?(): Promise<{
+    code: string;
+    expiresAt: number;
+    displayName: string;
+  }>;
+
   /** 打开系统文件选择框，返回选中文件路径或 null */
   selectFile(): Promise<string | null>;
 
@@ -656,6 +679,9 @@ export interface IPlatformService {
 
   /** 使用系统默认应用打开本地文件；普通 Web 平台返回 unsupported。 */
   openExternalFile?(path: string): Promise<{ success: boolean; error?: string }>;
+
+  /** 把本地文件复制进系统剪贴板（可在文件管理器里粘贴）；普通 Web 平台不支持。Desktop only。 */
+  copyFileToClipboard?(path: string): Promise<{ success: boolean; error?: string }>;
 
   /** 打开 ZCode Computer Use 的完整权限引导。Desktop only。 */
   openCuaPermissionOnboarding?(

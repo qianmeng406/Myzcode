@@ -27,18 +27,21 @@ import {
   cancelBackgroundTask,
   closeSession,
   compactSession,
+  acknowledgeOracleReviewRecord,
   createSession,
   forkSession,
   generateWorkspaceText,
   goalSession,
   getTaskTokenUsage,
   getUsageStats,
+  listOracleReviewRecords,
   listSessions,
   listSessionSubagents,
   readEvents,
   readMessages,
   readSession,
   resumeSession,
+  saveOracleReviewRecord,
   sendPrompt,
   setMode,
   setModel,
@@ -562,6 +565,13 @@ export class ZCodeProtocolAgentServer {
         return await getUsageStats(this.context, request.params);
       case V4_METHODS.conversationUsage:
         return await getTaskTokenUsage(this.context, request.params);
+      // Oracle 审查记录：会话附属持久化（session entry），CLI 侧按 sessionId 隔离。
+      case zcodeProtocolMethods.oracleReviewSaveRecord:
+        return await saveOracleReviewRecord(this.context, request.params);
+      case zcodeProtocolMethods.oracleReviewListRecords:
+        return await listOracleReviewRecords(this.context, request.params);
+      case zcodeProtocolMethods.oracleReviewAcknowledgeRecord:
+        return await acknowledgeOracleReviewRecord(this.context, request.params);
       case V4_METHODS.command:
         return this.requireV4Gateway().handleCommand(request.params);
       case V4_METHODS.commandsQuery:
@@ -783,9 +793,23 @@ export class ZCodeProtocolAgentServer {
   private cancelWorkspaceGenerateText(rawParams: unknown) {
     const params = parseParams(zcodeWorkspaceCancelGenerateTextParamsSchema, rawParams);
     const controller = this.workspaceGenerateTextControllers.get(params.operationId);
-    if (!controller) return { operationId: params.operationId, cancelled: false };
+    if (!controller) {
+      // cancelled:false = 未配对：孤儿操作将继续执行。留痕归因（宿主会同步告警）。
+      this.context.logger?.warn("workspace generate text cancel missed (no active operation)", {
+        activeOperations: [...this.workspaceGenerateTextControllers.keys()],
+        event: "zcode_protocol.workspace_generate_text_cancel_missed",
+        module: "zcode_protocol.server",
+        operationId: params.operationId,
+      });
+      return { operationId: params.operationId, cancelled: false };
+    }
     controller.abort(new DOMException("Workspace model request cancelled", "AbortError"));
     this.workspaceGenerateTextControllers.delete(params.operationId);
+    this.context.logger?.info("workspace generate text cancel delivered", {
+      event: "zcode_protocol.workspace_generate_text_cancel_delivered",
+      module: "zcode_protocol.server",
+      operationId: params.operationId,
+    });
     return { operationId: params.operationId, cancelled: true };
   }
 

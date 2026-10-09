@@ -303,6 +303,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   handleOpenWhiteboard,
   handleOpenDeveloperTools,
   handleOpenTerminalTab,
+  handleOpenFileExplorerTab,
   handleToggleGit,
   handleOpenGitReview,
   handleToggleSidePane,
@@ -317,7 +318,6 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   handleOpenPlanDetail,
   handleOpenWorkflowRun,
   handleOpenWorkflowRunDirectory,
-  handleOpenWorkflowStage,
   handleOpenWorkflowActorSession,
   handleOpenWorkflowWorkspace,
   handleOpenWorkflowArtifact,
@@ -1464,6 +1464,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
       onOpenWhiteboard={handleOpenWhiteboard}
       onOpenDeveloperTools={handleOpenDeveloperTools}
       onOpenTerminalTab={handleOpenTerminalTab}
+      onOpenFileExplorerTab={handleOpenFileExplorerTab}
       onOpenReviewTab={handleToggleGit}
       onOpenSelectionSideConversation={handleOpenSelectionSideConversationLauncher}
       onRevealGitFileInTree={handleRevealGitFileInTree}
@@ -1880,7 +1881,6 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                               onOpenWorkflowRun={handleOpenWorkflowRun}
                               onOpenWorkflowArtifact={handleOpenWorkflowArtifact}
                               onOpenWorkflowRunDirectory={handleOpenWorkflowRunDirectory}
-                              onOpenWorkflowStage={handleOpenWorkflowStage}
                               onOpenWorkflowActorSession={handleOpenWorkflowActorSession}
                               onOpenWorkflowWorkspace={handleOpenWorkflowWorkspace}
                               onOpenFileLink={handleOpenMarkdownFileLink}

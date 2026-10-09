@@ -50,6 +50,8 @@ export function useRemoteConnectionForm({
   const [assetInstallMode, setAssetInstallMode] = useState<RemoteAssetInstallMode>(
     DEFAULT_REMOTE_ASSET_INSTALL_MODE,
   );
+  // 常驻模式：远端 server 以 daemon 运行，桌面断开不终止任务（Linux SSH）。
+  const [resident, setResident] = useState(false);
   const [password, setPassword] = useState("");
   const [privateKeyPath, setPrivateKeyPathState] = useState("");
   const [privateKeyPassphrase, setPrivateKeyPassphrase] = useState("");
@@ -100,6 +102,7 @@ export function useRemoteConnectionForm({
     setSshConfigAliasesLoaded(false);
     setSshConfigAliasesError("");
     setSelectedSshConfigAlias(null);
+    setResident(false);
     setWslOptionsLoaded(false);
     setWslOptionsLoading(false);
     setWslOptionsError("");
@@ -331,6 +334,7 @@ export function useRemoteConnectionForm({
     username,
     sshAuthMethod,
     assetInstallMode,
+    resident,
     password,
     privateKeyPath,
     privateKeyPassphrase,
@@ -352,6 +356,7 @@ export function useRemoteConnectionForm({
     setUsername,
     setSshAuthMethod,
     setAssetInstallMode,
+    setResident,
     setPassword,
     setPrivateKeyPath,
     setPrivateKeyPassphrase,

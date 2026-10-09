@@ -10,6 +10,15 @@ export function createDesktopPlatform(options: {
     canSelectFilePath: true,
     createLocalMediaPreviewUrl: buildLocalMediaPreviewUrl,
     isLocalDevelopmentRuntime: options.isLocalDevelopmentRuntime,
+    getCompanionConfig: window.zcode.getCompanionConfig
+      ? () => window.zcode.getCompanionConfig!()
+      : undefined,
+    setCompanionConfig: window.zcode.setCompanionConfig
+      ? (input) => window.zcode.setCompanionConfig!(input)
+      : undefined,
+    requestCompanionPairingCode: window.zcode.requestCompanionPairingCode
+      ? () => window.zcode.requestCompanionPairingCode!()
+      : undefined,
     selectDirectory: () => window.zcode.selectDirectory(),
     selectFile: () => window.zcode.selectFile(),
     selectFiles: () => window.zcode.selectFiles?.() ?? Promise.resolve([]),
@@ -40,6 +49,7 @@ export function createDesktopPlatform(options: {
     canOpenCommunity: (locale) => window.zcode.canOpenCommunity(locale),
     openInFileManager: (path) => window.zcode.openInFileManager(path),
     openExternalFile: (path) => window.zcode.openExternalFile(path),
+    copyFileToClipboard: (path) => window.zcode.copyFileToClipboard(path),
     openCuaPermissionOnboarding: window.zcode.openCuaPermissionOnboarding
       ? (permissionOptions) =>
           window.zcode.openCuaPermissionOnboarding?.(permissionOptions) ??

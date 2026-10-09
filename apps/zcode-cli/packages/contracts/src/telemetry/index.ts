@@ -16,6 +16,8 @@ export const ModelApiOperation = {
   GoalTitle: "goal_title_generation",
   GoalVerification: "goal_completion_verification",
   GitCommitMessage: "workspace_git_commit_message",
+  OracleTurnReview: "oracle_turn_review",
+  OracleDeepReview: "oracle_deep_review",
   ProjectMemoryExtract: "project_memory_extract",
   ReadSessionContextExtract: "read_session_context_extract",
   ReadSessionContextSynthesize: "read_session_context_synthesize",
@@ -181,6 +183,16 @@ function mapQuerySourceToModelApiOperation(querySource: string | undefined): {
     case "git_commit_message":
       return {
         operation: ModelApiOperation.GitCommitMessage,
+        actorKind: ModelApiActorKind.System,
+      };
+    case "oracle_turn_review":
+      return {
+        operation: ModelApiOperation.OracleTurnReview,
+        actorKind: ModelApiActorKind.System,
+      };
+    case "oracle_deep_review":
+      return {
+        operation: ModelApiOperation.OracleDeepReview,
         actorKind: ModelApiActorKind.System,
       };
     case "web_search_tool":

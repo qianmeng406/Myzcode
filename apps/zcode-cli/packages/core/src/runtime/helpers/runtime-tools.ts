@@ -49,7 +49,9 @@ function registerRuntimeBuiltInTools(runtime: AgentRuntimeInternal, deps: AgentR
   const browserUseEnabled = resolveRuntimeBrowserUseEnabled(runtime, deps);
   registerBuiltInTools(runtime.registry, {
     bashTimeoutPolicy: runtime.config.bashTimeoutPolicy,
-    includeSkill: Boolean(runtime.skillPort),
+    // 极简模式不发 skills 段，Skill 工具一并摘掉：留着它等于告诉模型有一个
+    // 它看不到任何技能清单的工具。
+    includeSkill: Boolean(runtime.skillPort) && runtime.config.mode !== "minimal",
     includeAgent: Boolean(runtime.subagentPort),
     includeSendMessage: runtime.subagentPort?.sendMessage !== undefined,
     includeRespondToCoordinator:

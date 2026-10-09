@@ -232,6 +232,7 @@ export function App({
     handleOpenWhiteboard,
     handleOpenDeveloperTools,
     handleOpenTerminalTab,
+    handleOpenFileExplorerTab,
     handleOpenSubagentSession,
     handleOpenBackgroundBash,
     handleOpenSubagentDirectory,
@@ -240,7 +241,6 @@ export function App({
     handleOpenPlanDetail,
     handleOpenWorkflowRun,
     handleOpenWorkflowRunDirectory,
-    handleOpenWorkflowStage,
     handleOpenWorkflowActorSession,
     handleOpenWorkflowWorkspace,
     handleOpenWorkflowArtifact,
@@ -1246,6 +1246,7 @@ export function App({
         handleOpenWhiteboard={handleOpenWhiteboard}
         handleOpenDeveloperTools={handleOpenDeveloperTools}
         handleOpenTerminalTab={handleOpenTerminalTabIfWritable}
+        handleOpenFileExplorerTab={handleOpenFileExplorerTab}
         handleToggleGit={handleToggleGitIfWritable}
         handleToggleSidePane={handleToggleSidePane}
         handleOpenBrowserUrl={handleOpenBrowserUrl}
@@ -1259,7 +1260,6 @@ export function App({
         handleOpenPlanDetail={handleOpenPlanDetail}
         handleOpenWorkflowRun={handleOpenWorkflowRun}
         handleOpenWorkflowRunDirectory={handleOpenWorkflowRunDirectory}
-        handleOpenWorkflowStage={handleOpenWorkflowStage}
         handleOpenWorkflowActorSession={handleOpenWorkflowActorSession}
         handleOpenWorkflowWorkspace={handleOpenWorkflowWorkspace}
         handleOpenWorkflowArtifact={handleOpenWorkflowArtifact}

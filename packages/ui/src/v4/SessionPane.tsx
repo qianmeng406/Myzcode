@@ -22,6 +22,7 @@ import {
   TID_CHAT_EMPTY,
   TID_V4_SESSION_PANE,
   testId,
+  type ModelSelection,
   ZCODE_AGENT_PROVIDER,
 } from "@zcode/shared";
 import type {
@@ -229,8 +230,14 @@ import {
 import { useSlashCommands } from "@/hooks/useSlashCommands.js";
 import { useV4Conversation } from "@/v4/V4ConversationContext.js";
 import { useConversationProjection } from "@/v4/useConversationProjection.js";
+import {
+  readStoredOracleModelSelection,
+  writeStoredOracleModelSelection,
+} from "@/v4/oracleReview/oracleReviewSupport.js";
+import { useOracleReview } from "@/v4/oracleReview/useOracleReview.js";
 import { usePendingCommandRecovery } from "@/v4/usePendingCommandRecovery.js";
 import { useV4SessionQuotaBanner } from "@/v4/useV4SessionQuotaBanner.js";
+import { CodingPlanQuotaResetPrompt } from "@/v4/CodingPlanQuotaResetPrompt.js";
 import { resolveMcpUnavailableNotice } from "@/v4/mcpUnavailableBannerNotice.js";
 import { shouldFocusTimelineAfterComposerSend } from "@/v4/promptScrollFocusPolicy.js";
 import {
@@ -253,7 +260,6 @@ import type {
   OpenWorkflowActorSessionSideTabRequest,
   OpenWorkflowArtifactSideTabRequest,
   OpenScopedWorkflowRunDirectorySideTabRequest,
-  OpenScopedWorkflowStageSideTabRequest,
   OpenScopedWorkflowWorkspaceSideTabRequest,
   OpenWorkflowWorkspaceSideTabRequest,
   OpenScopedSubagentSideTabRequest,
@@ -358,8 +364,6 @@ export interface SessionPaneProps {
   /** 通知行的产物 chip → 全尺寸查看 tab。 */
   onOpenWorkflowArtifact?: (request: OpenScopedWorkflowArtifactSideTabRequest) => void;
   onOpenWorkflowRunDirectory?: (request: OpenScopedWorkflowRunDirectorySideTabRequest) => void;
-  /** composer「工作流」标记 chip → 项目开发模式阶段侧栏 tab。 */
-  onOpenWorkflowStage?: (request: OpenScopedWorkflowStageSideTabRequest) => void;
   /** 工具卡上的子代理药丸 → transcript tab；与详情页子代理行同一个宿主处理器。 */
   onOpenWorkflowActorSession?: (request: OpenScopedWorkflowActorSessionSideTabRequest) => void;
   /** 工具卡上的脚本药丸 → 脚本 transcript tab；与详情页脚本行同一个宿主处理器。 */
@@ -535,7 +539,6 @@ export function SessionPane({
   onOpenWorkflowRun,
   onOpenWorkflowArtifact,
   onOpenWorkflowRunDirectory,
-  onOpenWorkflowStage,
   onOpenWorkflowActorSession,
   onOpenWorkflowWorkspace,
   conversationFindQuery = "",
@@ -1288,6 +1291,23 @@ export function SessionPane({
     useZCodeSessionStore.getState().invalidateDraftRuntime(workspacePath, workspaceIdentity);
   }, [draftConfigRef, modelSelectionView?.revision, sessionId, workspaceIdentity, workspacePath]);
   const recommendStartPlan = useStartPlanRecommendation(modelSelectionView);
+  // Oracle 把关：hook 挂在 pane 层——同一份状态既喂 composer（横幅/盾牌/模型下拉），
+  // 也经 row context 喂轮尾工具栏的「审查这一回合」。模型偏好存 renderer localStorage。
+  const [oracleModel, setOracleModel] = useState<ModelSelection | null>(() =>
+    readStoredOracleModelSelection(),
+  );
+  const handleSelectOracleModel = useCallback((selection: ModelSelection | null) => {
+    setOracleModel(selection);
+    writeStoredOracleModelSelection(selection);
+  }, []);
+  const oracleReview = useOracleReview({
+    snapshot,
+    workspacePath,
+    workspaceIdentity,
+    ...(remoteSessionId ? { remoteSessionId } : {}),
+    oracleModel,
+    modelSelectionView,
+  });
   const createSubmissionFromComposer = useCallback(
     () => createComposerSubmissionConfig(draftConfigRef.current, modelSelectionView),
     [draftConfigRef, modelSelectionView],
@@ -1383,6 +1403,12 @@ export function SessionPane({
   const codePreviewSettings = useZCodeStoreWithDefault(
     (state) => state.codePreviewSettings,
     DEFAULT_CODE_PREVIEW_SETTINGS,
+  );
+  // 会话回合导航开关（默认关闭）：false 时 Timeline 停用 rail、导航专属索引与
+  // 目录补拉；分享与普通向上分页不受影响。
+  const conversationTurnNavigatorEnabled = useZCodeStoreWithDefault(
+    (state) => state.conversationTurnNavigatorEnabled,
+    false,
   );
   // Tier 1 fork 跳转：点 child 会话的 forkNotice → 把当前 pane 原地切到父会话，复用 fork
   // 落地同款 onSessionCreated（primary→setActiveTaskId、分屏→bindPaneSession）。rowId 预留
@@ -1868,17 +1894,6 @@ export function SessionPane({
     },
     [onOpenWorkflowRunDirectory, remoteSessionId, workspaceIdentity, workspacePath],
   );
-  // composer「工作流」标记 chip 的入口：chip 只说「打开」，会话与 workspace 身份在这里补齐
-  // （同 run 目录页的约定）。草稿会话没有 sessionId，回调直接不返回，chip 在 composer 侧缺席。
-  const handleOpenWorkflowStageFromComposer = useCallback(() => {
-    if (!sessionId) return;
-    onOpenWorkflowStage?.({
-      parentSessionId: sessionId,
-      workspacePath,
-      ...(workspaceIdentity ? { workspaceIdentity } : {}),
-      ...(remoteSessionId ? { remoteSessionId } : {}),
-    });
-  }, [onOpenWorkflowStage, remoteSessionId, sessionId, workspaceIdentity, workspacePath]);
   const handleAddSelectionToCurrentTask = useCallback(
     (reference: ConversationSelectionReference) => {
       if (!sessionId) return;
@@ -2228,6 +2243,11 @@ export function SessionPane({
       workflowGraphByToolCallId,
       workflowDraftByToolCallId,
       fetchFileChanges: handleFetchFileChanges,
+      // 轮尾审查入口是用户显式发起的手动审查，不受 oracleReviewEnabled 门控：
+      // 该开关只控「回合成功后的自动把关」（见 useOracleReview 的 completedSuccess 边沿）。
+      reviewTurn: oracleReview.reviewTurnHeader,
+      reviewTurnDeep: oracleReview.reviewTurnHeaderDeep,
+      oracleReviewPending: oracleReview.state.status === "pending",
       previewFileRewind: workspaceFileRewindEnabled ? handlePreviewFileRewind : undefined,
       applyFileRewind: workspaceFileRewindEnabled ? handleApplyFileRewind : undefined,
       readAttachment: attachmentRead,
@@ -2239,6 +2259,9 @@ export function SessionPane({
       workspaceIdentity,
       remoteSessionId,
       modelSelectionView,
+      oracleReview.reviewTurnHeader,
+      oracleReview.reviewTurnHeaderDeep,
+      oracleReview.state.status,
       snapshot?.logEpoch,
       theme,
       codePreviewSettings,
@@ -3641,25 +3664,44 @@ export function SessionPane({
     return lease?.store.loadOlder();
   }, [lease]);
 
-  const handleLoadAllOlder = useCallback(() => {
-    return lease
-      ? lease.store.loadAllOlder()
-      : Promise.resolve({
-          status: "stale" as const,
-          logEpoch: snapshot?.logEpoch ?? "unknown",
-        });
-  }, [lease, snapshot?.logEpoch]);
+  // 导航目录补拉：以 navigator 身份持有需求；signal 由 Timeline per-attempt
+  // controller 提供，资格撤销/卸载即 abort，store 据此停止后续分页。
+  const handleLoadAllOlder = useCallback(
+    (signal: AbortSignal) => {
+      return lease
+        ? lease.store.loadAllOlder({ consumer: "navigator", signal })
+        : Promise.resolve({
+            status: "stale" as const,
+            logEpoch: snapshot?.logEpoch ?? "unknown",
+          });
+    },
+    [lease, snapshot?.logEpoch],
+  );
 
   useEffect(() => {
     if (!shareActive || !sessionId || !hasOlderRows(snapshot)) return;
     const key = `${sessionId}:${snapshot?.logEpoch ?? "unknown"}`;
     if (shareHydratedSessionRef.current === key) return;
+    // 分享是独立需求方（consumer: "share"）：导航关闭/退出不能取消分享补齐；
+    // 且只有确认完整历史已就绪（hydrated）才保留成功标记——旧实现先记账后清理，
+    // busy/stale 返回时会把未完成的补齐误标成已加载。
     shareHydratedSessionRef.current = key;
-    void handleLoadAllOlder().catch((error) => {
-      shareHydratedSessionRef.current = null;
-      logger.warn("[conversation-share] 补齐分享目录失败", { error });
+    const controller = new AbortController();
+    void (lease
+      ? lease.store.loadAllOlder({ consumer: "share", signal: controller.signal })
+      : Promise.resolve({
+          status: "stale" as const,
+          logEpoch: snapshot?.logEpoch ?? "unknown",
+        })
+    ).then((result) => {
+      if (controller.signal.aborted) return;
+      if (result.status === "hydrated") return;
+      // stale / retryable-failure / not-enough-queries：不留成功标记，
+      // 依赖变化后重试；新一次 job 携 share owner 时会完整提交。
+      if (shareHydratedSessionRef.current === key) shareHydratedSessionRef.current = null;
     });
-  }, [handleLoadAllOlder, sessionId, shareActive, snapshot]);
+    return () => controller.abort();
+  }, [lease, sessionId, shareActive, snapshot]);
 
   useEffect(() => {
     if (
@@ -4384,6 +4426,21 @@ export function SessionPane({
       // Snapshot 仍服务用量、路由与运行态；工具栏的 mode/model 只读下方 Composer Draft。
       snapshot={snapshot}
       sessionId={sessionId}
+      oracleReview={{
+        state: oracleReview.state,
+        enabled: oracleReview.enabled,
+        pendingElapsedSeconds: oracleReview.pendingElapsedSeconds,
+        pendingOutputChars: oracleReview.pendingOutputChars,
+        manualReview: oracleReview.manualReview,
+        deepReview: oracleReview.deepReview,
+        reviewTurnHeader: oracleReview.reviewTurnHeader,
+        reviewTurnHeaderDeep: oracleReview.reviewTurnHeaderDeep,
+        retryReview: oracleReview.retryReview,
+        dismiss: oracleReview.dismiss,
+        acknowledge: oracleReview.acknowledge,
+        model: oracleModel,
+        onSelectModel: handleSelectOracleModel,
+      }}
       // 草稿 taskId 仍为 null，但 prewarm 已经拥有独立 AgentRuntime。
       // 只给 Skill catalog 下发 effective id，避免 UI 扫到 prewarm runtime 尚未加载的新 Skill。
       skillCatalogSessionId={effectiveSessionId}
@@ -4429,9 +4486,6 @@ export function SessionPane({
       onSelectModel={handleSelectModel}
       onSelectThought={handleSelectThought}
       onSwitchMode={handleSwitchMode}
-      onOpenWorkflowStage={
-        sessionId ? handleOpenWorkflowStageFromComposer : undefined
-      }
       onOpenRunningBackgroundWorks={
         sessionId && runningBackgroundWorkCount > 0 ? handleOpenRunningBackgroundWorks : undefined
       }
@@ -4525,6 +4579,15 @@ export function SessionPane({
           onDismiss={quotaBanner.dismiss}
         />
       ) : null}
+      {snapshot?.config.provider ? (
+        // 5 小时窗口剩余 ≤10% 时弹「使用重置卡」小提示。
+        // 组件自持检测（账号访问缺失即休眠）与展示状态（同窗口只弹一次）。
+        <CodingPlanQuotaResetPrompt
+          providerId={snapshot.config.provider}
+          usageStatsService={baseWorkspaceServices.usageStatsService}
+          phase={snapshot?.control.phase ?? null}
+        />
+      ) : null}
       {recoverableCommand ? (
         <PendingCommandRecoveryBanner
           entry={recoverableCommand}
@@ -4567,6 +4630,7 @@ export function SessionPane({
           remoteSessionId={remoteSessionId ?? undefined}
           provider={provider}
           snapshot={snapshot}
+          modelSelectionView={modelSelectionView}
         />
       ) : null}
       {composerNode}
@@ -4774,6 +4838,7 @@ export function SessionPane({
               turnNavigatorDirectoryRevision={state.turnNavigatorDirectoryRevision}
               bottomDock={conversationBottomDock}
               hideTurnNavigator={shareActive && shareInSelectionStage}
+              turnNavigatorEnabled={conversationTurnNavigatorEnabled}
               backgroundScrollLocked={resolveConversationShareBackgroundScrollLocked({
                 partialShareActive: shareActive,
                 stage: shareDraft?.stage ?? "selection",

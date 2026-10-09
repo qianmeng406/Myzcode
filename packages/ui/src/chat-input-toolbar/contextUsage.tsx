@@ -51,6 +51,11 @@ import {
   hasChatStartPlanBalance,
   type ChatStartPlanBalanceConfig,
 } from "@/chat-input-toolbar/StartPlanContextBalance.js";
+import {
+  ChatCommandCodeQuotaPanel,
+  hasChatCommandCodeQuota,
+  type ChatCommandCodeQuotaConfig,
+} from "@/chat-input-toolbar/CommandCodeContextQuota.js";
 import { runContextPanelActionWithClose } from "@/chat-input-toolbar/contextPanelAction.js";
 import { coordinateCodingPlanQuotaResetAutoPlay } from "@/chat-input-toolbar/codingPlanQuotaResetAutoPlay.js";
 import { formatCompactTokenNumber } from "@/lib/tokenNumberFormat.js";
@@ -235,6 +240,7 @@ function resolveAutomaticCompletedAt(entry: CodingPlanQuotaResetUiEntry | null):
 export function ChatContextUsage({
   codingPlanUsageRemaining,
   startPlanBalance,
+  commandCodeQuota,
   taskUsage,
   selectedProvider: _selectedProvider,
   intl,
@@ -242,6 +248,8 @@ export function ChatContextUsage({
 }: {
   codingPlanUsageRemaining?: ChatCodingPlanUsageRemainingConfig;
   startPlanBalance?: ChatStartPlanBalanceConfig;
+  /** Command Code（网关渠道）额度：按选中渠道自己的 key 查询，与套餐类来源并列。 */
+  commandCodeQuota?: ChatCommandCodeQuotaConfig;
   taskUsage: {
     used: number;
     size: number;
@@ -274,7 +282,10 @@ export function ChatContextUsage({
       // hover 刷新入口不能只认 Coding Plan 的 onAccess：Start Plan（今日余额）与
       // Coding Plan 连接方式互斥，start plan 用户 hover 时整条刷新链路都不触发，余额只能被动等
       // 设置页/侧栏刷新。改为两段配置任一提供 onAccess 即发起本次静默 access 刷新（互斥下实际只有一个存在）。
-      const accessRefresh = codingPlanUsageRemaining?.onAccess ?? startPlanBalance?.onAccess;
+      const accessRefresh =
+        codingPlanUsageRemaining?.onAccess ??
+        startPlanBalance?.onAccess ??
+        commandCodeQuota?.onAccess;
       if (!open || !accessRefresh) {
         return;
       }
@@ -289,7 +300,7 @@ export function ChatContextUsage({
         }
       });
     },
-    [codingPlanUsageRemaining?.onAccess, startPlanBalance?.onAccess],
+    [codingPlanUsageRemaining?.onAccess, startPlanBalance?.onAccess, commandCodeQuota?.onAccess],
   );
   const handleQuotaResetDialogOpenChange = useCallback((open: boolean) => {
     quotaResetDialogOpenRef.current = open;
@@ -346,10 +357,33 @@ export function ChatContextUsage({
       },
     };
   }, [startPlanBalance, contextAccessRefreshing]);
+  const commandCodeQuotaWithClose = useMemo<ChatCommandCodeQuotaConfig | undefined>(() => {
+    if (!commandCodeQuota) {
+      return undefined;
+    }
+    const base: ChatCommandCodeQuotaConfig = {
+      ...commandCodeQuota,
+      // 网关额度同样是 hover 静默刷新，标题旁 spinner 要跟随本次 promise，而不是只有显式加载态。
+      refreshing: contextAccessRefreshing || commandCodeQuota.refreshing === true,
+    };
+    if (!commandCodeQuota.onOpenDashboard) {
+      return base;
+    }
+
+    return {
+      ...base,
+      onOpenDashboard: () =>
+        runContextPanelActionWithClose({
+          action: commandCodeQuota.onOpenDashboard,
+          close: () => setContextOpen(false),
+        }),
+    };
+  }, [commandCodeQuota, contextAccessRefreshing]);
   const hasCodingPlanUsageRemaining = codingPlanUsageRemainingWithClose
     ? hasChatCodingPlanUsageRemaining(codingPlanUsageRemainingWithClose)
     : false;
   const hasStartPlanBalance = hasChatStartPlanBalance(startPlanBalanceWithClose);
+  const hasCommandCodeQuota = hasChatCommandCodeQuota(commandCodeQuotaWithClose);
 
   // 自动重置：触发器和面板复用同一完整 Personal/Team scope；共享 in-flight 避免重复请求。
   const resetCodingPlanState = useMemo(
@@ -818,7 +852,8 @@ export function ChatContextUsage({
   if (
     (!renderableTaskUsage || !contextUsageLabel) &&
     !hasCodingPlanUsageRemaining &&
-    !hasStartPlanBalance
+    !hasStartPlanBalance &&
+    !hasCommandCodeQuota
   ) {
     return null;
   }
@@ -836,7 +871,7 @@ export function ChatContextUsage({
     : null;
   const triggerLabel =
     contextUsageLabel ??
-    (hasCodingPlanUsageRemaining
+    (hasCodingPlanUsageRemaining || hasCommandCodeQuota
       ? intl.formatMessage({ id: "sidebar.usage.plan.title" })
       : intl.formatMessage({
           id: "settings.modelProvider.startPlan.balance.title",
@@ -1003,6 +1038,18 @@ export function ChatContextUsage({
               locale={locale}
               separated={Boolean(
                 (renderableTaskUsage && compactTokenUsageLabel) || hasCodingPlanUsageRemaining,
+              )}
+            />
+          ) : null}
+          {commandCodeQuotaWithClose && hasCommandCodeQuota ? (
+            <ChatCommandCodeQuotaPanel
+              config={commandCodeQuotaWithClose}
+              intl={intl}
+              locale={locale}
+              separated={Boolean(
+                (renderableTaskUsage && compactTokenUsageLabel) ||
+                hasCodingPlanUsageRemaining ||
+                hasStartPlanBalance,
               )}
             />
           ) : null}

@@ -44,9 +44,16 @@ const ZCODE_AGENT_MODE_OPTIONS = [
     description: "Read-only web research across docs, code Q&A, and academic sources.",
   },
   {
-    id: "workflow",
-    name: "Project development mode",
-    description: "Document-driven delivery with staged gates and adversarial review; commands and edits run without confirmation.",
+    id: "minimal",
+    name: "Minimal mode",
+    description:
+      "Send only the system tools with a bare identity line and working directory, and run commands and edits without confirmation; no skills, memory, project instructions, or MCP tools.",
+  },
+  {
+    id: "zcodeUpdate",
+    name: "ZCode update mode",
+    description:
+      "Track upstream ZCode releases: fetch each version's diff, judge relevance, re-implement locally, then verify.",
   },
   {
     id: "yolo",

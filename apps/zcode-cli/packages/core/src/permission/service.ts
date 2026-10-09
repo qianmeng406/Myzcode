@@ -164,16 +164,27 @@ export class PermissionService {
       );
     }
 
-    // workflow（项目开发模式）：命令与文件修改自动执行、不逐次确认（交付纪律由 reminder
-    // 承担），但**排在 disallowedTools 与项目 deny 之后**——用户显式配置的禁用清单是比
-    // 「完整权限」更强的意图表达，必须照旧生效；项目 ask 规则不生效（该模式的定义就是
-    // 不打断）。yolo 保持既有位置不动：这是本模式与 yolo 唯一的语义差，别把两者合并。
-    if (context.mode === "workflow" && !planEnabled) {
+    // ZCode 更新模式：命令与文件修改自动执行、不逐次确认（纪律由 SOP reminder 与台账
+    // 承担），**排在 disallowedTools 与项目 deny 之后**，项目 ask 规则不生效。跟随官方
+    // 发布要连续跑 git fetch/diff 与多轮改动，逐次确认会让整条流程断在半途。
+    if (context.mode === "zcodeUpdate" && !planEnabled) {
       return this.allow(
         context,
         capability,
-        "mode.workflow",
-        "Workflow mode executes commands and edits without per-action prompts",
+        "mode.zcodeUpdate",
+        "ZCode update mode executes commands and edits without per-action prompts",
+      );
+    }
+
+    // 极简模式：上下文极简 + 权限也极简——自动执行、不逐次确认，排在 disallowedTools 与
+    // 项目 deny 之后（同 workflow 姿态）。注意该模式刻意不发任何 reminder，也没有身份
+    // 行为段与技能清单，所以这里放行后**没有任何护栏文本**，这是模式定义本身的取舍。
+    if (context.mode === "minimal" && !planEnabled) {
+      return this.allow(
+        context,
+        capability,
+        "mode.minimal",
+        "Minimal mode executes commands and edits without per-action prompts",
       );
     }
 

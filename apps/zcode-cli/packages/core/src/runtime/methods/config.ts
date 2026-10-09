@@ -29,6 +29,7 @@ import { applyRuntimeExecutionState } from "../execution-state.js";
 
 import { orderProviderVisibleToolContracts } from "../../tool/provider-visible-order.js";
 import { projectToolModelContract } from "../../tool/model-contract.js";
+import { isMcpToolName } from "../../mcp/name.js";
 import { rebuildContextPrefix } from "./context-refresh.js";
 import { filterEmbeddedSearchRuntimeVisibleTools } from "./embedded-search-branch.js";
 import {
@@ -55,6 +56,13 @@ export function updateConfig(
     Object.assign(this.config, next);
     if (previous.planEnabled !== next.planEnabled)
       this.needsPlanModeExitReminder = !next.planEnabled;
+    // 极简模式的提示词档位与工具表都在「构建时」读 mode：只改 config 不重建的话，
+    // 本次请求仍会带上一档位的 system 段与工具表，用户看到的切换就是不生效。
+    // 其他模式不带提示词/工具差异，重建是无副作用的（与 language / outputStyle 同一条路）。
+    if (previous.mode !== next.mode && !this.activeTurn) {
+      this.invalidateToolCache();
+      rebuildContextPrefix(this);
+    }
   }
   if (patch.language !== undefined) {
     this.config.language = patch.language;
@@ -260,9 +268,31 @@ function filterRuntimeVisibleTools(
   this: AgentRuntimeInternal,
   tools: ModelToolContract[],
 ): ModelToolContract[] {
-  const visibleTools = filterEmbeddedSearchRuntimeVisibleTools(this, tools);
+  const minimalFiltered = filterMinimalProfileRuntimeVisibleTools(this, tools);
+  const visibleTools = filterEmbeddedSearchRuntimeVisibleTools(this, minimalFiltered);
   // provider-visible 工具顺序属于最终输出边界；toolset 只决定可见工具集合。
   return orderProviderVisibleToolContracts(visibleTools);
+}
+
+/**
+ * Skill 工具的注册名（与 tool/handlers/skill.ts 的 metadata.name 同字面；contracts 没有常量）。
+ * 与 context/builder.ts 的同名常量重复：核心既有惯例就是各处按字面比较这个工具名。
+ */
+const SKILL_TOOL_NAME = "Skill";
+
+/**
+ * 极简模式（mode=minimal）：工具表只留内置工具，摘掉全部 MCP 工具与 Skill 工具。
+ *
+ * 在这里按名过滤而不是只靠注册期短路：MCP 注册与 Skill 工具都是「运行期只做一次」的，
+ * 中途从别的模式切进极简时它们已经在注册表里了，只靠 mcp.ts 的启动短路收不回来。
+ * 配合 updateConfig 在 mode 变化时 invalidateToolCache，切换即时生效。
+ */
+export function filterMinimalProfileRuntimeVisibleTools(
+  runtime: AgentRuntimeInternal,
+  tools: ModelToolContract[],
+): ModelToolContract[] {
+  if (runtime.config.mode !== "minimal") return tools;
+  return tools.filter((tool) => tool.name !== SKILL_TOOL_NAME && !isMcpToolName(tool.name));
 }
 
 function shouldExposeWebSearch(this: AgentRuntimeInternal, model?: Model): boolean {

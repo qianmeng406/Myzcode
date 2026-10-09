@@ -159,6 +159,12 @@ export type ServiceChannelName = (typeof ServiceChannels)[keyof typeof ServiceCh
 
 /** Electron IPC 频道名。仅在 preload ↔ main 之间使用。 */
 export const PlatformChannels = {
+  /** Renderer → Main：读取 My zcode 桌面直连配置（节点令牌不回传 renderer） */
+  CompanionGetConfig: "zcode:companion-get-config",
+  /** Renderer → Main：更新 My zcode 桌面直连配置（启用/网关/令牌/开放工作区白名单） */
+  CompanionSetConfig: "zcode:companion-set-config",
+  /** Renderer → Main：用已存节点令牌向 gateway 索取一次性配对码 */
+  CompanionPairingCode: "zcode:companion-pairing-code",
   /** 打开系统目录选择框 */
   SelectDirectory: "zcode:select-directory",
   /** 打开系统文件选择框 */
@@ -284,6 +290,8 @@ export const PlatformChannels = {
   OpenInFileManager: "zcode:open-in-file-manager",
   /** Renderer → Main：使用系统默认应用打开本地文件 */
   OpenExternalFile: "zcode:open-external-file",
+  /** Renderer → Main：把本地文件复制进系统剪贴板（可在文件管理器粘贴） */
+  CopyFileToClipboard: "zcode:copy-file-to-clipboard",
   /** Renderer → Main：打开 ZCode Computer Use 权限引导 */
   OpenCuaPermissionOnboarding: "zcode:open-cua-permission-onboarding",
   /** Renderer → Main：取消当前 renderer 发起的一次权限引导 participant */
@@ -872,6 +880,10 @@ export interface PlatformChannelMap {
     response: { success: boolean; error?: string };
   };
   [PlatformChannels.OpenExternalFile]: {
+    request: string;
+    response: { success: boolean; error?: string };
+  };
+  [PlatformChannels.CopyFileToClipboard]: {
     request: string;
     response: { success: boolean; error?: string };
   };

@@ -11,5 +11,6 @@ export const zcodeTaskModeSchema = z.enum([
   "autoEdit",
   "build",
   "research",
-  "workflow",
+  "minimal",
+  "zcodeUpdate",
 ]);

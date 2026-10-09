@@ -119,6 +119,15 @@
       "sourceUrl": "https://avatars.githubusercontent.com/u/130314967?v=4",
       "sourceOwner": "xAI",
       "normalization": "Official GitHub organization avatar downsampled from 460x460 to 80x80 RGB."
+    },
+    {
+      "brand": "Command Code",
+      "file": "model-provider-command-code-light.svg",
+      "darkFile": "model-provider-command-code-dark.svg",
+      "providerIds": ["command-code"],
+      "sourceUrl": "",
+      "sourceOwner": "ZCode 本地分支自绘",
+      "normalization": "占位标识：本仓库自绘的圆角方框 + 终端提示符，不是 Command Code 官方 logo。拿到官方素材后应替换这两个文件，并在此登记真实来源与授权。"
     }
   ]
 }

@@ -44,7 +44,9 @@ export function startMcpStartup(
   if (this.mcpInitialized) return this.mcpStartupPromise;
   this.mcpInitialized = true;
 
-  if (!this.mcpPort || this.config.mcp?.enabled === false) {
+  // 极简模式不下发任何 MCP 工具：走「未启用」同一短路，registerMcpTools 根本不跑。
+  // 不走工具拒绝表那条路——通用 allow/deny 匹配是精确名，`mcp__*` 通配在这里不成立。
+  if (!this.mcpPort || this.config.mcp?.enabled === false || this.config.mode === "minimal") {
     this.mcpToolsRegistered = true;
     return undefined;
   }

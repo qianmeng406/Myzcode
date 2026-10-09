@@ -34,7 +34,6 @@ import type {
   OpenScopedWorkflowArtifactSideTabRequest,
   OpenScopedWorkflowRunSideTabRequest,
   OpenScopedWorkflowRunDirectorySideTabRequest,
-  OpenScopedWorkflowStageSideTabRequest,
   OpenScopedWorkflowWorkspaceSideTabRequest,
   SyncSubagentSessionTabsRequest,
 } from "@/lib/workspaceSidePane.js";
@@ -293,7 +292,6 @@ export interface WorkbenchShellBinding {
   onOpenWorkflowRun?: (request: OpenScopedWorkflowRunSideTabRequest) => void;
   onOpenWorkflowArtifact?: (request: OpenScopedWorkflowArtifactSideTabRequest) => void;
   onOpenWorkflowRunDirectory?: (request: OpenScopedWorkflowRunDirectorySideTabRequest) => void;
-  onOpenWorkflowStage?: (request: OpenScopedWorkflowStageSideTabRequest) => void;
   onOpenWorkflowActorSession?: (request: OpenScopedWorkflowActorSessionSideTabRequest) => void;
   onOpenWorkflowWorkspace?: (request: OpenScopedWorkflowWorkspaceSideTabRequest) => void;
   conversationFindQuery?: string;
@@ -606,7 +604,6 @@ export function WorkbenchLeafPane({
           onOpenWorkflowRun={shell.onOpenWorkflowRun}
           onOpenWorkflowArtifact={shell.onOpenWorkflowArtifact}
           onOpenWorkflowRunDirectory={shell.onOpenWorkflowRunDirectory}
-          onOpenWorkflowStage={shell.onOpenWorkflowStage}
           onOpenWorkflowActorSession={shell.onOpenWorkflowActorSession}
           onOpenWorkflowWorkspace={shell.onOpenWorkflowWorkspace}
           conversationFindQuery={focused ? shell.conversationFindQuery : ""}
