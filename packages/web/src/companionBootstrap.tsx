@@ -7,6 +7,10 @@
 import { CompanionClient, type CompanionRelayChannel } from "@zcode/companion/client";
 import type { CompanionCatalogResult } from "@zcode/shared/companion-protocol";
 import { AppErrorBoundary, Root, ZCodeIntlProvider } from "@zcode/ui";
+import {
+  setCompanionSharedWorkspaces,
+  type CompanionWorkspaceRef,
+} from "@zcode/ui/companion-workspace-visibility";
 import { createRoot } from "react-dom/client";
 import { createWebPlatform } from "./webPlatform.js";
 import { renderCompanionTargetPicker } from "./companionTargetPicker.js";
@@ -323,6 +327,33 @@ export async function bootstrapCompanionApp(): Promise<void> {
   await runCompanionBoot(config);
 }
 
+/**
+ * 把 gateway 目录里目标节点的共享工作区集合注入 UI（未共享工作区在手机端不可见，
+ * specs §A4 存在性不泄露）。目标自身强制纳入，避免键法差异把当前 attach 的工作区滤掉。
+ */
+function applyCompanionWorkspaceVisibility(
+  catalog: CompanionCatalogResult,
+  target: BootTarget,
+): void {
+  const entries: CompanionWorkspaceRef[] = [];
+  for (const node of catalog.nodes) {
+    if (node.nodeId !== target.nodeId) continue;
+    for (const workspace of node.workspaces) {
+      entries.push({
+        workspacePath: workspace.workspacePath,
+        ...(workspace.workspaceIdentity
+          ? { workspaceIdentity: workspace.workspaceIdentity }
+          : {}),
+      });
+    }
+  }
+  entries.push({
+    workspacePath: target.workspacePath,
+    ...(target.workspaceIdentity ? { workspaceIdentity: target.workspaceIdentity } : {}),
+  });
+  setCompanionSharedWorkspaces(entries);
+}
+
 async function runCompanionBoot(config: CompanionWebConfig): Promise<void> {
   let client: CompanionClient | null = null;
   try {
@@ -337,11 +368,11 @@ async function runCompanionBoot(config: CompanionWebConfig): Promise<void> {
           TARGET_KEY,
           JSON.stringify({ nodeId: picked.nodeId, workspacePath: picked.workspacePath, workspaceIdentity: picked.workspaceIdentity }),
         );
-        void attachAndRender(client!, config, picked);
+        void attachAndRender(client!, config, picked, catalog);
       }, renderCompanionTree);
       return;
     }
-    await attachAndRender(client, config, target);
+    await attachAndRender(client, config, target, catalog);
   } catch (error) {
     // 引导失败关闭控制面连接；状态屏重试整段重跑（保持记住的目标）。
     client?.close();
@@ -357,7 +388,11 @@ async function attachAndRender(
   client: CompanionClient,
   config: CompanionWebConfig,
   target: BootTarget,
+  catalog: CompanionCatalogResult,
 ): Promise<void> {
+  // 目录（共享集合）先行注入：Root 恢复 Host 标签会话时就会带上未共享工作区，
+  // 过滤必须在首帧渲染前生效，避免先显示再消失。
+  applyCompanionWorkspaceVisibility(catalog, target);
   let relay: CompanionRelayChannel | null = null;
   let workspace: { path: string; identity?: string };
   try {

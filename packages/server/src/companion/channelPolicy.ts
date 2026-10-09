@@ -4,6 +4,10 @@
 // 宿主写方法永不下发手机（specs §11.3）：写需求走 v4 命令通道。
 import type { Event, IChannel, IServerChannel } from "@zcode/rpc";
 import { ServiceChannels } from "@zcode/shared";
+import {
+  CONTROLLER_TASKS_INDEX_TOPIC,
+  CONTROLLER_WORKSPACES_TOPIC,
+} from "@zcode/shared/zcode-protocol-v4";
 
 export type ChannelPolicy =
   | { kind: "passthrough" }
@@ -12,12 +16,17 @@ export type ChannelPolicy =
       calls: ReadonlySet<string>;
       /**
        * 事件面白名单。缺省 = 沿用既有语义（事件原样转发），仅用于既有 T1 只读频道；
-       * 显式给出空集合 = 该频道不得建立任何事件转发。window-controller 必须用空集合：
-       * 它的 controller 帧是宿主投影的跨工作区事实流，会带上未共享工作区的任务元数据。
+       * 显式给出空集合 = 该频道不得建立任何事件转发。
        */
       events?: ReadonlySet<string>;
     }
   | { kind: "task-scoped" }
+  /**
+   * window-controller 专用：只读任务列表 + 跨工作区任务索引帧流（specs §11.4.1）。
+   * 帧是宿主投影的全量事实流，必须先按 attachment 的共享集合过滤再下发手机——
+   * 未过滤会把未共享工作区的任务/工作区事实直接推给设备。
+   */
+  | { kind: "controller-readonly" }
   | { kind: "deny" };
 
 /** file 只读面（specs §11.2）：文件树/差异/预览所需的全部读方法；写方法不入表。 */
@@ -103,18 +112,12 @@ export const COMPANION_CHANNEL_POLICIES: Readonly<Record<string, ChannelPolicy>>
       "getBotStates",
     ]),
   },
-  // window-controller：只放行**只读任务列表**（specs §11.4 只读任务索引的手机侧读面）。
+  // window-controller：只读任务列表 + 任务索引帧流（specs §11.4 只读任务索引的手机侧读面）。
   // 侧栏的每工作区任务行来自这条磁盘链路（tasks-index 持久化，不需要该工作区的
-  // agent 运行时在跑）；被整体拒绝时手机上除已 attach 工作区外全部显示「暂无任务」。
-  // 写方法（mutateTask / deleteArchivedTask(s)）与跨工作区事件订阅
-  // （subscribeControllerV4 / onDynamicControllerFrame）一律 T0：前者是宿主写面，
-  // 后者会把未共享工作区的任务事实推给手机。listTaskList 的响应范围由
-  // shapeArgsWithScope 收窄到 attachment 的共享工作区集合。
-  [ServiceChannels.WindowController]: {
-    kind: "allow-calls",
-    calls: new Set(["listTaskList"]),
-    events: new Set([]),
-  },
+  // agent 运行时在跑）；帧流是侧栏跨工作区活度（增删/置顶/归档/运行状态）的实时镜像源。
+  // 写方法（mutateTask / deleteArchivedTask(s)）一律 T0。listTaskList 的响应范围由
+  // shapeArgsWithScope 收窄；帧内容由 ControllerReadonlyChannel 按共享集合过滤。
+  [ServiceChannels.WindowController]: { kind: "controller-readonly" },
   // onboarding-record：只读判定面（shouldOnboard/getLatestEntry/getRecords/
   // syncSettingsFromRecord）。被拒会让 Root 的引导判定回退成“需要引导”，
   // 把主界面拦在向导上。record/append/dismiss/clear 等写方法永 T0
@@ -422,6 +425,188 @@ class TaskScopedChannel implements IServerChannel {
   }
 }
 
+// ── window-controller 只读面（specs §11.4.1 跨工作区活度帧）──
+
+interface ControllerFrameLike {
+  topic?: unknown;
+  subscriptionId?: unknown;
+  logEpoch?: unknown;
+  fromSeq?: unknown;
+  toSeq?: unknown;
+  payload?: unknown;
+}
+
+interface ControllerAddressLike {
+  workspacePath?: unknown;
+  workspaceIdentity?: unknown;
+  remoteSessionId?: unknown;
+}
+
+/** 帧内出现的 workspace 目标（task address / workspace fact / removed delta）是否命中共享集合。 */
+function isSharedFrameTarget(target: ControllerAddressLike | null | undefined, scope: PolicyWorkspaceScope): boolean {
+  if (!target || typeof target !== "object") return false;
+  const path = typeof target.workspacePath === "string" ? target.workspacePath : "";
+  const identity = typeof target.workspaceIdentity === "string" ? target.workspaceIdentity : undefined;
+  return isSharedWorkspaceTarget(path, identity, scope);
+}
+
+/**
+ * 把宿主 controller 帧过滤到 attachment 的共享工作区集合。
+ * - 只改 payload 里的行/delta 内容；帧封套（subscriptionId/logEpoch/fromSeq/toSeq/sentAt）
+ *   原样保留——seq 连续性是客户端 gap 检测与 resync 的依据，绝不能因过滤而断链。
+ * - 增量全部被滤掉时仍转发空增量帧（客户端按 no-op 处理），同样是保 seq 连续性。
+ * - 无法识别的帧形状整体丢弃（fail-closed）并留痕；客户端会当作 gap 触发 resync 自愈。
+ * 返回 null = 该帧不得下发。
+ */
+export function filterControllerFrameToShared<T>(
+  frame: T,
+  scope: PolicyWorkspaceScope,
+  logReject?: (message: string) => void,
+): T | null {
+  const sharedKnown = (scope.sharedWorkspaces?.length ?? 0) > 0;
+  if (!sharedKnown) return null;
+  const record = frame as unknown as ControllerFrameLike;
+  if (!record || typeof record !== "object" || typeof record.topic !== "string") {
+    logReject?.("controller frame dropped: unrecognizable shape");
+    return null;
+  }
+  const payload = record.payload as
+    | { kind?: unknown; snapshot?: unknown; deltas?: unknown }
+    | null
+    | undefined;
+  if (!payload || typeof payload !== "object" || typeof payload.kind !== "string") {
+    logReject?.(`controller frame dropped: unknown payload (${record.topic})`);
+    return null;
+  }
+
+  if (record.topic === CONTROLLER_TASKS_INDEX_TOPIC) {
+    if (payload.kind === "snapshot") {
+      const snapshot = payload.snapshot as { tasks?: unknown } | null;
+      if (!snapshot || !Array.isArray(snapshot.tasks)) {
+        logReject?.("controller frame dropped: malformed tasks snapshot");
+        return null;
+      }
+      const tasks = snapshot.tasks.filter((row) =>
+        isSharedFrameTarget((row as { address?: ControllerAddressLike } | null)?.address, scope),
+      );
+      return { ...(frame as object), payload: { kind: "snapshot", snapshot: { ...snapshot, tasks } } } as T;
+    }
+    if (payload.kind === "deltas") {
+      const deltas = Array.isArray(payload.deltas) ? payload.deltas : null;
+      if (!deltas) {
+        logReject?.("controller frame dropped: malformed tasks deltas");
+        return null;
+      }
+      const kept = deltas.filter((delta) =>
+        isSharedFrameTarget(
+          (delta as { address?: ControllerAddressLike; task?: { address?: ControllerAddressLike } } | null)
+            ?.task?.address ??
+            (delta as { address?: ControllerAddressLike } | null)?.address,
+          scope,
+        ),
+      );
+      return { ...(frame as object), payload: { kind: "deltas", deltas: kept } } as T;
+    }
+    logReject?.(`controller frame dropped: unknown tasks payload kind (${String(payload.kind)})`);
+    return null;
+  }
+
+  if (record.topic === CONTROLLER_WORKSPACES_TOPIC) {
+    if (payload.kind === "snapshot") {
+      const snapshot = payload.snapshot as { workspaces?: unknown } | null;
+      if (!snapshot || !Array.isArray(snapshot.workspaces)) {
+        logReject?.("controller frame dropped: malformed workspaces snapshot");
+        return null;
+      }
+      const workspaces = snapshot.workspaces.filter((fact) => isSharedFrameTarget(fact, scope));
+      return {
+        ...(frame as object),
+        payload: { kind: "snapshot", snapshot: { ...snapshot, workspaces } },
+      } as T;
+    }
+    if (payload.kind === "deltas") {
+      const deltas = Array.isArray(payload.deltas) ? payload.deltas : null;
+      if (!deltas) {
+        logReject?.("controller frame dropped: malformed workspaces deltas");
+        return null;
+      }
+      const kept = deltas.filter((delta) =>
+        isSharedFrameTarget(
+          (delta as { workspace?: ControllerAddressLike } | null)?.workspace ?? (delta as ControllerAddressLike),
+          scope,
+        ),
+      );
+      return { ...(frame as object), payload: { kind: "deltas", deltas: kept } } as T;
+    }
+    logReject?.(`controller frame dropped: unknown workspaces payload kind (${String(payload.kind)})`);
+    return null;
+  }
+
+  logReject?.(`controller frame dropped: unknown topic (${record.topic})`);
+  return null;
+}
+
+/**
+ * window-controller 的手机读面：只读任务列表 + 按 topic 订阅任务索引帧流。
+ * - `listTaskList` 走 shapeArgsWithScope（workspaceScopes[] 按共享集合收窄）；
+ * - 订阅/续订/退订参数是 `.strict()` schema（topic/subscriptionId/seq），
+ *   绝不能注入 workspace 键——原样透传；
+ * - 帧流（onDynamicControllerFrame）逐帧过 filterControllerFrameToShared；
+ * - 写方法（mutateTask / deleteArchivedTask(s)）与方法白名单外一律拒绝。
+ *   帧携带的是任务**列表事实**（标题/成员/活度），据此学习 taskId 允许集会打开
+ *   跨工作区操作面，因此这里刻意不学习——跨工作区操作仍必须先 attach。
+ */
+class ControllerReadonlyChannel implements IServerChannel {
+  private static readonly READ_METHODS = new Set<string>([
+    "listTaskList",
+    "subscribeControllerV4",
+    "resyncControllerV4",
+    "unsubscribeControllerV4",
+  ]);
+  /** 参数需要 workspace 塑形的方法（其余 strict-schema 方法原样透传）。 */
+  private static readonly SHAPED_METHODS = new Set<string>(["listTaskList"]);
+
+  constructor(
+    private readonly upstream: IChannel,
+    private readonly scope: PolicyWorkspaceScope,
+    private readonly logReject: (message: string) => void,
+  ) {}
+
+  async call<T>(_ctx: unknown, command: string, arg?: unknown): Promise<T> {
+    if (!ControllerReadonlyChannel.READ_METHODS.has(command)) {
+      this.logReject(`method not allowed: window-controller.${command}`);
+      throw new Error(`companion facade: method not allowed: window-controller.${command}`);
+    }
+    if (command === "subscribeControllerV4" && !(this.scope.sharedWorkspaces?.length ?? 0)) {
+      // 没有共享集合就无法过滤帧流：宁可拒绝订阅也不下发全量投影。
+      this.logReject("controller subscribe without shared workspace set");
+      throw new Error("companion facade: controller frames require a shared workspace set");
+    }
+    if (ControllerReadonlyChannel.SHAPED_METHODS.has(command)) {
+      return this.upstream.call<T>(
+        command,
+        shapeArgsWithScope(arg, this.scope, (workspacePath) =>
+          this.logReject(`scope outside shared set: ${workspacePath}`),
+        ),
+      );
+    }
+    return this.upstream.call<T>(command, arg);
+  }
+
+  listen<T>(_ctx: unknown, event: string, arg?: unknown): Event<T> {
+    if (event !== "onDynamicControllerFrame") {
+      this.logReject(`event not allowed: window-controller.${event}`);
+      return neverEvent<T>();
+    }
+    const inner = this.upstream.listen<T>(event, arg);
+    return ((listener: (value: T) => void) =>
+      inner((frame: T) => {
+        const filtered = filterControllerFrameToShared(frame, this.scope, this.logReject);
+        if (filtered !== null) listener(filtered);
+      })) as unknown as Event<T>;
+  }
+}
+
 /** 按裁决生成频道 facade：T0 快速失败；T1 白名单外拒绝；事件面仅 T0 关闭。 */
 export function createPolicyChannel(options: {
   channelName: string;
@@ -448,6 +633,9 @@ export function createPolicyChannel(options: {
   }
   if (policy.kind === "task-scoped") {
     return new TaskScopedChannel(upstream, scope, logReject);
+  }
+  if (policy.kind === "controller-readonly") {
+    return new ControllerReadonlyChannel(upstream, scope, logReject);
   }
   const maskResponse = channelName === ServiceChannels.ProviderSettings;
   return {

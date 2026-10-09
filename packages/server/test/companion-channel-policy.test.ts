@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { IChannel } from "@zcode/rpc";
 import { ServiceChannels } from "@zcode/shared";
-import { createPolicyChannel, policyForChannel } from "../src/companion/channelPolicy.js";
+import { createPolicyChannel, filterControllerFrameToShared, policyForChannel } from "../src/companion/channelPolicy.js";
 
 function createRecordingUpstream() {
   const calls: Array<{ command: string; arg: unknown }> = [];
@@ -125,13 +125,8 @@ test("未登记频道默认 T0；裁决表覆盖既定频道", () => {
   assert.equal(policyForChannel("credential").kind, "deny");
   assert.equal(policyForChannel("skills").kind, "deny");
   assert.equal(policyForChannel("nonexistent-channel").kind, "deny");
-  // window-controller 只放行只读任务列表（跨工作区摘要的手机侧读面）。
-  const controllerPolicy = policyForChannel("window-controller");
-  assert.equal(controllerPolicy.kind, "allow-calls");
-  assert.deepEqual(
-    controllerPolicy.kind === "allow-calls" ? [...controllerPolicy.calls] : [],
-    ["listTaskList"],
-  );
+  // window-controller 只读面（列表 + 订阅 + 帧，写面与其它事件拒绝）。
+  assert.equal(policyForChannel("window-controller").kind, "controller-readonly");
   assert.equal(policyForChannel("zcode-task").kind, "task-scoped");
   assert.equal(policyForChannel("bots").kind, "allow-calls");
   assert.equal(policyForChannel("model-selection").kind, "passthrough");
@@ -417,7 +412,7 @@ test("zcode-task：只读列表方法可指向共享集合内其它工作区；�
   );
 });
 
-test("window-controller：只放行 listTaskList；订阅帧与写方法仍 T0", async () => {
+test("window-controller：只读列表/订阅放行；写方法与其它事件仍 T0", async () => {
   const { upstream, calls } = createRecordingUpstream();
   const scope = {
     workspacePath: "/srv/ws",
@@ -446,11 +441,17 @@ test("window-controller：只放行 listTaskList；订阅帧与写方法仍 T0",
     ["/srv/other"],
   );
 
-  // 跨工作区事件帧会把未共享工作区的任务事实推给手机 → 必须整体拒绝。
-  await assert.rejects(
-    () => channel.call("ctx", "subscribeControllerV4", { topic: "controller/tasks-index" }),
-    (error: unknown) => error instanceof Error && error.message.includes("not allowed"),
-  );
+  // 订阅参数是 strict schema：必须原样透传（注入 workspace 键会让订阅解析失败）。
+  const subscribeParams = { topic: "controller/tasks-index", visibility: "foreground" };
+  await channel.call("ctx", "subscribeControllerV4", subscribeParams);
+  assert.deepEqual(calls[1]!.arg, subscribeParams, "订阅参数不得被注入/改写");
+  await channel.call("ctx", "resyncControllerV4", {
+    subscriptionId: "sub-1",
+    base: { logEpoch: "e", seq: 3 },
+    forceSnapshot: true,
+  });
+  await channel.call("ctx", "unsubscribeControllerV4", { subscriptionId: "sub-1" });
+
   // 写面永不下发手机。
   await assert.rejects(
     () => channel.call("ctx", "mutateTask", { address: { workspacePath: "/srv/ws", taskId: "t1" } }),
@@ -460,9 +461,9 @@ test("window-controller：只放行 listTaskList；订阅帧与写方法仍 T0",
     () => channel.call("ctx", "deleteArchivedTasks", { taskIds: ["t1"] }),
     (error: unknown) => error instanceof Error && error.message.includes("not allowed"),
   );
-  assert.equal(calls.length, 1, "仅 listTaskList 到达上游");
-  // 事件面同样关闭：未白名单的事件不得建立转发。
-  const listener = channel.listen("ctx", "onDynamicControllerFrame", undefined) as unknown as {
+  assert.equal(calls.length, 4, "仅四个只读方法到达上游");
+  // 其它事件面关闭。
+  const listener = channel.listen("ctx", "onSomethingElse", undefined) as unknown as {
     (fn: (value: unknown) => void): { dispose(): void };
   };
   let fired = false;
@@ -470,6 +471,187 @@ test("window-controller：只放行 listTaskList；订阅帧与写方法仍 T0",
     fired = true;
   }).dispose();
   assert.equal(fired, false);
+});
+
+test("window-controller：没有共享集合时拒绝订阅（宁可不订阅也不下发全量投影）", async () => {
+  const { upstream, calls } = createRecordingUpstream();
+  const channel = createPolicyChannel({
+    channelName: "window-controller",
+    upstream,
+    policy: policyForChannel("window-controller"),
+    scope: { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
+  });
+  await assert.rejects(
+    () => channel.call("ctx", "subscribeControllerV4", { topic: "controller/tasks-index" }),
+    (error: unknown) =>
+      error instanceof Error && error.message.includes("controller frames require a shared workspace set"),
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("controller 帧过滤：未共享工作区的任务/事实不下发，seq 封套保持连续", async () => {
+  const scope = {
+    workspacePath: "/srv/ws",
+    workspaceIdentity: "/srv/ws",
+    sharedWorkspaces: [
+      { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
+      { workspacePath: "/srv/other", workspaceIdentity: "/srv/other" },
+    ],
+  };
+  const rejects: string[] = [];
+  const logReject = (message: string): void => rejects.push(message);
+
+  // 快照：共享工作区的行保留，未共享的被滤掉；封套字段原样。
+  const snapshotFrame = {
+    topic: "controller/tasks-index",
+    subscriptionId: "sub-1",
+    logEpoch: "epoch-1",
+    fromSeq: 0,
+    toSeq: 5,
+    sentAt: 123,
+    payload: {
+      kind: "snapshot",
+      snapshot: {
+        protocolVersion: 1,
+        logEpoch: "epoch-1",
+        tasks: [
+          { address: { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws", taskId: "t1" } },
+          { address: { workspacePath: "/srv/other", workspaceIdentity: "/srv/other", taskId: "t2" } },
+          { address: { workspacePath: "/etc", workspaceIdentity: "/etc", taskId: "t3" } },
+        ],
+      },
+    },
+  };
+  const filteredSnapshot = filterControllerFrameToShared(snapshotFrame, scope, logReject);
+  assert.ok(filteredSnapshot);
+  assert.equal(filteredSnapshot.payload.snapshot.tasks.length, 2);
+  assert.deepEqual(
+    filteredSnapshot.payload.snapshot.tasks.map((row: { address: { taskId: string } }) => row.address.taskId),
+    ["t1", "t2"],
+  );
+  assert.equal(filteredSnapshot.toSeq, 5, "seq 封套不得因过滤改变");
+  assert.equal(filteredSnapshot.logEpoch, "epoch-1");
+
+  // 增量：task.upserted/task.removed 按 address 过滤；全被滤掉仍转发空增量（保 seq 连续）。
+  const deltaFrame = {
+    topic: "controller/tasks-index",
+    subscriptionId: "sub-1",
+    logEpoch: "epoch-1",
+    fromSeq: 5,
+    toSeq: 8,
+    sentAt: 456,
+    payload: {
+      kind: "deltas",
+      deltas: [
+        { op: "task.upserted", task: { address: { workspacePath: "/etc", taskId: "t3" } } },
+        { op: "task.removed", address: { workspacePath: "/srv/ws", taskId: "t1" } },
+      ],
+    },
+  };
+  const filteredDeltas = filterControllerFrameToShared(deltaFrame, scope, logReject);
+  assert.ok(filteredDeltas);
+  assert.equal(filteredDeltas.payload.deltas.length, 1);
+  assert.equal(filteredDeltas.payload.deltas[0].op, "task.removed");
+  assert.equal(filteredDeltas.toSeq, 8);
+
+  const allForeignFrame = {
+    topic: "controller/tasks-index",
+    subscriptionId: "sub-1",
+    logEpoch: "epoch-1",
+    fromSeq: 8,
+    toSeq: 9,
+    sentAt: 789,
+    payload: { kind: "deltas", deltas: [{ op: "task.upserted", task: { address: { workspacePath: "/etc", taskId: "t9" } } }] },
+  };
+  const filteredAllForeign = filterControllerFrameToShared(allForeignFrame, scope, logReject);
+  assert.ok(filteredAllForeign, "空增量帧仍要转发（客户端按 no-op 处理，seq 不断链）");
+  assert.deepEqual(filteredAllForeign.payload.deltas, []);
+
+  // workspace facts 快照/增量同样收窄。
+  const workspaceFrame = {
+    topic: "controller/workspaces",
+    subscriptionId: "sub-2",
+    logEpoch: "epoch-1",
+    fromSeq: 0,
+    toSeq: 2,
+    sentAt: 1,
+    payload: {
+      kind: "snapshot",
+      snapshot: {
+        protocolVersion: 1,
+        logEpoch: "epoch-1",
+        workspaces: [
+          { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws", sourceAvailability: "online", connectionState: "online" },
+          { workspacePath: "/home/x", workspaceIdentity: "/home/x", sourceAvailability: "online", connectionState: "online" },
+        ],
+      },
+    },
+  };
+  const filteredWorkspaces = filterControllerFrameToShared(workspaceFrame, scope, logReject);
+  assert.ok(filteredWorkspaces);
+  assert.equal(filteredWorkspaces.payload.snapshot.workspaces.length, 1);
+
+  // 未识别形状整体丢弃并留痕。
+  assert.equal(filterControllerFrameToShared({ topic: "controller/unknown", payload: { kind: "x" } }, scope, logReject), null);
+  assert.equal(filterControllerFrameToShared({ nonsense: true }, scope, logReject), null);
+  assert.equal(filterControllerFrameToShared({ topic: "controller/tasks-index", payload: { kind: "snapshot", snapshot: {} } }, scope, logReject), null);
+  assert.ok(rejects.length >= 3, "丢弃必须留痕");
+});
+
+test("controller 帧事件：订阅方只收到过滤后的帧", async () => {
+  const scope = {
+    workspacePath: "/srv/ws",
+    workspaceIdentity: "/srv/ws",
+    sharedWorkspaces: [{ workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" }],
+  };
+  const received: unknown[] = [];
+  let pushFrame: ((frame: unknown) => void) | null = null;
+  const upstream: IChannel = {
+    async call<T>(): Promise<T> {
+      return {} as T;
+    },
+    listen(_event: string) {
+      return ((listener: (frame: unknown) => void) => {
+        pushFrame = listener;
+        return { dispose: () => undefined };
+      }) as never;
+    },
+  };
+  const channel = createPolicyChannel({
+    channelName: "window-controller",
+    upstream,
+    policy: policyForChannel("window-controller"),
+    scope,
+  });
+  const disposable = channel.listen("ctx", "onDynamicControllerFrame", undefined) as unknown as {
+    (fn: (value: unknown) => void): { dispose(): void };
+  };
+  disposable((frame: unknown) => received.push(frame));
+  assert.ok(pushFrame, "上游事件必须被订阅");
+
+  pushFrame?.({
+    topic: "controller/tasks-index",
+    subscriptionId: "s",
+    logEpoch: "e",
+    fromSeq: 0,
+    toSeq: 1,
+    sentAt: 1,
+    payload: { kind: "deltas", deltas: [{ op: "task.removed", address: { workspacePath: "/elsewhere", taskId: "t" } }] },
+  });
+  pushFrame?.({
+    topic: "controller/tasks-index",
+    subscriptionId: "s",
+    logEpoch: "e",
+    fromSeq: 1,
+    toSeq: 2,
+    sentAt: 2,
+    payload: { kind: "deltas", deltas: [{ op: "task.removed", address: { workspacePath: "/srv/ws", taskId: "t1" } }] },
+  });
+  pushFrame?.({ garbage: true });
+  assert.equal(received.length, 2, "被完全过滤的帧与垃圾帧都不得下发");
+  const first = received[0] as { payload: { deltas: unknown[] }; toSeq: number };
+  assert.deepEqual(first.payload.deltas, [], "全外部增量仍以空增量下发（保 seq）");
+  assert.equal((received[1] as { payload: { deltas: unknown[] } }).payload.deltas.length, 1);
 });
 
 test("provider-settings：响应中的明文 apiKey 脱敏后下发", async () => {
