@@ -1,4 +1,8 @@
-# ZCode
+# Myzcode
+
+> **This repository is a community fork / secondary development of the official ZCode open-source project. It is NOT an official release.**
+>
+> This project has **no affiliation, sponsorship, partnership, or endorsement** from Z.ai, Zhipu, or the official ZCode team. See [Fork notice](#fork-notice) and [Disclaimer](#disclaimer) below. For the full documentation, see the Chinese [README.md](README.md).
 
 <div align="center">
   <img src="public/logo/icons/1024x1024.png" alt="ZCode" width="128" height="128" />
@@ -206,6 +210,26 @@ Open `http://127.0.0.1:3030` to validate the complete flow, with one backend ser
 | `apps/zcode-cli`                                     | Agent CLI, TUI, runtime, and tools                                                      |
 | `scripts`, `config`, `third-party`                   | Build and maintenance scripts, built-in configuration, and third-party notice materials |
 
+## Fork notice
+
+1. **Origin**: This project is a secondary development (fork) of the open-source [zai-org/ZCode](https://github.com/zai-org/ZCode) repository, under the upstream Apache-2.0 license. Copyright in the original upstream code, documentation, and assets belongs to their respective authors and the zai-org/ZCode project.
+2. **Not official**: This project is maintained by an individual. It is **not** an official product and has **no affiliation, sponsorship, partnership, or endorsement** from Z.ai, Zhipu, or the official ZCode team. Any installer, APK, or bundle produced from this repository is not an official release.
+3. **Scope of changes**: On top of upstream, this fork adds a phone remote-control stack (Companion), a mobile app, a user-managed model channel, and dual-model turn review, among other changes. Feature details are documented in the Chinese [README.md](README.md).
+4. **Protocols and compatibility**: This project does **not** copy official minified code, does **not** connect to the official private relay or account backend, and does **not** claim protocol compatibility or official certification. Do not describe this project as an official release or an official partner product.
+5. **Names and marks**: The "ZCode" name and logo appear here only to indicate the code's origin and purpose. They do not imply official authorization.
+
+## Disclaimer
+
+1. **No warranty**: This project is provided "AS IS", without warranty of any kind, express or implied, including but not limited to merchantability, fitness for a particular purpose, and non-infringement. The authors are not liable for any direct or indirect damages arising from the use of, or inability to use, this project (including data loss, service interruption, device damage, or lost profits).
+2. **Use at your own risk**: This fork includes **remote-control** capabilities that let a phone trigger side-effecting actions on ZCode running on a computer (creating tasks, sending input, stopping execution, resolving approvals, and so on). Enable it only on **your own devices** and in environments where you have **lawful authorization**, and keep pairing codes, tokens, and server credentials secure. You are responsible for the consequences of misuse, misconfiguration, or credential leakage.
+3. **No data collection**: This project provides no official backend service and the authors collect no data from you. You must **self-host** the server and network environment for the remote-control link; logs, data, and traffic in that environment are yours to manage and keep compliant.
+4. **Lawful use**: You are responsible for ensuring your use complies with applicable laws and regulations, the upstream project's terms, and the terms of any third-party services (model providers, cloud providers, etc.). Using this project for unauthorized intrusion, surveillance, data theft, or any other illegal purpose is **strictly prohibited**.
+5. **Models and costs**: This project may call third-party model services. Accounts, quotas, costs, and content compliance are your own responsibility; no official keys or quota are bundled with this repository.
+6. **Relationship with upstream**: This fork may lag behind upstream, may contain changes not merged upstream or already removed upstream, and may contain defects. Do not hold the upstream project or the official team responsible for problems in this fork.
+7. **No maintenance commitment**: The authors make no commitment to ongoing maintenance, timely fixes, or long-term compatibility with any upstream version.
+
+> If you do not agree with any of the terms above, stop using this project and delete all copies immediately.
+
 ## Project Notice
 
-See [NOTICE.md](NOTICE.md) for feature and promotion scope, maintenance policy, execution and data risks, licensing, and third-party copyright information.
+See [NOTICE.md](NOTICE.md) for feature and promotion scope, maintenance policy, execution and data risks, licensing, and third-party copyright information (inherited from upstream).
