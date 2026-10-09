@@ -27,6 +27,8 @@ Myzcode 在官方 ZCode 的基础上做面向个人使用的二次开发，主�
 
 让手机以**同一套 WebUI**（窄视口适配）附着到电脑上**已经打开并显式共享**的工作区，实时镜像任务、会话与执行结果；不在手机侧新开第二个执行者。
 
+> **需要自备服务器**：本仓库**不提供、也不内置任何接入服务地址**（既不指向官方私有中继，也不指向作者自己的机器）。手机远控必须由你**自行部署**一台接入服务（gateway）。完整步骤与**可直接交给 AI 的接入提示词**见下文「[手机远控：自建服务器与接入配置](#手机远控自建服务器与接入配置)」。没有服务器时，远控不可用，但其余功能不受影响。
+
 - **自托管接入与转发服务**：新增 `packages/companion`，含设备配对、节点登记、授权（grants）、attachment 注册与一次性 capability、控制面/数据面分离的 gateway（Hono + ws），数据面为字节透传，gateway 不解释、不缓存、不重排。
 - **节点连接器**：新增 `packages/server/src/companion`，桌面端由 Electron Main 出站连接并附着本机已打开工作区；云端由 resident 守护进程出站连接。手机附着到**既有**运行时，不隐式启动新运行时。
 - **频道收窄裁决**：`narrowingFacade` + `channelPolicy` 对手机暴露收窄后的 `IZCodeAgentService` 频道（T0 全拒 / T1 只读 / T2 受限），跨工作区只读任务列表与事件订阅按「已共享工作区集合」逐项放行，其余一律强制绑定或拒绝，fail-closed。
@@ -34,7 +36,7 @@ Myzcode 在官方 ZCode 的基础上做面向个人使用的二次开发，主�
 - **配对与设备授权**：6 位数字配对码 + 二维码/链接、一次性 capability、设备授权查看/收缩/撤销，凭证以哈希存储。
 - **连接恢复**：心跳 + watchdog、指数退避重连、`ConnectionSession` 代次恢复、命令 ACK 丢失先对账（不盲目重发创建/输入/审批）。
 - **移动端 App**：新增 `packages/mobile`（Capacitor Android），应用名 Myzcode，复用同一套 Web UI 资源，而非另写一套手机界面。
-- **自托管部署文档**：见 [packages/companion/specs/companion-gateway.md](packages/companion/specs/companion-gateway.md) 与 [packages/companion/specs/DEPLOY.md](packages/companion/specs/DEPLOY.md)。
+- **自托管部署文档**：接入服务需你自行部署；步骤、私密值放置与「交给 AI 执行的接入提示词」见上文「[手机远控：自建服务器与接入配置](#手机远控自建服务器与接入配置)」，深入细节见 [packages/companion/specs/DEPLOY.md](packages/companion/specs/DEPLOY.md) 与 [packages/companion/specs/companion-gateway.md](packages/companion/specs/companion-gateway.md)。
 
 ### 二、其余新增功能
 
@@ -52,6 +54,81 @@ Myzcode 在官方 ZCode 的基础上做面向个人使用的二次开发，主�
 - **不复制官方压缩代码**，不声称与官方通信协议兼容、不声称获得官方认证。
 - **执行权威唯一**：任务执行始终发生在原 Host/运行时，手机与 gateway 都不创建第二个执行者。
 - 手机首版**不可**进行凭据管理、任意文件系统访问、终端、服务端配置等特权操作。
+
+## 手机远控：自建服务器与接入配置
+
+> **这是手机远控能用的前提。** 本仓库**不提供任何公共接入服务**，也**不内置任何服务器地址**。要用手机远控，你必须自己准备并部署一台接入服务（gateway）。
+>
+> 没有自己的服务器 ⇒ 手机远控不可用；桌面端、模型渠道、模型审查等其余功能完全不受影响。
+
+### 前置条件
+
+| 项 | 要求 |
+| --- | --- |
+| 服务器 | Linux x86_64，Node ≥ 24（`packages/companion` 使用 `node:sqlite`），网络可达 |
+| 入口 | 公网 IP 或域名 + TLS 证书（手机端走 WSS/HTTPS；明文 HTTP 仅限局域网联调） |
+| 桌面端 | 本定制版桌面 App（产物名 `ZCode Preview`） |
+| 手机端 | 自行构建的 Myzcode APK（`packages/mobile`） |
+
+### 配置方法（四步）
+
+| 步骤 | 在哪做 | 做什么 |
+| --- | --- | --- |
+| **1. 构建并部署接入服务** | 本仓库 → 你的服务器 | 在 `packages/server` 执行构建，得到 `zcode-companion.cjs` / `zcode-server.cjs`，按目录布局放到服务器（如 `/www/zcode-companion`），用 PM2 或面板把 serve 常驻 |
+| **2. 登记节点** | 服务器命令行 | `ZCODE_COMPANION_CONTROL_DB=<部署目录>/data/control.db node zcode-companion.cjs register-node --id desktop-main --name <名称> --kind desktop`；输出**一次性**节点令牌，立即另存 |
+| **3. 配置桌面端** | 桌面 App | 「设置 → Myzcode 桌面直连」：填 `wss://<你的服务器>` + 节点令牌，勾选要开放给手机的工作区，保存启用 |
+| **4. 配对手机** | 桌面弹窗 + 手机 App | 桌面弹窗点「生成配对码」得到 6 位码（一次性、15 分钟）；手机在配对页填**你的接入服务地址** + 该码完成配对 |
+
+完整目录布局、`.env` 与 PM2 细节、故障排查表见
+[packages/companion/specs/DEPLOY.md](packages/companion/specs/DEPLOY.md)；
+协议、授权与配对模型见
+[packages/companion/specs/companion-gateway.md](packages/companion/specs/companion-gateway.md)。
+
+### 私密值放哪（不要提交）
+
+| 值 | 放哪 | 说明 |
+| --- | --- | --- |
+| 手机端预填的接入地址 | `packages/mobile/.env.local` 的 `VITE_COMPANION_GATEWAY_URL` | 构建期注入；未配置则配对页留空、手动填写 |
+| 自建远端资源地址（可选） | 仓库根 `.env.local` 的 `ZCODE_CDN_BASE_URL` | 不配置则回落到官方默认 |
+| 节点令牌 | 桌面端设置里填写；服务器侧为 `data/node.token`（0600） | 桌面端令牌存入 OS 安全存储；**永远不要**写进仓库 |
+
+`.env.local` 已被 `.gitignore` 忽略。请勿把任何服务器地址、令牌或密码提交到公开仓库。
+
+### 让 AI 帮你接入（可直接复制的提示词）
+
+把下面整段交给能访问你这台机器与服务器的 AI 编程助手（ZCode / Claude Code / Cursor 等），它会按仓库文档执行：
+
+```text
+你正在协助我把本仓库（Myzcode——官方 ZCode 的二次开发分支）的手机远控接入服务搭起来。
+
+先完整阅读这两个文件，再动手：
+- packages/companion/specs/DEPLOY.md（部署、目录布局、运维、故障排查）
+- packages/companion/specs/companion-gateway.md（协议、配对与授权模型）
+
+我的环境（缺失的请先问我，不要猜）：
+- 服务器：<公网 IP 或域名>，Linux x86_64，已装 Node ≥ 24
+- 服务器 TLS：<宝塔/其它面板已配好证书 | 需要帮助申请>
+- 部署目录：<如 /www/zcode-companion>
+- 要共享给手机的工作区目录：<填写>
+- 桌面端系统：<Windows | macOS>
+- 手机端：<已有 Myzcode APK | 需要一起构建>
+
+请按顺序执行；每一步先说清"将要做什么、影响面"，再执行：
+1. 在本仓库构建服务端产物（zcode-companion.cjs、zcode-server.cjs 及 pty 预编译），说明各产物来源与放置路径。
+2. 上传/放置到服务器部署目录，按 DEPLOY.md 的布局建好 data/ 与 logs/。
+3. 登记桌面节点并保存令牌（register-node --kind desktop），把一次性令牌提示我立即另存。
+4. 用 PM2 或面板把 serve 常驻，确认健康检查通过、日志路径可见。
+5. 桌面 App 打开「设置 → Myzcode 桌面直连」，填入 wss://<我的服务器> + 节点令牌，勾选开放工作区，保存启用。
+6. 手机端：构建 APK 前在 packages/mobile/.env.local 写 VITE_COMPANION_GATEWAY_URL=https://<我的服务器>（或用已有 APK 手动填地址），用桌面生成的 6 位配对码完成配对。
+7. 验收：手机上能看到已共享工作区的任务与会话；创建一次任务，回到桌面确认是同一会话（执行者唯一）；断开网络再恢复，确认能自动重连。
+8. 全程禁止把任何令牌、密码、服务器地址写入仓库或提交；凡是需要我手工输入凭据的步骤，列出来让我自己做。
+```
+
+### 常见问题
+
+- **手机上看不到任何任务**：该工作区没有对手机开放。到桌面「Myzcode 桌面直连」把它加入开放列表。
+- **配对码获取失败 / 连接被拒**：桌面端的 `wss://` 地址或节点令牌与服务器不一致；或服务器证书不匹配（检查证书是否过期）。
+- **只想用其它功能**：完全跳过本节即可，远控模块不会影响桌面端正常使用。
 
 ## 分支说明
 

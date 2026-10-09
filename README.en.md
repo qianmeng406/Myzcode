@@ -3,6 +3,8 @@
 > **This repository is a community fork / secondary development of the official ZCode open-source project. It is NOT an official release.**
 >
 > This project has **no affiliation, sponsorship, partnership, or endorsement** from Z.ai, Zhipu, or the official ZCode team. See [Fork notice](#fork-notice) and [Disclaimer](#disclaimer) below. For the full documentation, see the Chinese [README.md](README.md).
+>
+> **Remote control requires your own server.** The phone remote-control feature (Companion) ships with **no** access-service address and never uses an official private relay — you must self-host the gateway yourself. Setup steps and a copy-paste prompt for an AI coding agent are in [README.md](README.md) under “手机远控：自建服务器与接入配置”.
 
 <div align="center">
   <img src="public/logo/icons/1024x1024.png" alt="ZCode" width="128" height="128" />
