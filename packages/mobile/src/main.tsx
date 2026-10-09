@@ -11,8 +11,15 @@ import { CompanionClient } from "@zcode/companion/client";
 import { CONFIG_KEY, ENDPOINT_KEY, PERSIST_KEY, tryRecoverSession, type CompanionConfig } from "./recover.js";
 import "./app.css";
 
-/** 个人自托管部署的默认接入服务（配对页免填；换环境时仍可手动覆盖）。 */
-const DEFAULT_GATEWAY_URL = "https://47.101.52.182";
+/**
+ * 接入服务地址的默认值（配对页预填；换环境时仍可手动覆盖）。
+ *
+ * 取值来自构建期环境变量 `VITE_COMPANION_GATEWAY_URL`，**仓库内不内置任何具体地址**：
+ * 公开版本不携带个人自建服务器地址，自部署者用自己的 `.env.local`（已 gitignore）填：
+ *   VITE_COMPANION_GATEWAY_URL=https://你的网关
+ * 未配置时预填为空，配对前必须手动填写地址（表单会拦住空地址提交）。
+ */
+const DEFAULT_GATEWAY_URL = (import.meta.env.VITE_COMPANION_GATEWAY_URL ?? "").trim();
 
 /** 完整 WebUI 子路径：companion 引导读同源 sessionStorage 的配对配置。 */
 function openFullUi(): void {
@@ -102,7 +109,9 @@ function ConfigView(props: {
           <button
             type="button"
             className="button-primary-block"
-            disabled={pairing || !codeComplete || deviceName.trim() === ""}
+            disabled={
+              pairing || !codeComplete || deviceName.trim() === "" || baseUrl.trim() === ""
+            }
             onClick={() => {
               setPairing(true);
               setPairError(null);
@@ -132,7 +141,7 @@ function ConfigView(props: {
               <input
                 value={baseUrl}
                 onChange={(event) => setBaseUrl(event.target.value)}
-                placeholder={DEFAULT_GATEWAY_URL}
+                placeholder={DEFAULT_GATEWAY_URL || "https://你的网关地址"}
                 autoCapitalize="none"
               />
             </label>

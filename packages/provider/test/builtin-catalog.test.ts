@@ -38,7 +38,7 @@ test("内置目录的 modelConfigRules 能通过 schema 解析", () => {
   assert.doesNotThrow(() => parseZCodeBuiltinModelConfigRules(catalog.config.modelConfigRules));
 });
 
-test("Command Code 渠道作为内置条目存在且配置完整", () => {
+test("Command Code 渠道作为内置条目存在且配置完整，地址为上游官方地址", () => {
   const { providers } = parseZCodeBuiltinProviderConfigRules(catalog.config.providerConfigRules);
   const provider = providers.get(COMMAND_CODE_PROVIDER_ID);
   assert.ok(provider, "内置目录缺少 Command Code 渠道");
@@ -48,7 +48,9 @@ test("Command Code 渠道作为内置条目存在且配置完整", () => {
   assert.equal(provider.group, COMMAND_CODE_PROVIDER_GROUP);
   assert.equal(provider.access?.type, "api-key");
   assert.equal(provider.api?.type, "openai-chat-completions");
-  assert.equal(provider.api?.baseUrl, "http://47.101.52.182:3050/v1");
+  // 必须指向上游官方地址：渠道与额度都由客户端直连上游完成，不得出现任何
+  // 个人/自建服务器地址（额度接口为同源的 /alpha/billing/*）。
+  assert.equal(provider.api?.baseUrl, "https://api.commandcode.ai/provider/v1");
   assert.equal(provider.logo?.type, "builtin");
 
   // 渠道的模型由用户自建：目录带入的内置模型既不能删除也不能改名，

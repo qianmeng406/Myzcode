@@ -9,7 +9,7 @@ import {
   PlanStatusCardSurface,
   PlanUsageMetricCard,
 } from "./StatusCards.js";
-import { type GatewayQuotaWindowId, resolveGatewayDashboardUrl } from "./gatewayQuota.js";
+import { type GatewayQuotaWindowId, resolveCommandCodeDashboardUrl } from "./gatewayQuota.js";
 import { useGatewayQuota } from "./useGatewayQuota.js";
 
 /**
@@ -18,7 +18,7 @@ import { useGatewayQuota } from "./useGatewayQuota.js";
  * 复用官方 Coding Plan 额度卡的叶子组件（外壳 + 额度条），因此配色、百分比反转、
  * 重置时间格式都与「模型设置」里其它套餐卡一致。
  *
- * 额度按**渠道自己填的 key**查询（网关 `/v1/usage` 的 Bearer 鉴权），所以多账号切换时
+ * 额度按**渠道自己填的 key** 直连上游查询（客户端内置，不经自建服务器），所以多账号切换时
  * 不会串号；没填 key 前不发请求，只提示先填 Key。
  */
 
@@ -32,12 +32,10 @@ export function GatewayQuotaCard({ baseUrl, apiKey }: { baseUrl: string; apiKey:
   const { intl } = useZCodeIntl();
   const platform = usePlatform();
   const { status, readings, limits, errorMessage, refresh } = useGatewayQuota({ baseUrl, apiKey });
-  const dashboardUrl = resolveGatewayDashboardUrl(baseUrl);
+  // 官方用量面板（Studio）：额度已改为客户端直连上游，不再有自建网关面板。
+  const dashboardUrl = resolveCommandCodeDashboardUrl();
 
   const handleOpenDashboard = () => {
-    if (!dashboardUrl) {
-      return;
-    }
     // 优先内置浏览器（面板带登录态，未登录时也能就地登录）；当前壳层没有 Browser 面板
     // 时退回系统浏览器，保证按钮在任何环境都有反馈。
     if (requestEmbeddedBrowserOpen(dashboardUrl)) {

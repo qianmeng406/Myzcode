@@ -38,7 +38,7 @@ Myzcode 在官方 ZCode 的基础上做面向个人使用的二次开发，主�
 
 ### 二、其余新增功能
 
-- **自定义模型渠道（Command Code）**：新增内置渠道，模型由用户自行管理而非预置，附按 key 的额度与上下文用量展示。
+- **自定义模型渠道（Command Code）**：内置渠道，模型由用户自行管理而非预置。渠道地址为上游官方地址（`https://api.commandcode.ai/provider/v1`），按 key 的额度也由**客户端直连上游**读取（`/alpha/billing/*`），**不经任何自建服务器**。
 - **双模型审查（Oracle）**：回合结束后自动复审本轮 diff，也支持手动重审；含深度审查（派发只读子代理多轮取证）、审查进度展示、一键修复与审查结果持久化。
 - **计划批准时选择执行模型与推理等级**：退出计划模式时可直接指定后续执行所用的模型与推理档位。
 - **会话回合导航**：按回合在长会话中快速跳转，配套设置开关与全量历史加载协调。
@@ -113,6 +113,8 @@ pnpm --filter @zcode/mobile run apk:debug
 ```
 
 需要 JDK 21 与 Android SDK；`JAVA_HOME` 指向 JDK 21（Android Studio 自带 JBR 即可）。产物位于 `packages/mobile/android/app/build/outputs/apk/debug/`。
+
+配对页预填的网关地址取自构建期环境变量 `VITE_COMPANION_GATEWAY_URL`：仓库内**不内置任何具体地址**，自部署者在未跟踪的 `packages/mobile/.env.local` 中填写自己的网关；未配置时预填为空，需在配对页手动填写。
 
 #### 远程功能（SSH/WSL）
 

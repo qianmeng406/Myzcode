@@ -52,7 +52,7 @@ import {
 import type { ChatCommandCodeQuotaConfig } from "@/chat-input-toolbar/CommandCodeContextQuota.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
 import { requestEmbeddedBrowserOpen } from "@/lib/embeddedBrowserOpenBridge.js";
-import { resolveGatewayDashboardUrl } from "@/settings/model-provider-section/gatewayQuota.js";
+import { resolveCommandCodeDashboardUrl } from "@/settings/model-provider-section/gatewayQuota.js";
 import { useGatewayQuota } from "@/settings/model-provider-section/useGatewayQuota.js";
 import { ThoughtLevelCycleControl } from "@/chat-input-toolbar/ThoughtLevelCycleControl.js";
 import { getNextThoughtLevelValue } from "@/chat-input-toolbar/thoughtLevelOptions.js";
@@ -725,7 +725,7 @@ function V4ComposerModelControlsImpl({
       : undefined;
 
   // Command Code 渠道的额度：只有当前选中的模型属于该渠道时才进入弹层。
-  // 额度按渠道自己填的 key 查询（网关 /v1/usage 的 Bearer 鉴权），因此同一渠道换 key
+  // 额度按渠道自己填的 key 直连上游查询（客户端内置，不经自建服务器），因此同一渠道换 key
   // 会看到另一个账号的额度，不会串号。
   const commandCodeProviderEntry = useMemo(
     () =>
@@ -746,12 +746,9 @@ function V4ComposerModelControlsImpl({
     baseUrl: commandCodeBaseUrl,
     apiKey: commandCodeApiKey,
   });
-  const commandCodeDashboardUrl = resolveGatewayDashboardUrl(commandCodeBaseUrl);
+  const commandCodeDashboardUrl = resolveCommandCodeDashboardUrl();
   const platform = usePlatform();
   const handleOpenCommandCodeDashboard = useCallback(() => {
-    if (!commandCodeDashboardUrl) {
-      return;
-    }
     // 与设置页额度卡一致：优先内置浏览器（面板带登录态），无 Browser 面板时退回系统浏览器。
     if (requestEmbeddedBrowserOpen(commandCodeDashboardUrl)) {
       return;

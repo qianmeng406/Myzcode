@@ -1,178 +1,188 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  COMMAND_CODE_API_BASE,
+  COMMAND_CODE_PROVIDER_BASE_URL,
+  COMMAND_CODE_STUDIO_URL,
   GATEWAY_QUOTA_LIMIT_TYPES,
+  buildCommandCodeQuotaPayload,
+  commandCodeQuotaRequestInit,
+  isCommandCodeOfficialBaseUrl,
   mapGatewayQuotaWindowsToQuotaLimits,
+  normalizeCommandCodeResetAt,
   parseGatewayResetAt,
   readGatewayQuotaWindows,
-  resolveGatewayDashboardUrl,
-  resolveGatewayUsageUrl,
+  resolveCommandCodeDashboardUrl,
+  resolveCommandCodeQuotaEndpoints,
 } from "../src/settings/model-provider-section/gatewayQuota.js";
 
 /**
- * 真实抓样：2026-09-29 对网关 `GET /v1/usage`（Bearer 该渠道的 key）的实测响应，
- * 原样保留字段形态——usage summary 在**顶层**、额度窗口挂在顶层 `limits`，
- * 且 `resetAt` 是 ISO 字符串。
+ * 抓样：上游三条 alpha 接口的实测字段形态（与自建反代网关 `/v1/usage` 聚合成的一样）。
+ * - `credits`：`windowLimits.fiveHour/.weekly = { used, cap, resetAt }`（resetAt 纪元秒/毫秒）
+ *   与 `credits.monthlyCredits`（月**剩余**）；
+ * - `summary`：`totalCost`（本期已用）；
+ * - `subscription`：`data.currentPeriodEnd`（月窗口重置点，ISO）。
  */
-const REAL_PAYLOAD = {
-  totalCount: 23450,
-  totalCost: 69.2784521016,
-  averageCost: 0.0029543049936716415,
-  successRate: 100,
-  completedCount: 23450,
-  failedCount: 0,
-  totalTokensIn: 7097226765,
-  totalTokensOut: 16186614,
-  totalTokens: 7113413379,
-  totalCredits: 69.2784521016,
-  totalFreeCredits: 0,
-  totalMonthlyCredits: 69.2784521016,
-  totalPurchasedCredits: 0,
-  periodBasis: "billing-period",
-  limits: {
-    fiveHour: {
-      used: 0.632298758,
-      total: 14,
-      remaining: 13.367701242,
-      resetAt: "2026-09-29T06:52:20.430Z",
-    },
-    weekly: {
-      used: 0.673454677,
-      total: 35,
-      remaining: 34.326545323,
-      resetAt: "2026-10-05T06:07:56.778Z",
-    },
-    monthly: {
-      used: 69.2784521016,
-      total: 70,
-      remaining: 0.7215478984,
-      resetAt: "2026-10-11T06:23:57.000Z",
-    },
-    monthlyRemaining: 0.7215478984,
-    planPeriodEnd: "2026-10-11T06:23:57.000Z",
+const CREDITS = {
+  credits: { monthlyCredits: 10.7215478984 },
+  windowLimits: {
+    // 纪元**秒**（上游两种单位都可能出现，这里各覆盖一种）。
+    fiveHour: { used: 0.632298758, cap: 14, resetAt: 1791234000 },
+    // 纪元**毫秒**。
+    weekly: { used: 0.673454677, cap: 35, resetAt: 1791752400000 },
   },
 };
+const SUMMARY = { totalCost: 69.2784521016 };
+const SUBSCRIPTION = { data: { currentPeriodEnd: "2026-10-11T06:23:57.000Z" } };
 
-test("resolveGatewayUsageUrl 剥掉 /v1 后缀并挂到同一 origin 的 /v1/usage", () => {
+test("渠道与额度都指向上游官方地址，不含任何自建服务器地址", () => {
+  assert.equal(COMMAND_CODE_API_BASE, "https://api.commandcode.ai");
+  assert.equal(COMMAND_CODE_PROVIDER_BASE_URL, "https://api.commandcode.ai/provider/v1");
+  assert.equal(COMMAND_CODE_STUDIO_URL, "https://commandcode.ai/studio");
+  assert.equal(resolveCommandCodeDashboardUrl(), "https://commandcode.ai/studio");
+});
+
+test("resolveCommandCodeQuotaEndpoints 给出同源的三条 alpha 额度接口", () => {
+  assert.deepEqual(resolveCommandCodeQuotaEndpoints(), {
+    credits: "https://api.commandcode.ai/alpha/billing/credits",
+    summary: "https://api.commandcode.ai/alpha/usage/summary",
+    subscription: "https://api.commandcode.ai/alpha/billing/subscriptions",
+  });
+  // 末尾斜杠不应改变结果。
+  assert.deepEqual(resolveCommandCodeQuotaEndpoints("https://api.commandcode.ai/"), {
+    credits: "https://api.commandcode.ai/alpha/billing/credits",
+    summary: "https://api.commandcode.ai/alpha/usage/summary",
+    subscription: "https://api.commandcode.ai/alpha/billing/subscriptions",
+  });
+});
+
+test("额度请求只带 Authorization——上游 CORS 预检不放行 x-cli-* 头", () => {
+  const init = commandCodeQuotaRequestInit("sk-test-key");
+  assert.equal(init.method, "GET");
+  const headers = init.headers as Record<string, string>;
+  assert.equal(headers["Authorization"], "Bearer sk-test-key");
+  // 反代网关用的遥测头会被上游预检拒绝，必须不下发，否则浏览器/渲染进程直接请求失败。
+  assert.equal("x-cli-environment" in headers, false);
+  assert.equal("x-command-code-version" in headers, false);
+});
+
+test("isCommandCodeOfficialBaseUrl 只认上游同源地址", () => {
+  assert.equal(isCommandCodeOfficialBaseUrl("https://api.commandcode.ai/provider/v1"), true);
+  assert.equal(isCommandCodeOfficialBaseUrl("https://api.commandcode.ai"), true);
+  assert.equal(isCommandCodeOfficialBaseUrl("  https://api.commandcode.ai/provider/v1  "), true);
+  // 自建代理、其它上游、空值与不可解析地址一律不认，避免展示对不上的额度。
+  assert.equal(isCommandCodeOfficialBaseUrl("http://proxy.example.test:3050/v1"), false);
+  assert.equal(isCommandCodeOfficialBaseUrl("https://gw.example.com/provider/v1"), false);
+  assert.equal(isCommandCodeOfficialBaseUrl(""), false);
+  assert.equal(isCommandCodeOfficialBaseUrl("not a url"), false);
+});
+
+test("normalizeCommandCodeResetAt 统一纪元秒/毫秒/ISO，0 表示窗口未启动", () => {
+  assert.equal(normalizeCommandCodeResetAt(1791234000), new Date(1791234000 * 1000).toISOString());
+  assert.equal(normalizeCommandCodeResetAt(1791752400000), new Date(1791752400000).toISOString());
   assert.equal(
-    resolveGatewayUsageUrl("http://47.101.52.182:3050/v1"),
-    "http://47.101.52.182:3050/v1/usage",
+    normalizeCommandCodeResetAt("2026-10-11T06:23:57.000Z"),
+    "2026-10-11T06:23:57.000Z",
   );
-  // 不带 /v1 的写法必须得到同一个地址，否则同一个网关会因写法不同而查不到额度。
+  // 0 / 空 / 不可解析都表示"没有可展示的重置时刻"，不能显示成 1970 年。
+  assert.equal(normalizeCommandCodeResetAt(0), null);
+  assert.equal(normalizeCommandCodeResetAt(null), null);
+  assert.equal(normalizeCommandCodeResetAt("nope"), null);
+});
+
+test("buildCommandCodeQuotaPayload 把上游三响应合成 limits，月额度按已用还原总额", () => {
+  const payload = buildCommandCodeQuotaPayload({
+    credits: CREDITS,
+    summary: SUMMARY,
+    subscription: SUBSCRIPTION,
+  });
+  assert.deepEqual(payload, {
+    limits: {
+      fiveHour: {
+        used: 0.632298758,
+        total: 14,
+        remaining: 13.367701242,
+        resetAt: new Date(1791234000 * 1000).toISOString(),
+      },
+      weekly: {
+        used: 0.673454677,
+        total: 35,
+        remaining: 34.326545323,
+        resetAt: new Date(1791752400000).toISOString(),
+      },
+      // 月额度上游只给"剩余"，用 summary.totalCost 还原总额：10.7215478984 + 69.2784521016。
+      monthly: {
+        used: 69.2784521016,
+        total: 80,
+        remaining: 10.7215478984,
+        resetAt: "2026-10-11T06:23:57.000Z",
+      },
+    },
+  });
+});
+
+test("buildCommandCodeQuotaPayload 不拿 0 冒充缺失档位", () => {
+  const payload = buildCommandCodeQuotaPayload({
+    credits: { credits: {}, windowLimits: { fiveHour: { used: 1, cap: 0, resetAt: 0 } } },
+    summary: {},
+    subscription: null,
+  });
+  // cap<=0 的窗口视作不存在；月剩余缺失时月档也不展示，只留下结构里的 null。
+  assert.deepEqual(payload, { limits: { fiveHour: null, weekly: null, monthly: null } });
+  assert.deepEqual(readGatewayQuotaWindows(payload), []);
+});
+
+test("buildCommandCodeQuotaPayload 在三条响应全空时返回 null", () => {
   assert.equal(
-    resolveGatewayUsageUrl("http://47.101.52.182:3050"),
-    "http://47.101.52.182:3050/v1/usage",
-  );
-  assert.equal(
-    resolveGatewayUsageUrl("http://127.0.0.1:9933/v1/"),
-    "http://127.0.0.1:9933/v1/usage",
-  );
-  assert.equal(
-    resolveGatewayUsageUrl("https://gw.example.com/V1"),
-    "https://gw.example.com/v1/usage",
-  );
-  // 非 /v1 的路径前缀原样保留，不猜业务路由。
-  assert.equal(
-    resolveGatewayUsageUrl("https://gw.example.com/gateway/v1"),
-    "https://gw.example.com/gateway/v1/usage",
+    buildCommandCodeQuotaPayload({ credits: null, summary: null, subscription: null }),
+    null,
   );
 });
 
-test("resolveGatewayUsageUrl 拒绝非 http(s) 与不可解析地址", () => {
-  assert.equal(resolveGatewayUsageUrl(""), null);
-  assert.equal(resolveGatewayUsageUrl("   "), null);
-  assert.equal(resolveGatewayUsageUrl("ftp://gw.example.com"), null);
-  assert.equal(resolveGatewayUsageUrl("not a url"), null);
-  assert.equal(resolveGatewayUsageUrl("file:///tmp/x"), null);
-});
-
-test("resolveGatewayDashboardUrl 指向同一 origin 的 /dashboard", () => {
-  assert.equal(
-    resolveGatewayDashboardUrl("http://47.101.52.182:3050/v1"),
-    "http://47.101.52.182:3050/dashboard",
+test("合成载荷经 readGatewayQuotaWindows 得到 5小时/周/月三档读数", () => {
+  const readings = readGatewayQuotaWindows(
+    buildCommandCodeQuotaPayload({
+      credits: CREDITS,
+      summary: SUMMARY,
+      subscription: SUBSCRIPTION,
+    }),
   );
-  assert.equal(resolveGatewayDashboardUrl("nope"), null);
-});
-
-test("parseGatewayResetAt 把 ISO 解析成毫秒，0 与非法值归为无重置时刻", () => {
-  assert.equal(
-    parseGatewayResetAt("2026-09-29T06:52:20.430Z"),
-    Date.parse("2026-09-29T06:52:20.430Z"),
-  );
-  assert.equal(parseGatewayResetAt(1790664740430), 1790664740430);
-  // 窗口未启动：网关返回 0，不能显示成 1970。
-  assert.equal(parseGatewayResetAt(0), null);
-  assert.equal(parseGatewayResetAt(""), null);
-  assert.equal(parseGatewayResetAt(null), null);
-  assert.equal(parseGatewayResetAt(undefined), null);
-  assert.equal(parseGatewayResetAt("not-a-date"), null);
-});
-
-test("readGatewayQuotaWindows 逐项读出顶层 limits 的真实数值", () => {
-  const readings = readGatewayQuotaWindows(REAL_PAYLOAD);
   assert.deepEqual(
     readings.map((reading) => reading.id),
     ["fiveHour", "weekly", "monthly"],
   );
-  const [fiveHour, weekly, monthly] = readings;
-  assert.equal(fiveHour?.used, 0.632298758);
-  assert.equal(fiveHour?.total, 14);
-  assert.equal(fiveHour?.remaining, 13.367701242);
-  assert.equal(fiveHour?.resetAtMs, Date.parse("2026-09-29T06:52:20.430Z"));
-  assert.equal(weekly?.resetAtMs, Date.parse("2026-10-05T06:07:56.778Z"));
-  assert.equal(monthly?.total, 70);
+  assert.equal(readings[0]?.total, 14);
+  assert.equal(readings[1]?.total, 35);
+  assert.equal(readings[2]?.total, 80);
+  assert.equal(readings[2]?.resetAtMs, Date.parse("2026-10-11T06:23:57.000Z"));
 });
 
-test("readGatewayQuotaWindows 不补占位：缺失/异常窗口一律跳过", () => {
-  const partial = readGatewayQuotaWindows({
-    limits: { weekly: { used: 1, total: 4, resetAt: 0 } },
-  });
-  assert.deepEqual(
-    partial.map((reading) => reading.id),
-    ["weekly"],
+test("mapGatewayQuotaWindowsToQuotaLimits 填已用百分比并映射到合成 type", () => {
+  const readings = readGatewayQuotaWindows(
+    buildCommandCodeQuotaPayload({
+      credits: CREDITS,
+      summary: SUMMARY,
+      subscription: SUBSCRIPTION,
+    }),
   );
-  // remaining 缺失时按 total - used 推导；resetAt=0 归为无重置时刻。
-  assert.equal(partial[0]?.remaining, 3);
-  assert.equal(partial[0]?.resetAtMs, null);
-
-  assert.deepEqual(readGatewayQuotaWindows({ limits: { fiveHour: { used: 0, total: 0 } } }), []);
-  assert.deepEqual(readGatewayQuotaWindows({ limits: {} }), []);
-  assert.deepEqual(readGatewayQuotaWindows({}), []);
-  assert.deepEqual(readGatewayQuotaWindows(null), []);
-  assert.deepEqual(readGatewayQuotaWindows("<html>nope</html>"), []);
-  // 上游抖动时可能把窗口给成 null，不能抛错。
-  assert.deepEqual(readGatewayQuotaWindows({ limits: { fiveHour: null, weekly: null } }), []);
+  const limits = mapGatewayQuotaWindowsToQuotaLimits(readings);
+  assert.equal(limits.length, 3);
+  assert.equal(limits[0]?.type, GATEWAY_QUOTA_LIMIT_TYPES.fiveHour);
+  assert.equal(limits[1]?.type, GATEWAY_QUOTA_LIMIT_TYPES.weekly);
+  assert.equal(limits[2]?.type, GATEWAY_QUOTA_LIMIT_TYPES.monthly);
+  // usage=已用、number=总额、remaining=剩余；percentage 是已用百分比（渲染时自行反转）。
+  assert.equal(limits[0]?.usage, 0.632298758);
+  assert.equal(limits[0]?.number, 14);
+  assert.equal(limits[0]?.remaining, 13.367701242);
+  assert.equal(limits[0]?.percentage, (0.632298758 / 14) * 100);
+  assert.equal(limits[0]?.usageDetails.length, 0);
 });
 
-test("mapGatewayQuotaWindowsToQuotaLimits 填已用百分比（反转由卡片层负责）", () => {
-  const limits = mapGatewayQuotaWindowsToQuotaLimits(readGatewayQuotaWindows(REAL_PAYLOAD));
-  assert.deepEqual(
-    limits.map((limit) => limit.type),
-    [
-      GATEWAY_QUOTA_LIMIT_TYPES.fiveHour,
-      GATEWAY_QUOTA_LIMIT_TYPES.weekly,
-      GATEWAY_QUOTA_LIMIT_TYPES.monthly,
-    ],
-  );
-  const fiveHour = limits[0]!;
-  assert.equal(fiveHour.usage, 0.632298758);
-  assert.equal(fiveHour.remaining, 13.367701242);
-  assert.equal(fiveHour.number, 14);
-  // 0.632 / 14 ≈ 4.5% 已用 —— 不能在这里写成 95.5%。
-  assert.ok(Math.abs((fiveHour.percentage ?? 0) - 4.5164) < 0.001);
-  assert.equal(fiveHour.nextResetTime, Date.parse("2026-09-29T06:52:20.430Z"));
-  // 不编造模型明细，否则卡片会渲染出并不存在的模型名。
-  assert.deepEqual(fiveHour.usageDetails, []);
-  // 合成 type 不能撞上 Coding Plan 的额度类别，否则会被别的入口误命中。
-  assert.notEqual(fiveHour.type, "TOKENS_LIMIT");
-  assert.notEqual(fiveHour.type, "TIME_LIMIT");
-});
-
-test("map 对超限与无重置时刻的窗口保持可渲染", () => {
-  const limits = mapGatewayQuotaWindowsToQuotaLimits([
-    { id: "fiveHour", used: 20, total: 10, remaining: 0, resetAtMs: null },
-  ]);
-  assert.equal(limits[0]?.percentage, 100);
-  assert.equal(limits[0]?.nextResetTime, undefined);
-  assert.equal(limits[0]?.remaining, 0);
+test("parseGatewayResetAt 拒绝 0 与不可解析值", () => {
+  assert.equal(parseGatewayResetAt(0), null);
+  assert.equal(parseGatewayResetAt(null), null);
+  assert.equal(parseGatewayResetAt(""), null);
+  assert.equal(parseGatewayResetAt("nope"), null);
+  assert.equal(parseGatewayResetAt("2026-10-11T06:23:57.000Z"), Date.parse("2026-10-11T06:23:57.000Z"));
+  assert.equal(parseGatewayResetAt(1791752400000), 1791752400000);
 });

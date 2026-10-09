@@ -869,7 +869,7 @@
             },
             "api": {
               "type": "openai-chat-completions",
-              "baseUrl": "http://47.101.52.182:3050/v1"
+              "baseUrl": "https://api.commandcode.ai/provider/v1"
             },
             "logo": {
               "type": "builtin",

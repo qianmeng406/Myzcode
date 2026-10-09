@@ -4,7 +4,7 @@
 // Ctrl+C 停止：依次停 connector、gateway、resident daemon。
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, cpSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startCompanionGateway } from "@zcode/companion";
@@ -20,6 +20,18 @@ const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const stackRoot = join(repoRoot, ".tmp", "companion-dev-stack");
 const runtimeRoot = join(stackRoot, "runtime");
 const workspaceDir = resolve(readArg("--workspace", join(stackRoot, "workspace")));
+
+/** 本机局域网 IPv4（手机直连地址）；取不到时回退回环，避免打印写死的固定地址。 */
+function lanIPv4(): string {
+  for (const infos of Object.values(networkInterfaces())) {
+    for (const info of infos ?? []) {
+      if (info.family === "IPv4" && !info.internal) {
+        return info.address;
+      }
+    }
+  }
+  return "127.0.0.1";
+}
 
 // 工作区准备：真实目录 + 一个演示文件（Agent 可读改）。
 rmSync(runtimeRoot, { recursive: true, force: true });
@@ -78,7 +90,7 @@ const connector = await startCloudCompanionConnector({
 const pairing = await gateway.owner.createPairingCode();
 
 console.log("\n===== 手机端配置 =====");
-console.log(`接入服务地址:  http://192.168.2.9:${gateway.port}`);
+console.log(`接入服务地址:  http://${lanIPv4()}:${gateway.port}`);
 console.log(`配对码:       ${pairing.code}`);
 console.log(`验收工作区:    ${workspaceDir}`);
 console.log("======================\n");

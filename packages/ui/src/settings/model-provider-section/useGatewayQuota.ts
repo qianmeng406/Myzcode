@@ -2,19 +2,24 @@ import { useCallback, useEffect, useState } from "react";
 import type { UsageQuotaLimit } from "@zcode/shared";
 import { logger } from "@/logger.js";
 import {
+  buildCommandCodeQuotaPayload,
+  commandCodeQuotaRequestInit,
+  isCommandCodeOfficialBaseUrl,
   mapGatewayQuotaWindowsToQuotaLimits,
   readGatewayQuotaWindows,
-  resolveGatewayUsageUrl,
+  resolveCommandCodeQuotaEndpoints,
   type GatewayQuotaWindowReading,
 } from "./gatewayQuota.js";
 
 /**
- * 读取 Command Code 网关的滚动窗口额度。
+ * 读取 Command Code 渠道的滚动窗口额度（**客户端直连上游**）。
  *
- * 用渠道自己的 key 打 `/v1/usage`（Bearer），所以看到的就是该 key 所属账号的额度；
- * 没有 key 时不下发请求（`idle`），避免拿默认账户的额度冒充当前账号。
+ * 用渠道自己填的 key 并行打上游三条 alpha 接口（Bearer），所以看到的就是该 key 所属账号
+ * 的额度；没有 key、或渠道地址不是上游官方地址时不下发请求（`idle`），避免拿别的账号或
+ * 已经改指到别处的渠道额度冒充当前值。
  *
- * 不做跨挂载缓存：渠道详情一次只挂一个，且响应里含账号额度，缓存收益小于「换 key 后看到旧额度」的风险。
+ * 不做跨挂载缓存：渠道详情一次只挂一个，且响应里含账号额度，缓存收益小于「换 key 后看到
+ * 旧额度」的风险。
  */
 
 export type GatewayQuotaStatus = "idle" | "loading" | "ready" | "empty" | "error";
@@ -27,8 +32,27 @@ export interface GatewayQuotaView {
   refresh: () => void;
 }
 
-/** 网关自身对上游有 30s 缓存；客户端 5s 超时足够，且不会长时间吊住设置页。 */
+/** 三条请求并行，客户端 5s 超时足够，且不会长时间吊住设置页。 */
 const REQUEST_TIMEOUT_MS = 5000;
+
+interface JsonFetchResult {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly data: unknown;
+}
+
+async function fetchJson(url: string, init: RequestInit, signal: AbortSignal): Promise<JsonFetchResult> {
+  const response = await fetch(url, { ...init, signal });
+  if (!response.ok) {
+    return { ok: false, status: response.status, data: null };
+  }
+  try {
+    return { ok: true, status: response.status, data: await response.json() };
+  } catch {
+    // 200 但响应体不是 JSON：按上游异常处理，不把解析失败当成"没有额度"。
+    return { ok: false, status: response.status, data: null };
+  }
+}
 
 export function useGatewayQuota(options: { baseUrl: string; apiKey: string }): GatewayQuotaView {
   const { baseUrl, apiKey } = options;
@@ -43,14 +67,15 @@ export function useGatewayQuota(options: { baseUrl: string; apiKey: string }): G
 
   useEffect(() => {
     const key = apiKey.trim();
-    const url = resolveGatewayUsageUrl(baseUrl);
-    if (!key || !url) {
+    if (!key || !isCommandCodeOfficialBaseUrl(baseUrl)) {
       setStatus("idle");
       setReadings([]);
       setErrorMessage(null);
       return;
     }
 
+    const endpoints = resolveCommandCodeQuotaEndpoints();
+    const init = commandCodeQuotaRequestInit(key);
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       controller.abort();
@@ -61,24 +86,28 @@ export function useGatewayQuota(options: { baseUrl: string; apiKey: string }): G
 
     void (async () => {
       try {
-        const response = await fetch(url, {
-          method: "GET",
-          headers: { Accept: "application/json", Authorization: `Bearer ${key}` },
-          signal: controller.signal,
-        });
+        const [credits, summary, subscription] = await Promise.all([
+          fetchJson(endpoints.credits, init, controller.signal),
+          fetchJson(endpoints.summary, init, controller.signal),
+          fetchJson(endpoints.subscription, init, controller.signal),
+        ]);
         if (cancelled) {
           return;
         }
-        if (!response.ok) {
+        // credits 给窗口、summary 给本期已用：缺任一条就还原不出可信额度，按错误态展示。
+        // subscriptions 只影响月窗口重置时间，缺它时其余两档照常展示。
+        if (!credits.ok || !summary.ok) {
+          const failed = !credits.ok ? credits.status : summary.status;
           setStatus("error");
           setReadings([]);
-          setErrorMessage(`HTTP ${response.status}`);
+          setErrorMessage(`HTTP ${failed}`);
           return;
         }
-        const payload: unknown = await response.json();
-        if (cancelled) {
-          return;
-        }
+        const payload = buildCommandCodeQuotaPayload({
+          credits: credits.data,
+          summary: summary.data,
+          subscription: subscription.ok ? subscription.data : null,
+        });
         const nextReadings = readGatewayQuotaWindows(payload);
         // 上游这次没给出窗口（billing 抖动或该账号确实无额度）时按空态展示，
         // 不隐藏卡片——渠道是用户自己指定的，空态比静默消失更容易判断问题。
@@ -95,7 +124,7 @@ export function useGatewayQuota(options: { baseUrl: string; apiKey: string }): G
           setErrorMessage("Request timed out");
           return;
         }
-        logger.info(`[gateway-quota] 读取额度失败 url=${url} error=${String(error)}`);
+        logger.info(`[command-code-quota] 读取额度失败 base=${baseUrl} error=${String(error)}`);
         setStatus("error");
         setReadings([]);
         setErrorMessage(error instanceof Error ? error.message : String(error));
