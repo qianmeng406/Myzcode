@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import process from "node:process";
-import { dirname, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveNativeSearchReleasePlan } from "../../../scripts/native-search-tools-config.mjs";
 import { runCommand } from "../../../scripts/spawn-command.mjs";
@@ -10,6 +11,8 @@ import { getTargetPlatform } from "./target-platform.mjs";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(scriptDir, "..");
 const rootDir = resolve(desktopRoot, "../..");
+// 远端资源按 <version> 分目录（mock-cdn 与随包本地资源树都用同一个版本号）。
+const version = JSON.parse(readFileSync(join(rootDir, "package.json"), "utf-8")).version;
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const target = getTargetPlatform();
 const nativeSearchReleasePlan = resolveNativeSearchReleasePlan({
@@ -70,6 +73,12 @@ const shouldSkipRemoteAssets = process.env.ZCODE_SKIP_REMOTE_ASSETS === "1";
 // 规格与发布步骤见 packages/server/specs/remote-resident-server.md 5.1。
 const shouldSkipRemoteCdnPack = process.env.ZCODE_SKIP_REMOTE_CDN_PACK === "1";
 const remoteCdnPlatforms = process.env.ZCODE_REMOTE_CDN_PLATFORMS?.trim() || "linux-x64";
+// 本地远端资源树：裁剪出目标平台后随安装包分发，运行时直接本地上传，不再访问 CDN。
+// 这是 fork 的默认部署形态；只有显式设置 ZCODE_SKIP_LOCAL_REMOTE_ASSETS=1 才跳过。
+const shouldSkipLocalRemoteAssets = process.env.ZCODE_SKIP_LOCAL_REMOTE_ASSETS === "1";
+const localRemoteAssetSource =
+  process.env.ZCODE_LOCAL_REMOTE_ASSET_SOURCE?.trim() ||
+  resolve(rootDir, "packages", "desktop", "mock-cdn", "releases", version);
 
 if (!shouldSkipRemoteAssets) {
   runTimedPnpmScript("prepare:remote-assets");
@@ -81,6 +90,24 @@ if (!shouldSkipRemoteAssets) {
     runTimedNodeScript(
       "pack-remote-assets-cdn",
       resolve(rootDir, "scripts/pack-remote-assets-cdn.mjs"),
+      ["--platforms", remoteCdnPlatforms],
+    );
+  }
+  // 必须紧跟 prepare:remote-assets：上面刚重建过 mock-cdn 里的 server bundle，
+  // 这里立刻裁剪成随包资源，避免打包到上一次构建的陈旧产物。
+  if (shouldSkipLocalRemoteAssets) {
+    console.log(
+      "[prepare-runtime-assets] skip prepare-local-remote-assets (ZCODE_SKIP_LOCAL_REMOTE_ASSETS=1)",
+    );
+  } else if (!existsSync(localRemoteAssetSource)) {
+    // 未准备 mock-cdn 的机器仍应能出包；此时运行时回退 CDN 下载。
+    console.log(
+      `[prepare-runtime-assets] skip prepare-local-remote-assets: 源目录不存在 ${localRemoteAssetSource}`,
+    );
+  } else {
+    runTimedNodeScript(
+      "prepare-local-remote-assets",
+      resolve(rootDir, "scripts/prepare-local-remote-assets.mjs"),
       ["--platforms", remoteCdnPlatforms],
     );
   }

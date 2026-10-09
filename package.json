@@ -33,6 +33,7 @@
     "knip": "knip",
     "count-lines": "bash scripts/count-lines.sh",
     "prepare:remote-assets": "pnpm --filter @zcode/desktop prepare:remote-assets",
+    "prepare:local-remote-assets": "node scripts/prepare-local-remote-assets.mjs",
     "doctor:macos-release": "bash scripts/doctor-macos-release-app.sh",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix --fix-suggestions",
