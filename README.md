@@ -10,14 +10,14 @@
 
 Myzcode 在官方 ZCode 的基础上做面向个人使用的二次开发，主要方向是**「让手机也能远程操控电脑上运行的 ZCode」**，并额外扩展了模型渠道、模型审查与若干交互能力。
 
-| 项目 | 说明 |
-| --- | --- |
-| 上游项目 | [zai-org/ZCode](https://github.com/zai-org/ZCode)（Apache-2.0） |
-| 本仓库 | [qianmeng406/Myzcode](https://github.com/qianmeng406/Myzcode) |
-| 定制主线分支 | `custom/command-code-channel`（全部定制内容与修复所在分支） |
-| 桌面端 | 基于官方 ZCode 桌面版二次构建（Preview 构建身份，产物名 `ZCode Preview`） |
-| 移动端 | 「Myzcode」Android App，包名 `com.zcode.myzcode`，版本 `0.1.0` |
-| 许可证 | Apache-2.0（继承上游，见 [LICENSE](LICENSE)、[NOTICE.md](NOTICE.md)） |
+| 项目         | 说明                                                                                         |
+| ------------ | -------------------------------------------------------------------------------------------- |
+| 上游项目     | [zai-org/ZCode](https://github.com/zai-org/ZCode)（Apache-2.0）                              |
+| 本仓库       | [qianmeng406/Myzcode](https://github.com/qianmeng406/Myzcode)                                |
+| 定制主线分支 | `main`（默认分支，包含全部定制内容与修复；`custom/command-code-channel` 为已并入的历史分支） |
+| 桌面端       | 基于官方 ZCode 桌面版二次构建（Preview 构建身份，产物名 `ZCode Preview`）                    |
+| 移动端       | 「Myzcode」Android App，包名 `com.zcode.myzcode`，版本 `0.1.0`                               |
+| 许可证       | Apache-2.0（继承上游，见 [LICENSE](LICENSE)、[NOTICE.md](NOTICE.md)）                        |
 
 ## 本定制版的新增与改动
 
@@ -46,7 +46,7 @@ Myzcode 在官方 ZCode 的基础上做面向个人使用的二次开发，主�
 - **会话回合导航**：按回合在长会话中快速跳转，配套设置开关与全量历史加载协调。
 - **权限/协作模式扩展**：新增 **资料查询（research）只读模式**（内置多个免密钥检索渠道）、`minimal`、`zcodeUpdate` 等模式。
 - **提示词优化器**：输入区新增提示词优化入口，可指定优化所用模型。
-- **远端资源自建发布管线与 SSH 常驻工作区**：可自建远端资源发布树（`packages/server/build-remote.ts` 等），并支持 SSH 远程工作区**断开不终止任务、重连接回同一运行时**。
+- **远端资源随包分发 + SSH 常驻工作区**：远端工作区（SSH/WSL）所需的 server bundle、node 运行时、agent 运行时与搜索工具**随安装包分发**（安装目录 `resources/remote-assets`），部署时由桌面端直接读取本地文件再 SFTP 上传，**全程不访问任何 CDN**；「远端服务器下载」模式缺省走 ZCode 官方 CDN（拉官方产物，不含本定制版远端改动），自建 CDN 发布树保留为可选覆盖。同时支持 SSH 远程工作区**断开不终止任务、重连接回同一运行时**。
 
 ### 三、与官方版的差异边界（明确不做的事）
 
@@ -63,21 +63,21 @@ Myzcode 在官方 ZCode 的基础上做面向个人使用的二次开发，主�
 
 ### 前置条件
 
-| 项 | 要求 |
-| --- | --- |
+| 项     | 要求                                                                         |
+| ------ | ---------------------------------------------------------------------------- |
 | 服务器 | Linux x86_64，Node ≥ 24（`packages/companion` 使用 `node:sqlite`），网络可达 |
-| 入口 | 公网 IP 或域名 + TLS 证书（手机端走 WSS/HTTPS；明文 HTTP 仅限局域网联调） |
-| 桌面端 | 本定制版桌面 App（产物名 `ZCode Preview`） |
-| 手机端 | 自行构建的 Myzcode APK（`packages/mobile`） |
+| 入口   | 公网 IP 或域名 + TLS 证书（手机端走 WSS/HTTPS；明文 HTTP 仅限局域网联调）    |
+| 桌面端 | 本定制版桌面 App（产物名 `ZCode Preview`）                                   |
+| 手机端 | 自行构建的 Myzcode APK（`packages/mobile`）                                  |
 
 ### 配置方法（四步）
 
-| 步骤 | 在哪做 | 做什么 |
-| --- | --- | --- |
-| **1. 构建并部署接入服务** | 本仓库 → 你的服务器 | 在 `packages/server` 执行构建，得到 `zcode-companion.cjs` / `zcode-server.cjs`，按目录布局放到服务器（如 `/www/zcode-companion`），用 PM2 或面板把 serve 常驻 |
-| **2. 登记节点** | 服务器命令行 | `ZCODE_COMPANION_CONTROL_DB=<部署目录>/data/control.db node zcode-companion.cjs register-node --id desktop-main --name <名称> --kind desktop`；输出**一次性**节点令牌，立即另存 |
-| **3. 配置桌面端** | 桌面 App | 「设置 → Myzcode 桌面直连」：填 `wss://<你的服务器>` + 节点令牌，勾选要开放给手机的工作区，保存启用 |
-| **4. 配对手机** | 桌面弹窗 + 手机 App | 桌面弹窗点「生成配对码」得到 6 位码（一次性、15 分钟）；手机在配对页填**你的接入服务地址** + 该码完成配对 |
+| 步骤                      | 在哪做              | 做什么                                                                                                                                                                          |
+| ------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1. 构建并部署接入服务** | 本仓库 → 你的服务器 | 在 `packages/server` 执行构建，得到 `zcode-companion.cjs` / `zcode-server.cjs`，按目录布局放到服务器（如 `/www/zcode-companion`），用 PM2 或面板把 serve 常驻                   |
+| **2. 登记节点**           | 服务器命令行        | `ZCODE_COMPANION_CONTROL_DB=<部署目录>/data/control.db node zcode-companion.cjs register-node --id desktop-main --name <名称> --kind desktop`；输出**一次性**节点令牌，立即另存 |
+| **3. 配置桌面端**         | 桌面 App            | 「设置 → Myzcode 桌面直连」：填 `wss://<你的服务器>` + 节点令牌，勾选要开放给手机的工作区，保存启用                                                                             |
+| **4. 配对手机**           | 桌面弹窗 + 手机 App | 桌面弹窗点「生成配对码」得到 6 位码（一次性、15 分钟）；手机在配对页填**你的接入服务地址** + 该码完成配对                                                                       |
 
 完整目录布局、`.env` 与 PM2 细节、故障排查表见
 [packages/companion/specs/DEPLOY.md](packages/companion/specs/DEPLOY.md)；
@@ -86,11 +86,11 @@ Myzcode 在官方 ZCode 的基础上做面向个人使用的二次开发，主�
 
 ### 私密值放哪（不要提交）
 
-| 值 | 放哪 | 说明 |
-| --- | --- | --- |
-| 手机端预填的接入地址 | `packages/mobile/.env.local` 的 `VITE_COMPANION_GATEWAY_URL` | 构建期注入；未配置则配对页留空、手动填写 |
-| 自建远端资源地址（可选） | 仓库根 `.env.local` 的 `ZCODE_CDN_BASE_URL` | 不配置则回落到官方默认 |
-| 节点令牌 | 桌面端设置里填写；服务器侧为 `data/node.token`（0600） | 桌面端令牌存入 OS 安全存储；**永远不要**写进仓库 |
+| 值                       | 放哪                                                         | 说明                                             |
+| ------------------------ | ------------------------------------------------------------ | ------------------------------------------------ |
+| 手机端预填的接入地址     | `packages/mobile/.env.local` 的 `VITE_COMPANION_GATEWAY_URL` | 构建期注入；未配置则配对页留空、手动填写         |
+| 自建远端资源地址（可选） | 仓库根 `.env.local` 的 `ZCODE_CDN_BASE_URL`                  | 不配置则回落到官方默认                           |
+| 节点令牌                 | 桌面端设置里填写；服务器侧为 `data/node.token`（0600）       | 桌面端令牌存入 OS 安全存储；**永远不要**写进仓库 |
 
 `.env.local` 已被 `.gitignore` 忽略。请勿把任何服务器地址、令牌或密码提交到公开仓库。
 
@@ -132,8 +132,8 @@ Myzcode 在官方 ZCode 的基础上做面向个人使用的二次开发，主�
 
 ## 分支说明
 
-- `custom/command-code-channel`：**定制主线分支**，包含上述全部定制内容与后续修复。
-- `main`：保留了早期「项目开发模式（workflow）」相关提交作为历史线；该模式已在定制主线的后续提交中移除，不再属于当前定制版功能。
+- `main`：**默认分支与定制主线**，包含全部定制内容、修复与文档，后续开发都在这里进行。
+- `custom/command-code-channel`：早期开发用的定制分支，内容已全部并入 `main` 并与 `main` 保持同步，仅作历史保留。
 
 ## 上游 ZCode 使用说明
 
@@ -195,7 +195,21 @@ pnpm --filter @zcode/mobile run apk:debug
 
 #### 远程功能（SSH/WSL）
 
-先执行 `pnpm bootstrap:with-remote` 准备远程资源（mock-cdn），再 `pnpm dev:desktop`；连接远程项目时资源选择「本地下载后上传」。开发态资源取自本地 `packages/desktop/mock-cdn` 和本地构建产物，经 SFTP 上传到远程，不访问 CDN。
+**打包版默认不依赖 CDN。** 构建时 `prepare:runtime-assets` 会把 mock-cdn 里目标平台（默认 `linux-x64`，可用 `ZCODE_REMOTE_CDN_PLATFORMS` 改）的远端运行时资源裁剪出来，经 electron-builder 打进安装目录的 `resources/remote-assets`；连接远程项目时资源方式选默认的「本地上传（随包资源）」，桌面端直接读取随包文件并 SFTP 上传，不发起任何 CDN 请求。
+
+- 资源树体积：单平台约 165 MB（`node` 运行时占约 117 MB），会随安装包分发；用 `ZCODE_SKIP_LOCAL_REMOTE_ASSETS=1` 可跳过随包（此时本地上传无资源可用，需走「远端服务器下载」）。
+- 想改用外部资源目录而不重打包：设置 `ZCODE_REMOTE_ASSET_LOCAL_DIR=<含 releases/<版本>/ 的目录>` 即可覆盖随包资源；目录缺件时会明确报错，不会静默回退官方 CDN。
+- 手动重建资源树：`pnpm prepare:local-remote-assets --platforms linux-x64`（产出在 `packages/desktop/dist-remote-assets-local`）。
+- 仍需自建 CDN 发布树的场景只剩：安装包内没有随包资源（`ZCODE_SKIP_LOCAL_REMOTE_ASSETS=1` 打包），或想让「远端服务器下载」模式也用 fork 产物——该模式缺省拉 **ZCode 官方 CDN** 的产物（不含常驻运行等本定制版远端改动，连接时会明确拒绝「常驻运行 + 远端服务器下载」组合）。
+
+开发态：先执行 `pnpm bootstrap:with-remote` 准备远程资源（mock-cdn），再 `pnpm dev:desktop`；开发态资源取自本地 `packages/desktop/mock-cdn` 和本地构建产物，经 SFTP 上传到远程，同样不访问 CDN。
+
+构建后想复核「随包资源 → 真实远端 → 零 CDN」整条链路，可跑验收脚本（支持 WSL 与任意 SSH 目标）：
+
+```bash
+npx tsx packages/server/scripts/remote-local-assets-check.ts --wsl
+npx tsx packages/server/scripts/remote-local-assets-check.ts --ssh <host> --user <name> --password-file <file>
+```
 
 #### Web 开发
 
@@ -340,20 +354,20 @@ node dist/zcode/debug/zcode/bin/zcode.mjs --web \
 
 上游结构如下，`本定制版新增` 列出的目录为本仓库新增。
 
-| 目录                                                 | 职责                                       |
-| ---------------------------------------------------- | ------------------------------------------ |
-| `packages/companion`                                 | **本定制版新增**：手机远控的 gateway、协议、配对与授权 |
-| `packages/mobile`                                    | **本定制版新增**：Myzcode Android App（Capacitor） |
-| `packages/desktop`                                   | Electron Main、Host、Renderer 与桌面打包   |
-| `packages/web`                                       | Web 客户端                                 |
+| 目录                                                 | 职责                                                             |
+| ---------------------------------------------------- | ---------------------------------------------------------------- |
+| `packages/companion`                                 | **本定制版新增**：手机远控的 gateway、协议、配对与授权           |
+| `packages/mobile`                                    | **本定制版新增**：Myzcode Android App（Capacitor）               |
+| `packages/desktop`                                   | Electron Main、Host、Renderer 与桌面打包                         |
+| `packages/web`                                       | Web 客户端                                                       |
 | `packages/server`                                    | HTTP / WebSocket 服务与远程连接（含 `src/companion` 节点连接器） |
-| `packages/zcode-server-cli`                          | 独立 Server 启动与进程管理                 |
-| `packages/ui`                                        | 共享 React 组件、hooks 与 Zustand 状态     |
-| `packages/services`                                  | 业务服务与持久化                           |
-| `packages/shared`、`packages/rpc`、`packages/client` | 共享协议和类型、RPC 框架、Agent 客户端 SDK |
-| `packages/provider`、`packages/provider-node`        | Provider 公共能力与 Node 实现              |
-| `apps/zcode-cli`                                     | Agent CLI、TUI、运行时与工具               |
-| `scripts`、`config`、`third-party`                   | 构建维护脚本、内置配置与第三方声明材料     |
+| `packages/zcode-server-cli`                          | 独立 Server 启动与进程管理                                       |
+| `packages/ui`                                        | 共享 React 组件、hooks 与 Zustand 状态                           |
+| `packages/services`                                  | 业务服务与持久化                                                 |
+| `packages/shared`、`packages/rpc`、`packages/client` | 共享协议和类型、RPC 框架、Agent 客户端 SDK                       |
+| `packages/provider`、`packages/provider-node`        | Provider 公共能力与 Node 实现                                    |
+| `apps/zcode-cli`                                     | Agent CLI、TUI、运行时与工具                                     |
+| `scripts`、`config`、`third-party`                   | 构建维护脚本、内置配置与第三方声明材料                           |
 
 ## 二次开发声明
 

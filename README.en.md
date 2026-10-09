@@ -37,15 +37,18 @@ The Agent CLI and runtime source code lives in [apps/zcode-cli/](apps/zcode-cli/
 
 Additional setup and build commands:
 
-| Command                        | Purpose                                                                                                                             |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm install`                 | Install dependencies                                                                                                                |
-| `pnpm prepare:desktop-runtime` | Prepare desktop runtime assets, including remote assets by default                                                                  |
-| `pnpm prepare:remote-assets`   | Prepare remote runtime assets separately                                                                                            |
-| `pnpm bootstrap:with-remote`   | Set up dependencies and local and remote assets, then build the relevant packages sequentially; skip the desktop application bundle |
-| `pnpm build`                   | Recursively run each workspace package's build script, including its asset preparation steps                                        |
+| Command                            | Purpose                                                                                                                             |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm install`                     | Install dependencies                                                                                                                |
+| `pnpm prepare:desktop-runtime`     | Prepare desktop runtime assets, including remote assets by default                                                                  |
+| `pnpm prepare:remote-assets`       | Prepare remote runtime assets separately                                                                                            |
+| `pnpm prepare:local-remote-assets` | Trim `mock-cdn` into the platform assets that ship inside the installer (`resources/remote-assets`)                                 |
+| `pnpm bootstrap:with-remote`       | Set up dependencies and local and remote assets, then build the relevant packages sequentially; skip the desktop application bundle |
+| `pnpm build`                       | Recursively run each workspace package's build script, including its asset preparation steps                                        |
 
 The default `bootstrap` skips remote asset preparation and is suitable for local desktop development. Run the corresponding preparation command when working with remote workspaces or validating remote distribution assets.
+
+Packaged builds do not need a CDN: SSH/WSL remote runtime assets (server bundle, Node runtime, agent runtime, search tools) are trimmed to the target platforms and shipped inside the installer, then uploaded over SFTP at deploy time. `ZCODE_REMOTE_ASSET_LOCAL_DIR` overrides the bundled directory at runtime; `ZCODE_SKIP_LOCAL_REMOTE_ASSETS=1` skips bundling them. The opt-in "download on remote server" mode pulls official ZCode artifacts from `cdn-zcode.z.ai` by default (official artifacts do not include this fork's remote changes, so resident mode is unavailable and rejected in that mode). End-to-end verification: `npx tsx packages/server/scripts/remote-local-assets-check.ts --wsl`.
 
 ## Development and Usage
 
