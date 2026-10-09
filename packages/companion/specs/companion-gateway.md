@@ -216,7 +216,9 @@ connector 对手机暴露单一 channel（`IZCodeAgentService.channelName`），
 | window-controller（`controller-readonly`） | 只读方法 `listTaskList` + 订阅/续订/退订；帧（`onDynamicControllerFrame`）经 `filterControllerFrameToShared` 逐帧按共享集合过滤后才下发，帧封套（subscriptionId/logEpoch/fromSeq/toSeq）原样保留（seq 连续性是 gap 检测与 resync 的依据），全滤空的增量仍以空增量转发；无共享集合时拒绝订阅；`mutateTask`/`deleteArchivedTask(s)` 与其它事件永 T0；刻意不从帧学习 taskId 允许集（跨工作区操作仍须先 attach） |
 | 其余全部（file/git/agent 的顶层目标、一切写方法与按 taskId 的操作） | 不变：强制绑定值 / 拒绝 |
 
-- `allowSharedTopLevelWorkspace` 默认关闭，且**只允许** zcode-task 的只读列表方法开启。
+- `allowSharedTopLevelWorkspace` 默认关闭，且**只允许** zcode-task 的只读列表方法
+  与事件订阅开启（file/git/agent 等读写内容面绝不开启——它们的读内容必须留在所选
+  attachment 内）。
 - 写方法与按 taskId 的操作**不得**借只读索引跨工作区：`TaskScopedChannel` 的允许集仍然
   只学习绑定工作区内的 taskId，跨工作区操作必须先 attach 到该工作区（fail-closed）。
 - 集合未知（scope 未带 `sharedWorkspaces`）时全部退回旧行为，不放宽任何范围。
