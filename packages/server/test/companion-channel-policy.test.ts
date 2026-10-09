@@ -412,6 +412,48 @@ test("zcode-task：只读列表方法可指向共享集合内其它工作区；�
   );
 });
 
+test("zcode-task：workspace 事件订阅可指向共享集合内工作区（活度镜像），未共享仍绑回", async () => {
+  const listens: Array<{ event: string; arg: unknown }> = [];
+  const upstream: IChannel = {
+    async call<T>(): Promise<T> {
+      return {} as T;
+    },
+    listen(event: string, arg?: unknown) {
+      listens.push({ event, arg });
+      return ((_listener: (value: unknown) => void) => ({ dispose: () => undefined })) as never;
+    },
+  };
+  const scope = {
+    workspacePath: "/srv/ws",
+    workspaceIdentity: "/srv/ws",
+    sharedWorkspaces: [
+      { workspacePath: "/srv/ws", workspaceIdentity: "/srv/ws" },
+      { workspacePath: "/srv/other", workspaceIdentity: "/srv/other" },
+    ],
+  };
+  const channel = createPolicyChannel({
+    channelName: "zcode-task",
+    upstream,
+    policy: { kind: "task-scoped" },
+    scope,
+  });
+
+  // 共享工作区的 workspace 事件订阅：目标必须原样保留（否则桌面端对它的
+  // 归档/置顶/未读事件手机永远收不到——真机复现的活度断点）。
+  channel.listen("ctx", "onDynamicWorkspaceEvent", {
+    workspacePath: "/srv/other",
+    workspaceIdentity: "/srv/other",
+  });
+  assert.deepEqual(listens[0]!.arg, {
+    workspacePath: "/srv/other",
+    workspaceIdentity: "/srv/other",
+  });
+
+  // 未共享目标：改写成绑定工作区（fail-closed）。
+  channel.listen("ctx", "onDynamicWorkspaceEvent", { workspacePath: "/etc", workspaceIdentity: "/etc" });
+  assert.equal((listens[1]!.arg as { workspacePath: string }).workspacePath, "/srv/ws");
+});
+
 test("window-controller：只读列表/订阅放行；写方法与其它事件仍 T0", async () => {
   const { upstream, calls } = createRecordingUpstream();
   const scope = {

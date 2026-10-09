@@ -411,10 +411,18 @@ class TaskScopedChannel implements IServerChannel {
   }
 
   listen<T>(_ctx: unknown, event: string, arg?: unknown): Event<T> {
+    // 事件面同样允许共享集合内的顶层目标：侧栏的活度机制是按工作区订阅
+    // onDynamicWorkspaceEvent（workspace_task_list_changed 归属事件→bump→重读左表）。
+    // 若一律把订阅目标改写成绑定工作区，手机只能收到已 attach 工作区的事件——
+    // 桌面端对其它共享工作区的归档/置顶/未读变化手机永远收不到（真机复现）。
+    // 事件只来自手机已获准订阅的共享工作区，与只读索引同一授权边界。
     const inner = this.upstream.listen<T>(
       event,
-      shapeArgsWithScope(arg, this.scope, (workspacePath) =>
-        this.logReject(`scope outside shared set: ${workspacePath}`),
+      shapeArgsWithScope(
+        arg,
+        this.scope,
+        (workspacePath) => this.logReject(`scope outside shared set: ${workspacePath}`),
+        { allowSharedTopLevelWorkspace: true },
       ),
     );
     return ((listener: (value: T) => void) =>
