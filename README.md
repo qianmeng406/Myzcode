@@ -282,6 +282,9 @@ node apps/zcode-cli/packages/cli/dist/zcode.cjs --help
 
 ### 打包
 
+**发布打包（正式/Preview 双身份安装包、APK、随包远端资源、发布前核对清单与已知坑位）见
+[BUILD.md](BUILD.md)**，里面列了完整命令序列和踩过的坑，出包前照着核对一遍即可。
+
 第三方声明生成、发行校验流程及声明在发行物中的位置见 [third-party/README.md](third-party/README.md)。
 
 #### 桌面版
