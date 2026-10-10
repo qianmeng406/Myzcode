@@ -269,8 +269,6 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   gitState,
   browserNavigationRequest,
   browserRestoreUrls,
-  taskNativeSessionLogFile,
-  taskSessionFile,
   testMessages,
   conversationFindActiveIndex,
   conversationFindNavigationRequestId,
@@ -1589,6 +1587,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                     isMacDesktop={isMacDesktop}
                     isWindowsDesktop={isWindowsDesktop}
                     isSidebarVisible={isSidebarVisible}
+                    isWorkspaceVisible={isWorkspaceVisible}
                     onToggleSidebar={handleToggleSidebar}
                     toggleSidebarShortcutLabel={toggleSidebarShortcutLabel}
                     canGoBack={canPrimaryNavigationBack}
@@ -1715,11 +1714,6 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                           activeSessionId={activeSessionId}
                           activeTaskProvider={activeTaskProvider}
                           resolvedActiveTaskMeta={resolvedActiveTaskMeta}
-                          sessionLogPath={taskSessionFile.path}
-                          nativeSessionLogProvider={taskNativeSessionLogFile.provider}
-                          nativeSessionLogPath={taskNativeSessionLogFile.path}
-                          nativeSessionLogExists={taskNativeSessionLogFile.exists}
-                          nativeSessionLogLoading={taskNativeSessionLogFile.loading}
                           workspaceHeaderState={workspaceShellZCodeState}
                           gitSummary={gitState.summary}
                           gitDirtyFileCount={gitDirtyFileCount}

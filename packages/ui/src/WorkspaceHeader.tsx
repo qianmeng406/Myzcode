@@ -38,11 +38,6 @@ export function WorkspaceHeader({
   activeSessionId,
   activeTaskProvider,
   resolvedActiveTaskMeta,
-  sessionLogPath,
-  nativeSessionLogProvider,
-  nativeSessionLogPath,
-  nativeSessionLogExists,
-  nativeSessionLogLoading,
   workspaceHeaderState,
   gitSummary,
   gitDirtyFileCount,
@@ -81,11 +76,6 @@ export function WorkspaceHeader({
   activeSessionId: string | null;
   activeTaskProvider: ZCodeProvider | null;
   resolvedActiveTaskMeta?: ZCodeTaskMeta | null;
-  sessionLogPath: string | null;
-  nativeSessionLogProvider: ZCodeProvider | null;
-  nativeSessionLogPath: string | null;
-  nativeSessionLogExists: boolean;
-  nativeSessionLogLoading: boolean;
   workspaceHeaderState: WorkspaceHeaderState;
   gitSummary: GitRepositorySummary;
   gitDirtyFileCount: number;
@@ -178,11 +168,6 @@ export function WorkspaceHeader({
             resolvedActiveTaskMeta={resolvedActiveTaskMeta}
             gitSummary={gitSummary}
             gitDirtyFileCount={gitDirtyFileCount}
-            sessionLogPath={sessionLogPath}
-            nativeSessionLogProvider={nativeSessionLogProvider}
-            nativeSessionLogPath={nativeSessionLogPath}
-            nativeSessionLogExists={nativeSessionLogExists}
-            nativeSessionLogLoading={nativeSessionLogLoading}
             workspaceHeaderState={workspaceHeaderState}
             isMacDesktop={isMacDesktop}
             isMacFullscreen={isMacFullscreen}

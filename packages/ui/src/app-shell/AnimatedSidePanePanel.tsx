@@ -1247,6 +1247,8 @@ export function AnimatedSidePanePanel({
                             workspaceRemoteSessionId={workspaceRemoteSessionId}
                             gitState={gitState}
                             isDesktop={isDesktop}
+                            // 非活动 tab / 面板隐藏时不拉 diff 与批量预取（保留已加载 diff）。
+                            active={isVisible && tab.id === visibleActiveTabId}
                             selectedSourceId={activeGitSourceId}
                             fileChangeFindActiveIndex={fileChangeFindActiveIndex}
                             fileChangeFindNavigationRequestId={fileChangeFindNavigationRequestId}

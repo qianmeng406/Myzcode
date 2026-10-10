@@ -85,6 +85,8 @@ export function FileExplorerSidePane({
           workspaceRemoteSessionId={workspaceRemoteSessionId}
           canOpenLocalFileManager={canOpenLocalFileManager}
           activePreviewPath={previewPath ?? null}
+          // 非活动 tab / 面板隐藏时暂停树专属查询与 watcher（保留缓存）。
+          active={active}
           onOpenBrowserUrl={onOpenBrowserUrl}
           onOpenPreview={handleOpenPreview}
         />

@@ -40,6 +40,9 @@ import {
   loadConversationTurnNavigatorEnabled, persistConversationTurnNavigatorEnabled,
 } from "@/lib/conversationTurnNavigatorPreference.js";
 import {
+  loadAssistantAutoFilePreviewEnabled, persistAssistantAutoFilePreviewEnabled,
+} from "@/lib/assistantAutoFilePreviewPreference.js";
+import {
   loadCodePreviewSettings, persistCodePreviewSettings,
 } from "@/lib/codePreviewPersistence.js";
 import {
@@ -107,6 +110,10 @@ export interface ZCodeState {
   /** 会话回合导航开关（rail + 完整历史补拉）；纯展示偏好，默认关闭。 */
   conversationTurnNavigatorEnabled: boolean;
   setConversationTurnNavigatorEnabled: (enabled: boolean) => void;
+
+  /** 消息 Markdown/HTML 文件预览自动加载；纯展示偏好，默认开启（仅显式 false 关闭）。 */
+  assistantAutoFilePreviewEnabled: boolean;
+  setAssistantAutoFilePreviewEnabled: (enabled: boolean) => void;
 
   /** 是否启用任务通知（桌面通知；提示音由子开关控制） */
   notificationEnabled: boolean;
@@ -197,10 +204,12 @@ export interface ZCodeState {
 
 const BROADCAST_FIELDS = new Set([
   "theme", "locale", "uiFontSizePx", "interfaceMode", "conversationTurnNavigatorEnabled",
+  "assistantAutoFilePreviewEnabled",
 ]);
 
 type BroadcastField =
-  | "theme" | "locale" | "uiFontSizePx" | "interfaceMode" | "conversationTurnNavigatorEnabled";
+  | "theme" | "locale" | "uiFontSizePx" | "interfaceMode" | "conversationTurnNavigatorEnabled"
+  | "assistantAutoFilePreviewEnabled";
 
 /** 广播频道名前缀 */
 const STATE_CHANNEL_PREFIX = "state:";
@@ -290,6 +299,12 @@ export function createZCodeStore(
     setConversationTurnNavigatorEnabled: (enabled: boolean) => {
       persistConversationTurnNavigatorEnabled(enabled);
       set({ conversationTurnNavigatorEnabled: enabled });
+    },
+
+    assistantAutoFilePreviewEnabled: loadAssistantAutoFilePreviewEnabled(),
+    setAssistantAutoFilePreviewEnabled: (enabled: boolean) => {
+      persistAssistantAutoFilePreviewEnabled(enabled);
+      set({ assistantAutoFilePreviewEnabled: enabled });
     },
 
     notificationEnabled: isTaskNotificationEnabled(),
@@ -477,6 +492,8 @@ export function createZCodeStore(
         state.setUiFontSizePx(msg.payload);
       } else if (field === "conversationTurnNavigatorEnabled" && typeof msg.payload === "boolean") {
         state.setConversationTurnNavigatorEnabled(msg.payload);
+      } else if (field === "assistantAutoFilePreviewEnabled" && typeof msg.payload === "boolean") {
+        state.setAssistantAutoFilePreviewEnabled(msg.payload);
       }
     } finally {
       applyingBroadcast = false;

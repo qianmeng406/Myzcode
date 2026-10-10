@@ -51,6 +51,8 @@ import {
   type AssistantCodeCommentCard,
 } from "@/lib/assistantCodeComment.js";
 import { useAssistantPreviewCardsForAssistantTextRow } from "@/v4/useAssistantPreviewCardsForRow.js";
+import type { AssistantPreviewLoadAction } from "@/lib/onDemandLoadingGuards.js";
+import { Button } from "@/components/ui/button.js";
 import { shouldShowTurnChatLoading } from "@/v4/chatLoadingVisibility.js";
 import {
   buildAssistantWorkRenderItems,
@@ -805,7 +807,12 @@ function ConversationTurnFlow({
     isRunning: unit.isRunning,
     rows: unit.assistantWorkRows,
   });
-  const assistantPreviewCards = useAssistantPreviewCardsForAssistantTextRow({
+  const {
+    cards: assistantPreviewCards,
+    loadAction: assistantPreviewLoadAction,
+    manualLoading: assistantPreviewLoadPending,
+    loadManually: loadAssistantPreviewManually,
+  } = useAssistantPreviewCardsForAssistantTextRow({
     row: unit.latestAssistantTextRow,
     assistantTextRows: unit.assistantTextRows,
     latestAssistantTextRow: unit.latestAssistantTextRow,
@@ -816,6 +823,8 @@ function ConversationTurnFlow({
       : null,
     fileChangesState: unit.header?.fileChanges?.state,
     fetchFileChanges: context.fetchFileChanges,
+    autoPreviewEnabled: context.assistantAutoFilePreviewEnabled,
+    presentationVisible: context.presentationVisible,
   });
 
   if (unit.timelineOnly) {
@@ -892,7 +901,47 @@ function ConversationTurnFlow({
           shareSelectionRowId={shareSelectionRowId}
         />
       ))}
+      <AssistantPreviewManualLoadAction
+        loadAction={assistantPreviewLoadAction}
+        loading={assistantPreviewLoadPending}
+        onLoad={loadAssistantPreviewManually}
+      />
       <TurnChatLoadingSlot apiRetry={apiRetry} eligible={showLoading} />
+    </div>
+  );
+}
+
+/**
+ * 自动预览关闭时的轻量手动入口：仅当本回合确实有 md/html 引用且未加载时出现；
+ * 点击走与自动加载完全相同的权威 fileChanges 读取与 builder（失败保留按钮作重试）。
+ */
+function AssistantPreviewManualLoadAction({
+  loadAction,
+  loading,
+  onLoad,
+}: {
+  loadAction: AssistantPreviewLoadAction;
+  loading: boolean;
+  onLoad: () => void;
+}) {
+  const { intl } = useZCodeIntl();
+  if (loadAction !== "manual") {
+    return null;
+  }
+  return (
+    <div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="w-fit"
+        disabled={loading}
+        onClick={onLoad}
+      >
+        {intl.formatMessage({
+          id: loading ? "common.loading" : "chat.assistantPreview.loadPreview",
+        })}
+      </Button>
     </div>
   );
 }
@@ -974,7 +1023,12 @@ function ConversationBackgroundResultWork({
     rows: unit.assistantWorkRows,
   });
   const latestAssistantTextRow = unit.latestAssistantTextRow;
-  const assistantPreviewCards = useAssistantPreviewCardsForAssistantTextRow({
+  const {
+    cards: assistantPreviewCards,
+    loadAction: assistantPreviewLoadAction,
+    manualLoading: assistantPreviewLoadPending,
+    loadManually: loadAssistantPreviewManually,
+  } = useAssistantPreviewCardsForAssistantTextRow({
     row: latestAssistantTextRow,
     assistantTextRows: unit.assistantTextRows,
     latestAssistantTextRow,
@@ -985,6 +1039,8 @@ function ConversationBackgroundResultWork({
       : null,
     fileChangesState: unit.header?.fileChanges?.state,
     fetchFileChanges: context.fetchFileChanges,
+    autoPreviewEnabled: context.assistantAutoFilePreviewEnabled,
+    presentationVisible: context.presentationVisible,
   });
 
   // 后台结果已经由独立唤醒轮总结过；复用普通 assistant 的工时折叠
@@ -1087,6 +1143,11 @@ function ConversationBackgroundResultWork({
           assistantCodeCommentProjectionEnabled={assistantCodeCommentProjectionEnabled}
         />
       ) : null}
+      <AssistantPreviewManualLoadAction
+        loadAction={assistantPreviewLoadAction}
+        loading={assistantPreviewLoadPending}
+        onLoad={loadAssistantPreviewManually}
+      />
       {hasFollowing ? (
         <ConversationAssistantWorkItems
           rows={unit.assistantFollowingRows}

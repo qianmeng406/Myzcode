@@ -1454,6 +1454,8 @@ const zhCN: Record<string, string> = {
   "fileActions.copyFileFailed": "复制文件失败",
   "fileActions.copyRelativePath": "复制相对路径",
   "appHeader.copyTaskPath": "复制任务路径",
+  "appHeader.retryLoadTaskPath": "重试加载任务路径",
+  "appHeader.retryLoadTaskLogPath": "重试加载日志路径",
   "appHeader.reloadSession": "重载会话",
   "appHeader.reloadSessionSuccess": "会话已重载",
   "appHeader.reloadSessionFailed": "重载会话失败",
@@ -1998,6 +2000,7 @@ const zhCN: Record<string, string> = {
   "chat.turnNavigator.emptyAssistant": "暂无助手正文",
   "chat.turnNavigator.runningAssistant": "助手仍在工作",
   "chat.turnNavigator.userFallback": "用户输入",
+  "chat.assistantPreview.loadPreview": "加载预览",
   "chat.rewind.conflictConfirm":
     "以下文件在该轮之后被外部修改过，强制回滚可能导致冲突：\n\n{paths}",
   "taskNav.back": "后退",
@@ -2108,6 +2111,9 @@ const zhCN: Record<string, string> = {
   "settings.conversationTurnNavigator": "会话回合导航",
   "settings.conversationTurnNavigatorDescription":
     "在聊天左侧显示回合索引，并自动补齐完整历史。长会话中关闭可减少加载与计算开销。",
+  "settings.assistantAutoFilePreview": "自动加载文件预览",
+  "settings.assistantAutoFilePreviewDescription":
+    "自动识别回复中引用的 Markdown/HTML 文件并加载预览卡片。关闭后改为点击“加载预览”手动获取。",
   "settings.systemTitle": "常规",
   "settings.systemDescription": "这些设置会影响当前窗口的显示与交互。",
   "settings.locale": "界面语言",

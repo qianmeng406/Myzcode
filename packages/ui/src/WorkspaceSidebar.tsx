@@ -248,7 +248,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
   isDesktop = false,
   isMacDesktop: _isMacDesktop = false,
   isWindowsDesktop = false,
-  isSidebarVisible: _isSidebarVisible = true,
+  isSidebarVisible = true,
+  isWorkspaceVisible = true,
   onToggleSidebar: _onToggleSidebar,
   toggleSidebarShortcutLabel: _toggleSidebarShortcutLabel,
   canGoBack: _canGoBack = false,
@@ -301,6 +302,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
   isMacDesktop?: boolean;
   isWindowsDesktop?: boolean;
   isSidebarVisible?: boolean;
+  /** 工作区整体可见（设置覆盖时 false）：与侧栏/文件树开闭共同裁决树的按需加载资格。 */
+  isWorkspaceVisible?: boolean;
   onToggleSidebar?: () => void;
   toggleSidebarShortcutLabel?: string;
   canGoBack?: boolean;
@@ -632,6 +635,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
     taskViewMode === "archived" ||
     taskViewMode === "grouped";
   const workspaceScrollRef = useRef<HTMLDivElement | null>(null);
+  // 任务列表各视图的共同展示资格（视图组件是否挂载由 taskViewMode 决定）。
+  const taskDisplayEnabled = isWorkspaceVisible && isSidebarVisible && !isFileTreeOpen;
   const [showWorkspaceTopMask, setShowWorkspaceTopMask] = useState(false);
   const [showWorkspaceBottomMask, setShowWorkspaceBottomMask] = useState(false);
   const workspaceSensors = useSensors(
@@ -651,6 +656,14 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
     sortBy: taskSortBy,
     visibleLimitByWorkspaceKey: workspaceTaskVisibleLimitByKey,
     defaultVisibleLimit: WORKSPACE_TASK_PAGE_SIZE,
+    // 任务列表是展示消费者：侧栏隐藏/被文件树覆盖/设置覆盖/非项目视图或项目区收起时
+    // 暂停查询与分组派生（未读与 membership 事件同步不受影响）。
+    enabled:
+      isWorkspaceVisible &&
+      isSidebarVisible &&
+      !isFileTreeOpen &&
+      taskViewMode === "workspace" &&
+      purposeSectionPreferences.projectsExpanded,
   });
   const workspaceTaskGroupByKey = useMemo(
     () =>
@@ -1385,6 +1398,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
                   activeWorkspaceIdentity={workspaceIdentity}
                   activeTaskId={activeTaskId}
                   taskSortBy={taskSortBy}
+                  displayEnabled={taskDisplayEnabled}
                   onSelectTask={handleTaskRowSelect}
                   onOpenFileTree={(target) => {
                     setFileTreeTarget(target);
@@ -1401,6 +1415,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
                     activeWorkspaceIdentity={workspaceIdentity}
                     activeTaskId={activeTaskId}
                     sortBy={taskSortBy}
+                    displayEnabled={taskDisplayEnabled}
                     onSelectTask={onSelectTask}
                   />
                 ) : taskViewMode === "grouped" ? (
@@ -1409,6 +1424,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
                     activeWorkspacePath={workspacePath}
                     activeWorkspaceIdentity={workspaceIdentity}
                     activeTaskId={activeTaskId}
+                    displayEnabled={taskDisplayEnabled}
                     onSelectTask={onSelectTask}
                     onCreateTask={onCreateTask}
                     onOpenFileTree={(target) => {
@@ -1430,6 +1446,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
                     activeWorkspaceIdentity={workspaceIdentity}
                     activeTaskId={activeTaskId}
                     taskSortBy={taskSortBy}
+                    displayEnabled={taskDisplayEnabled}
                     onSelectTask={handleTaskRowSelect}
                   />
                 ) : (
@@ -1640,6 +1657,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
                                 activeWorkspaceIdentity={workspaceIdentity}
                                 activeTaskId={activeTaskId}
                                 taskSortBy={taskSortBy}
+                                displayEnabled={taskDisplayEnabled}
                                 groupByDate={false}
                                 // conversation backing workspace 只是内部执行路径；用户文案改成“任务”不改变 purpose 语义。
                                 taskRowVariant="default"
@@ -1695,6 +1713,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
               temporaryExternalDirectory={fileTreeTarget.temporaryExternalDirectory}
               canOpenLocalFileManager={isDesktop}
               activePreviewPath={activePreviewPath}
+              // 文件树隐藏（侧栏收起 / 树关闭 / 设置覆盖）时暂停树专属查询与 watcher。
+              active={isWorkspaceVisible && isSidebarVisible && isFileTreeOpen}
               onClose={() => setIsFileTreeOpen(false)}
               onOpenBrowserUrl={isDesktop ? onOpenBrowserUrl : undefined}
               onOpenPreview={(source) => {

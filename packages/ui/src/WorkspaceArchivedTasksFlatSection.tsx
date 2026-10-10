@@ -27,6 +27,7 @@ export function WorkspaceArchivedTasksFlatSection({
   activeWorkspaceIdentity,
   activeTaskId,
   sortBy,
+  displayEnabled = true,
   actionsContainer,
   onSelectTask,
 }: {
@@ -35,6 +36,8 @@ export function WorkspaceArchivedTasksFlatSection({
   activeWorkspaceIdentity?: string;
   activeTaskId: string | null;
   sortBy: "created" | "updated";
+  /** 展示区可见资格（默认 true）：隐藏时暂停列表查询，保留最后可信列表。 */
+  displayEnabled?: boolean;
   actionsContainer?: HTMLElement | null;
   onSelectTask: (
     targetWorkspacePath: string,
@@ -89,6 +92,7 @@ export function WorkspaceArchivedTasksFlatSection({
     searchQuery: "",
     expanded: showAllTasks,
     collapsedLimit,
+    enabled: displayEnabled,
   });
   const canToggleExpanded = total > collapsedLimit;
 

@@ -17,6 +17,7 @@ import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import { useGlobalTaskList } from "@/hooks/useGlobalTaskList.js";
 import { useBaseWorkspaceServices, useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { useTaskListItemContextActions } from "@/useTaskListItemContextActions.js";
+import { shouldLoadTaskMenuPaths } from "@/lib/onDemandLoadingGuards.js";
 import { TaskActionMenuContent } from "@/TaskActionMenuContent.js";
 import {
   DropdownMenu,
@@ -88,11 +89,6 @@ export function WorkspaceHeaderTitleSection({
   resolvedActiveTaskMeta,
   gitSummary,
   gitDirtyFileCount: _gitDirtyFileCount,
-  sessionLogPath: _sessionLogPath,
-  nativeSessionLogProvider: _nativeSessionLogProvider,
-  nativeSessionLogPath: _nativeSessionLogPath,
-  nativeSessionLogExists: _nativeSessionLogExists,
-  nativeSessionLogLoading: _nativeSessionLogLoading,
   reloadSessionPending,
   workspaceHeaderState,
   onRefreshGit: _onRefreshGit,
@@ -179,6 +175,12 @@ export function WorkspaceHeaderTitleSection({
     // 任务日志查询与 Header 当前展示态使用同一个 provider。
     provider: menuTaskProvider,
     intl,
+    // Header 更多菜单是这两条路径查询的唯一需求方：菜单打开且 task 已落库才查询，
+    // 不在会话切换/列表重排时提前查（见 specs/task-menu-path-loading.md）。
+    loadTaskPaths: shouldLoadTaskMenuPaths({
+      menuOpen: taskMenuOpen,
+      taskId: resolvedTaskActionTaskId,
+    }),
   });
   const remoteWorkspaceHostLabel = remoteTarget
     ? formatRemoteWorkspaceHeaderHostLabel(remoteTarget)

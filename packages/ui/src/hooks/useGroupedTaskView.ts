@@ -583,7 +583,11 @@ function writeCachedGroupedView(signature: string, view: ZCodeGroupedTaskView): 
   }
 }
 
-export function useGroupedTaskView(params: { workspaceTabs: WorkspaceTabState[] }) {
+export function useGroupedTaskView(params: {
+  workspaceTabs: WorkspaceTabState[];
+  /** 展示消费者资格（默认 true）：隐藏时暂停 Controller task facts 查询。 */
+  displayEnabled?: boolean;
+}) {
   const services = useBaseWorkspaceServices();
   // grouped 仍是本地 workspace-only，但 task facts 也必须来自窗口 Controller，不能在
   // Renderer 另起 sessions-index join。分组结构/顺序继续走本地 task service，避免能力扩张。
@@ -661,6 +665,7 @@ export function useGroupedTaskView(params: { workspaceTabs: WorkspaceTabState[] 
     searchQuery: "",
     expanded: true,
     collapsedLimit: 1,
+    enabled: params.displayEnabled ?? true,
   });
   const sessionsIndexItems = controllerTaskFacts.items;
   // 缓存命中即视为已初始化：重挂载后 Controller 列表会重新进入 loading，若不把闩锁一起

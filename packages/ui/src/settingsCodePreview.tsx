@@ -87,6 +87,8 @@ export function AppearanceSectionContent({
   setUiFontSizePx,
   conversationTurnNavigatorEnabled,
   setConversationTurnNavigatorEnabled,
+  assistantAutoFilePreviewEnabled,
+  setAssistantAutoFilePreviewEnabled,
 }: {
   codePreviewSettings: CodePreviewSettings;
   setCodePreviewSettings: (settings: Partial<CodePreviewSettings>) => void;
@@ -96,6 +98,8 @@ export function AppearanceSectionContent({
   setUiFontSizePx: (fontSizePx: number) => void;
   conversationTurnNavigatorEnabled: boolean;
   setConversationTurnNavigatorEnabled: (enabled: boolean) => void;
+  assistantAutoFilePreviewEnabled: boolean;
+  setAssistantAutoFilePreviewEnabled: (enabled: boolean) => void;
 }) {
   const { intl } = useZCodeIntl();
   const activePreviewMode = resolveTheme(theme);
@@ -165,6 +169,18 @@ export function AppearanceSectionContent({
                 <Switch
                   checked={conversationTurnNavigatorEnabled}
                   onCheckedChange={setConversationTurnNavigatorEnabled}
+                />
+              }
+            />
+            <SettingsRow
+              label={intl.formatMessage({ id: "settings.assistantAutoFilePreview" })}
+              description={intl.formatMessage({
+                id: "settings.assistantAutoFilePreviewDescription",
+              })}
+              control={
+                <Switch
+                  checked={assistantAutoFilePreviewEnabled}
+                  onCheckedChange={setAssistantAutoFilePreviewEnabled}
                 />
               }
             />

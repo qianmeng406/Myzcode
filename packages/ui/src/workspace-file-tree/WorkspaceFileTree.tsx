@@ -94,6 +94,7 @@ export function WorkspaceFileTree({
   temporaryExternalDirectory = false,
   canOpenLocalFileManager = false,
   activePreviewPath,
+  active = true,
   onClose,
   onOpenBrowserUrl,
   onOpenPreview,
@@ -123,6 +124,7 @@ export function WorkspaceFileTree({
     workspaceIdentity,
     workspaceRemoteSessionId,
     enableWorkspaceFeatures: !temporaryExternalDirectory,
+    active,
   });
   const { installedEditors } = useInstalledFileTreeEditors();
   const isRemoteWorkspaceFileTree = Boolean(workspaceRemoteSessionId || workspaceIdentity);
@@ -150,7 +152,8 @@ export function WorkspaceFileTree({
     workspacePath,
     workspaceIdentity,
     workspaceRemoteSessionId,
-    enabled: hasFileSearchQuery,
+    // 搜索索引只在树可见且有 query 时分块拉取；隐藏时中断在途分块，保留搜索输入。
+    enabled: active && hasFileSearchQuery,
   });
   const {
     entries: searchIndexEntries,

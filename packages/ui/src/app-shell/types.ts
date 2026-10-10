@@ -187,12 +187,6 @@ export interface WorkspaceShellLayoutProps extends Omit<AppProps, "baseFeedbackS
   gitState: ReturnType<typeof import("@/hooks/useGitRepository.js").useGitRepository>;
   browserNavigationRequest: BrowserNavigationRequest | null;
   browserRestoreUrls: Record<string, string>;
-  taskNativeSessionLogFile: ReturnType<
-    typeof import("@/hooks/useTaskNativeSessionLogFile.js").useTaskNativeSessionLogFile
-  >;
-  taskSessionFile: ReturnType<
-    typeof import("@/hooks/useTaskSessionFilePath.js").useTaskSessionFilePath
-  >;
   testMessages: import("@/lib/taskChatMessageTypes.js").TaskChatMessage[] | null;
   conversationFindActiveIndex: number;
   conversationFindNavigationRequestId: number;

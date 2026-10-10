@@ -349,6 +349,12 @@ export function SettingsPage({
   const setConversationTurnNavigatorEnabled = useZCodeStore(
     (state) => state.setConversationTurnNavigatorEnabled,
   );
+  const assistantAutoFilePreviewEnabled = useZCodeStore(
+    (state) => state.assistantAutoFilePreviewEnabled,
+  );
+  const setAssistantAutoFilePreviewEnabled = useZCodeStore(
+    (state) => state.setAssistantAutoFilePreviewEnabled,
+  );
   const notificationEnabled = useZCodeStore((state) => state.notificationEnabled);
   const setNotificationEnabled = useZCodeStore((state) => state.setNotificationEnabled);
   const notificationSoundEnabled = useZCodeStore((state) => state.notificationSoundEnabled);
@@ -1836,6 +1842,22 @@ export function SettingsPage({
                                   trigger: "switch",
                                 },
                                 operation: () => setConversationTurnNavigatorEnabled(enabled),
+                                completed: {
+                                  resultSource: "local_commit",
+                                  valueAfter: enabled ? "enabled" : "disabled",
+                                },
+                                failureStage: "local_commit",
+                              })
+                            }
+                            assistantAutoFilePreviewEnabled={assistantAutoFilePreviewEnabled}
+                            setAssistantAutoFilePreviewEnabled={(enabled) =>
+                              runUserAction({
+                                input: {
+                                  featureId: "settings.appearance",
+                                  action: "toggle_assistant_auto_file_preview",
+                                  trigger: "switch",
+                                },
+                                operation: () => setAssistantAutoFilePreviewEnabled(enabled),
                                 completed: {
                                   resultSource: "local_commit",
                                   valueAfter: enabled ? "enabled" : "disabled",

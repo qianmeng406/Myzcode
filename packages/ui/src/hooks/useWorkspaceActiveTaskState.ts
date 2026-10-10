@@ -1,8 +1,6 @@
 import { useMemo, useRef } from "react";
 import type { ZCodeProvider, ZCodeTaskMeta } from "@zcode/shared";
 import { useActiveTaskSnapshotMeta } from "@/hooks/useActiveTaskSnapshotMeta.js";
-import { useTaskNativeSessionLogFile } from "@/hooks/useTaskNativeSessionLogFile.js";
-import { useTaskSessionFilePath } from "@/hooks/useTaskSessionFilePath.js";
 import { buildTaskEntityKey } from "@/lib/taskQueryCache.js";
 import { mergeTaskMetaCandidates } from "@/lib/zcodeTaskMetaMerge.js";
 import { resolveWorkspaceHeaderProvider } from "@/lib/workspaceHeaderProvider.js";
@@ -143,13 +141,6 @@ export function useWorkspaceActiveTaskState({
           : "taskList.newThread",
       });
   const activeTaskTitle = activeTaskBaseTitle;
-  const taskNativeSessionLogFile = useTaskNativeSessionLogFile(
-    workspaceAbsPath,
-    activeTaskId,
-    activeTaskProvider,
-    workspaceIdentity,
-  );
-  const taskSessionFile = useTaskSessionFilePath(workspaceAbsPath, activeTaskId, workspaceIdentity);
 
   return {
     activeTaskMeta,
@@ -160,7 +151,5 @@ export function useWorkspaceActiveTaskState({
     workspaceHeaderProvider,
     activeTaskChangeSummary,
     activeTaskTitle,
-    taskNativeSessionLogFile,
-    taskSessionFile,
   };
 }

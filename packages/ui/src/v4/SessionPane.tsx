@@ -324,6 +324,12 @@ export interface SessionPaneProps {
    * 只影响 foreground UI telemetry，不影响 live subscription 或后台 /event/report。
    */
   telemetryVisible?: boolean;
+  /**
+   * 展示可见性（与 focused/telemetryVisible 分离）：不可见时只暂停纯展示工作
+   * （运行中时钟等），消息/权限/任务状态照常（见 specs/hidden-presentation-pause.md）。
+   * 缺省 true，兼容未传的宿主。
+   */
+  presentationVisible?: boolean;
   /** 向右拆分新 draft 窗格（叶子数达上限时宿主不下发）。 */
   onSplitRight?: () => void;
   /** 向下拆分新 draft 窗格。 */
@@ -483,6 +489,11 @@ function shouldRestoreQueuedComposerFromAck(status: CommandAck["status"]): boole
   return status === "accepted" || status === "duplicate";
 }
 
+// 分享索引未激活时的稳定空引用：避免 memo 默认值每次渲染换新引用。
+const EMPTY_SHARE_RENDER_UNITS: ReturnType<typeof buildConversationTurnRenderUnits> = [];
+const EMPTY_SHARE_ITEMS: ReturnType<typeof buildConversationTurnNavigatorItems> = [];
+const EMPTY_SHARE_ROW_IDS: ReadonlySet<number> = new Set();
+
 /**
  * 单 pane 竖切：订阅 → 渲染 rows → composer 发送 / stop。
  *
@@ -510,6 +521,7 @@ export function SessionPane({
   onSelectionSideChatUnavailable,
   focused = true,
   telemetryVisible = true,
+  presentationVisible = true,
   onSplitRight,
   onSplitDown,
   onClosePane,
@@ -653,32 +665,43 @@ export function SessionPane({
     enabled: shareSelectionPanelVisible,
     onDismiss: dismissShareSelectionPanel,
   });
+  // 分享专属索引只在分享流程存在时构建（见 specs/hidden-presentation-pause.md）：
+  // 未进入分享时返回稳定空引用，不随 rows 变化重建回合结构与集合；
+  // 收起面板/配置阶段仍算分享中，shareActive 覆盖全流程。
   const shareRenderUnits = useMemo(
-    () => buildConversationTurnRenderUnits(snapshot?.rows.window ?? []),
-    [snapshot?.rows.window],
+    () =>
+      shareActive
+        ? buildConversationTurnRenderUnits(snapshot?.rows.window ?? [])
+        : EMPTY_SHARE_RENDER_UNITS,
+    [shareActive, snapshot?.rows.window],
   );
   const shareItems = useMemo(
     () =>
-      buildConversationTurnNavigatorItems(shareRenderUnits, {
-        assistantEmptyPreview: intl.formatMessage({
-          id: "chat.turnNavigator.emptyAssistant",
-        }),
-        assistantRunningPreview: intl.formatMessage({
-          id: "chat.turnNavigator.runningAssistant",
-        }),
-        userFallbackPreview: intl.formatMessage({
-          id: "chat.turnNavigator.userFallback",
-        }),
-      }),
-    [intl, shareRenderUnits],
+      shareActive
+        ? buildConversationTurnNavigatorItems(shareRenderUnits, {
+            assistantEmptyPreview: intl.formatMessage({
+              id: "chat.turnNavigator.emptyAssistant",
+            }),
+            assistantRunningPreview: intl.formatMessage({
+              id: "chat.turnNavigator.runningAssistant",
+            }),
+            userFallbackPreview: intl.formatMessage({
+              id: "chat.turnNavigator.userFallback",
+            }),
+          })
+        : EMPTY_SHARE_ITEMS,
+    [intl, shareActive, shareRenderUnits],
   );
   const eligibleShareItems = useMemo(
-    () => shareItems.filter((item) => !item.isRunning),
-    [shareItems],
+    () => (shareActive ? shareItems.filter((item) => !item.isRunning) : EMPTY_SHARE_ITEMS),
+    [shareActive, shareItems],
   );
   const eligibleShareRowIds = useMemo(
-    () => new Set(eligibleShareItems.map((item) => item.rowId)),
-    [eligibleShareItems],
+    () =>
+      shareActive
+        ? new Set(eligibleShareItems.map((item) => item.rowId))
+        : EMPTY_SHARE_ROW_IDS,
+    [shareActive, eligibleShareItems],
   );
   useEffect(() => {
     if (!sessionId || !shareActive) return;
@@ -1409,6 +1432,11 @@ export function SessionPane({
   const conversationTurnNavigatorEnabled = useZCodeStoreWithDefault(
     (state) => state.conversationTurnNavigatorEnabled,
     false,
+  );
+  // 消息文件预览自动加载开关（默认开启）：关闭后改为回合内「加载预览」手动触发。
+  const assistantAutoFilePreviewEnabled = useZCodeStoreWithDefault(
+    (state) => state.assistantAutoFilePreviewEnabled,
+    true,
   );
   // Tier 1 fork 跳转：点 child 会话的 forkNotice → 把当前 pane 原地切到父会话，复用 fork
   // 落地同款 onSessionCreated（primary→setActiveTaskId、分屏→bindPaneSession）。rowId 预留
@@ -2204,6 +2232,8 @@ export function SessionPane({
       chatLoadingBlockedByActiveWork,
       chatLoadingBlockedByInteraction,
       messageStreamShowReasoning,
+      assistantAutoFilePreviewEnabled,
+      presentationVisible,
       messageStreamShowTodos,
       toolGroupingExploreEnabled,
       toolGroupingTerminalEnabled,
@@ -2270,6 +2300,8 @@ export function SessionPane({
       chatLoadingBlockedByActiveWork,
       chatLoadingBlockedByInteraction,
       messageStreamShowReasoning,
+      assistantAutoFilePreviewEnabled,
+      presentationVisible,
       messageStreamShowTodos,
       toolGroupingExploreEnabled,
       toolGroupingTerminalEnabled,
@@ -4839,6 +4871,7 @@ export function SessionPane({
               bottomDock={conversationBottomDock}
               hideTurnNavigator={shareActive && shareInSelectionStage}
               turnNavigatorEnabled={conversationTurnNavigatorEnabled}
+              presentationVisible={presentationVisible}
               backgroundScrollLocked={resolveConversationShareBackgroundScrollLocked({
                 partialShareActive: shareActive,
                 stage: shareDraft?.stage ?? "selection",

@@ -89,6 +89,7 @@ import {
 import { useConversationTimelineFind } from "@/v4/useConversationTimelineFind.js";
 import { ConversationSelectionTooltip } from "@/v4/ConversationSelectionTooltip.js";
 import type { ConversationSelectionReference } from "@/lib/conversationSelectionReference.js";
+import { shouldRunPresentationClock } from "@/lib/onDemandLoadingGuards.js";
 
 // memo 组件参数中的 `pendingGuides = []` 会在每次调用时创建新引用，
 // 让未传该属性的渲染绕过稳定引用边界；共享只读空数组可保持默认值恒定。
@@ -354,6 +355,11 @@ interface ConversationTimelineProps {
    * 普通向上分页不受影响。
    */
   turnNavigatorEnabled?: boolean;
+  /**
+   * 展示可见性（缺省 true）：false 时暂停纯展示工作（运行中每秒时钟等），
+   * 消息行/投影数据照常渲染（见 specs/hidden-presentation-pause.md）。
+   */
+  presentationVisible?: boolean;
 }
 
 /**
@@ -402,6 +408,7 @@ function ConversationTimelineImpl({
   shareSelection,
   hideTurnNavigator = false,
   turnNavigatorEnabled = false,
+  presentationVisible = true,
 }: ConversationTimelineProps) {
   const { intl } = useZCodeIntl();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -591,7 +598,9 @@ function ConversationTimelineImpl({
   }, [backgroundScrollLocked, selectionPanelLayoutContainerRef, syncShareSelectionPanelLayout]);
 
   useEffect(() => {
-    if (!hasRunningUnit) {
+    // 展示不可见（设置覆盖/收起的侧边 transcript）时停掉每秒 tick：
+    // 只影响“工作中 N 秒”文案推进，数据/投影照常；恢复可见立即校准当前时间。
+    if (!shouldRunPresentationClock({ presentationVisible, hasRunningUnit })) {
       return;
     }
 
@@ -603,7 +612,7 @@ function ConversationTimelineImpl({
     }, RUNNING_WORK_DURATION_TICK_MS);
 
     return () => window.clearInterval(timer);
-  }, [hasRunningUnit]);
+  }, [hasRunningUnit, presentationVisible]);
 
   useLayoutEffect(() => {
     const element = timelineRootRef.current;

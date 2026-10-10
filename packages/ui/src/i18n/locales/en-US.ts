@@ -1579,6 +1579,8 @@ const enUS: Record<string, string> = {
   "fileActions.copyFileFailed": "Failed to copy file",
   "fileActions.copyRelativePath": "Copy relative path",
   "appHeader.copyTaskPath": "Copy task path",
+  "appHeader.retryLoadTaskPath": "Retry loading task path",
+  "appHeader.retryLoadTaskLogPath": "Retry loading log path",
   "appHeader.copySessionId": "Copy session ID",
   "appHeader.reloadSession": "Reload session",
   "appHeader.reloadSessionSuccess": "Session reloaded",
@@ -2134,6 +2136,7 @@ const enUS: Record<string, string> = {
   "chat.turnNavigator.emptyAssistant": "No assistant text yet",
   "chat.turnNavigator.runningAssistant": "Assistant is still working",
   "chat.turnNavigator.userFallback": "User query",
+  "chat.assistantPreview.loadPreview": "Load preview",
   "chat.rewind.conflictConfirm":
     "These files changed outside this turn. Force rewinding may create conflicts:\n\n{paths}",
   "taskNav.back": "Go back",
@@ -2250,6 +2253,9 @@ const enUS: Record<string, string> = {
   "settings.conversationTurnNavigator": "Conversation turn navigator",
   "settings.conversationTurnNavigatorDescription":
     "Show the turn index beside the chat and auto-load full history. Turn off for long sessions to reduce loading and computation.",
+  "settings.assistantAutoFilePreview": "Auto-load file previews",
+  "settings.assistantAutoFilePreviewDescription":
+    "Automatically load preview cards for Markdown/HTML files referenced in replies. Turn off to load them manually via the “Load preview” action.",
   "settings.systemTitle": "General",
   "settings.systemDescription": "These preferences affect the current window experience.",
   "settings.locale": "Language",
