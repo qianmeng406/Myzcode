@@ -149,7 +149,7 @@ const ZCODE_UPDATE_MODE_FULL_REMINDER = [
   "对清单里每个版本：`git diff <prev>..<next> --stat` 先看规模，再按需取全文。按层归类：内置目录/provider 目录、桌面 UI、agent-core、协议枚举、构建与脚本、依赖。逐条判定**相关性**：",
   "- 与本地已改文件是否重叠（重叠即将来 rebase 的冲突源，必须标出来）；",
   "- 是否修了本地也踩过的问题（例如 provider 目录 revision 覆盖、打包缺少必需配置）；",
-  "- 是否影响本地已交付的功能（Command Code 渠道、极简模式、本模式自身）。",
+  "- 是否影响本地已交付的功能（极简上下文档位、极简模式、本模式自身）。",
   "",
   "## S3 落地（重写成本地改动，不直接套用官方提交）",
   "",
@@ -157,7 +157,7 @@ const ZCODE_UPDATE_MODE_FULL_REMINDER = [
   "",
   "## S4 验收",
   "",
-  "跑门禁：`pnpm typecheck`、`pnpm exec oxlint`、`pnpm exec oxfmt --check`、`pnpm architecture:check -- --changed`、相关单测；必要时重新 bundle 并验包内容。逐条勾销台账；门禁不过不许标记完成，也不许用「门禁通过」冒充「功能正确」。",
+  "跑门禁：`pnpm typecheck`、`pnpm exec oxlint`、`pnpm exec oxfmt --check`、`pnpm architecture:check -- --changed`、相关单测；改动落在 apps/zcode-cli 时另跑 `pnpm --dir apps/zcode-cli check`、`lint`、`format:check`（根 typecheck/lint 不覆盖 CLI）。必要时重新 bundle 并验包内容。逐条勾销台账；门禁不过不许标记完成，也不许用「门禁通过」冒充「功能正确」。",
   "",
   "## 台账与边界",
   "",
@@ -276,39 +276,94 @@ export function buildRuntimeModeReminderBody(
   entries: readonly RuntimeMessageEntry[],
   mode: CollaborationMode,
   planEnabled = mode === "plan",
+  options: { pendingFull?: boolean } = {},
 ): string | null {
-  const researchEnabled = mode === "research";
-  // plan+zcodeUpdate 组合可达（EnterPlanMode 不改 mode；composer 勾选计划也保留当前 mode），
-  // 此时权限真值是 plan 只读——必须给 plan 指引而不是宣称「完全访问」的 SOP，否则模型
-  // 会按全权行事、每条命令被拒。所以 zcodeUpdate 分支显式排除 planEnabled。
-  const zcodeUpdateEnabled = mode === "zcodeUpdate" && !planEnabled;
-  // 极简模式**刻意不给任何 reminder**：它的定义就是不发注入，多一条模式提醒就自相矛盾。
-  // 若将来要给它加提醒，先确认那不与「极简」的语义冲突。
-  if (!planEnabled && !researchEnabled && !zcodeUpdateEnabled) return null;
+  return buildRuntimeModeReminder(entries, mode, planEnabled, options)?.body ?? null;
+}
 
-  const { foundRuntimeModeReminder, humanTurnsSinceReminder } =
-    getRuntimeModeReminderTurnCount(entries);
+export type RuntimeModeReminderIdentity = "plan" | "research" | "zcodeUpdate";
+
+export interface RuntimeModeReminder {
+  body: string;
+  identity: RuntimeModeReminderIdentity;
+  kind: "full" | "sparse";
+}
+
+/**
+ * effective identity：Plan 真值优先（plan+research / plan+zcodeUpdate 组合只给 Plan 指引，
+ * 否则模型会按「完全访问」行事、每条命令被拒），再 research / zcodeUpdate。
+ * 其余模式（含极简）不发模式提醒。
+ */
+export function resolveRuntimeModeIdentity(
+  mode: CollaborationMode,
+  planEnabled: boolean,
+): RuntimeModeReminderIdentity | null {
+  if (planEnabled) return "plan";
+  if (mode === "research") return "research";
+  if (mode === "zcodeUpdate") return "zcodeUpdate";
+  return null;
+}
+
+/**
+ * 构造当前模式提醒并返回结构化身份，供调用方给 attachment 打 runtimeMode 标记。
+ *
+ * 节流按「同一身份 activation」计算：模式进入与重新进入（pendingFull）总是全文；
+ * 同一 activation 内按真实人类轮数节流、周期全文只统计当前身份。旧条目没有身份标记，
+ * 按未知身份处理——不能拿别的模式的节流压掉本次进入的全文（实测问题）。
+ */
+export function buildRuntimeModeReminder(
+  entries: readonly RuntimeMessageEntry[],
+  mode: CollaborationMode,
+  planEnabled = mode === "plan",
+  options: { pendingFull?: boolean } = {},
+): RuntimeModeReminder | null {
+  const identity = resolveRuntimeModeIdentity(mode, planEnabled);
+  if (!identity) return null;
+
+  const { lastReminder, humanTurnsSinceReminder } = getRuntimeModeReminderState(entries);
+  const sameActivation = lastReminder?.metadata?.runtimeMode?.identity === identity;
   if (
-    foundRuntimeModeReminder &&
+    sameActivation &&
+    !options.pendingFull &&
     humanTurnsSinceReminder < RUNTIME_MODE_REMINDER_CONFIG.TURNS_BETWEEN_ATTACHMENTS
   ) {
     return null;
   }
 
-  const nextReminderCount = countRuntimeModeReminders(entries) + 1;
-  const isFirstReminder = nextReminderCount % RUNTIME_MODE_REMINDER_CONFIG.FULL_REMINDER_EVERY_N_ATTACHMENTS === 1;
-  if (researchEnabled) {
-    return (isFirstReminder ? RESEARCH_MODE_FULL_REMINDER : RESEARCH_MODE_SPARSE_REMINDER).join("\n");
+  const nextReminderCount = countRuntimeModeReminders(entries, identity) + 1;
+  const kind: "full" | "sparse" =
+    options.pendingFull ||
+    nextReminderCount % RUNTIME_MODE_REMINDER_CONFIG.FULL_REMINDER_EVERY_N_ATTACHMENTS === 1
+      ? "full"
+      : "sparse";
+  const full = kind === "full";
+  let body: string;
+  if (identity === "research") {
+    body = (full ? RESEARCH_MODE_FULL_REMINDER : RESEARCH_MODE_SPARSE_REMINDER).join("\n");
+  } else if (identity === "zcodeUpdate") {
+    body = (full ? ZCODE_UPDATE_MODE_FULL_REMINDER : ZCODE_UPDATE_MODE_SPARSE_REMINDER).join("\n");
+  } else {
+    body = (full ? PLAN_MODE_FULL_REMINDER : PLAN_MODE_SPARSE_REMINDER).join("\n");
   }
-  if (zcodeUpdateEnabled) {
-    return (
-      isFirstReminder ? ZCODE_UPDATE_MODE_FULL_REMINDER : ZCODE_UPDATE_MODE_SPARSE_REMINDER
-    ).join("\n");
+  return { body, identity, kind };
+}
+
+function getRuntimeModeReminderState(entries: readonly RuntimeMessageEntry[]): {
+  lastReminder?: RuntimeMessageEntry;
+  humanTurnsSinceReminder: number;
+} {
+  let humanTurnsSinceReminder = 0;
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index]!;
+    if (entry.metadata?.source === "runtime_mode") {
+      return { lastReminder: entry, humanTurnsSinceReminder };
+    }
+    if (isRuntimeAttachmentEntry(entry)) continue;
+    if (entry.message.role === "user" && entry.metadata?.source === "real_user") {
+      humanTurnsSinceReminder++;
+    }
   }
-  const reminderLines = isFirstReminder
-    ? PLAN_MODE_FULL_REMINDER
-    : PLAN_MODE_SPARSE_REMINDER;
-  return reminderLines.join("\n");
+  return { humanTurnsSinceReminder };
 }
 
 export function buildPlanModeExitReminderBody(): string {
@@ -330,27 +385,14 @@ function formatTodoListForReminder(todos: readonly TodoItem[]): string[] {
   return todos.map((todo, index) => `${index + 1}. [${todo.status}] ${todo.content}`);
 }
 
-function getRuntimeModeReminderTurnCount(entries: readonly RuntimeMessageEntry[]): {
-  foundRuntimeModeReminder: boolean;
-  humanTurnsSinceReminder: number;
-} {
-  let humanTurnsSinceReminder = 0;
-  for (let index = entries.length - 1; index >= 0; index--) {
-    const entry = entries[index]!;
-    if (entry.metadata?.source === "runtime_mode") {
-      return { foundRuntimeModeReminder: true, humanTurnsSinceReminder };
-    }
-    if (isRuntimeAttachmentEntry(entry)) continue;
-    if (entry.message.role === "user" && entry.metadata?.source === "real_user") {
-      humanTurnsSinceReminder++;
-    }
-  }
-  return { foundRuntimeModeReminder: false, humanTurnsSinceReminder };
-}
-
-function countRuntimeModeReminders(entries: readonly RuntimeMessageEntry[]): number {
+/** 周期全文只统计当前身份的提醒；旧条目无身份标记不参与（避免跨模式混算）。 */
+function countRuntimeModeReminders(
+  entries: readonly RuntimeMessageEntry[],
+  identity: RuntimeModeReminderIdentity,
+): number {
   return entries.reduce(
-    (count, entry) => count + (entry.metadata?.source === "runtime_mode" ? 1 : 0),
+    (count, entry) =>
+      count + (entry.metadata?.runtimeMode?.identity === identity ? 1 : 0),
     0,
   );
 }

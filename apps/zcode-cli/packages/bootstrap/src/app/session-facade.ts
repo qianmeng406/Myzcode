@@ -27,7 +27,7 @@ import { listMcpServerStatuses } from "../mcp-config.js";
 import { loadSessionTranscriptFromStore } from "../session-transcript.js";
 import { createSubagentObservation } from "./subagent-observation.js";
 import { getLocaleConfigPath } from "./locale-selection.js";
-import { isClosableSessionStore } from "./session-store.js";
+import { isClosableSessionStore, isInheritableProjectPermissionMode } from "./session-store.js";
 import type { ProviderRegistryModelSource } from "./provider-registry-model-runtime.js";
 import {
   completeAuxiliaryRegistryModelSelection,
@@ -423,7 +423,9 @@ export function createSessionFacade(deps: CreateSessionFacadeDeps): SessionFacad
     setMode: async (mode: CollaborationMode) => {
       const previousMode = deps.runtime.getMode();
       await deps.runtime.setExecutionState({ mode }, deps.traceContext);
-      if (deps.localSettingStore) {
+      // 项目偏好只承接可继承模式：zcodeUpdate/minimal 是任务/兼容身份，写进项目偏好
+      // 会让下个普通新任务静默继承；Session 自身执行状态已在上面照常持久化。
+      if (deps.localSettingStore && isInheritableProjectPermissionMode(mode)) {
         try {
           await deps.localSettingStore.saveProjectPermissionMode({
             mode: deps.runtime.getMode(),

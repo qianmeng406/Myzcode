@@ -6,7 +6,10 @@ import {
 } from "@zcode/shared";
 /* oxlint-disable eslint(max-lines) -- ZCode Protocol transport、通知 wiring 和 app-facing session 方法必须共享同一个 client/emitter 上下文。 */
 import { randomUUID } from "node:crypto";
-import { ensureIndependentPlanSupport } from "./independentPlanSupport.js";
+import {
+  ensureContextProfileSupport,
+  ensureIndependentPlanSupport,
+} from "./independentPlanSupport.js";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Emitter } from "@zcode/rpc";
@@ -5110,6 +5113,7 @@ export function createZCodeAgentService(
           compression: "none" as const,
           workspaceHookReview: true,
           independentPlanState: true,
+          contextProfileState: true,
           // 与 connection scope 的 hello 同一份能力集：直连 base service 的宿主内部消费者
           // 也能收到 `workflowRun.*` 增量（是否真收由它自己的 clientHello 决定）。
           workflowRunDeltas: true,
@@ -5242,8 +5246,9 @@ export function createZCodeAgentService(
       const client = await getClient(params);
       const planPayload = params.envelope.payload as {
         planEnabled?: boolean;
-        config?: { planEnabled?: boolean };
-        firstInput?: { planEnabled?: boolean };
+        contextProfile?: string;
+        config?: { planEnabled?: boolean; contextProfile?: string };
+        firstInput?: { planEnabled?: boolean; contextProfile?: string };
       };
       if (
         planPayload.planEnabled ||
@@ -5251,6 +5256,15 @@ export function createZCodeAgentService(
         planPayload.firstInput?.planEnabled
       ) {
         await ensureIndependentPlanSupport(client);
+      }
+      // 显式极简档位是 additive 字段：旧执行端会静默剥掉它、按标准上下文执行，
+      // 发送前必须确认支持；standard 是旧缺省，无需协商。
+      const requestedContextProfile =
+        planPayload.contextProfile ??
+        planPayload.config?.contextProfile ??
+        planPayload.firstInput?.contextProfile;
+      if (requestedContextProfile === "minimal") {
+        await ensureContextProfileSupport(client);
       }
       // RPC facade 会清掉调用方可伪造的顶层 clientMode，再用 trusted carrier 注入 host
       // 真值；host 内部 adapter 直调仍兼容显式 clientMode。

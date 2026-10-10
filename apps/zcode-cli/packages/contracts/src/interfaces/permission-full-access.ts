@@ -19,6 +19,9 @@ export const permissionFullAccessReceiptSchema = z
           .object({
             mode: z.literal("yolo"),
             planEnabled: z.boolean(),
+            /** 上下文档位；授权只改权限、保留档位。旧 receipt 无此字段。 */
+            contextProfile: z.enum(["standard", "minimal"]).optional(),
+            previousContextProfile: z.enum(["standard", "minimal"]).optional(),
             previousMode: z.enum([
               "build",
               "edit",

@@ -7,7 +7,7 @@ import {
   TurnMachineImpl,
 } from "../deps.js";
 import {
-  buildRuntimeModeReminderBody,
+  buildRuntimeModeReminder,
   buildPlanModeExitReminderBody,
   buildRuntimeOutputStyleReminderBody,
   buildTodoReminderBody,
@@ -21,6 +21,7 @@ import {
   todoReminderRuntimeMetadata,
 } from "../../agent/message-history.js";
 import type { AgentRuntimeInternal } from "../internal.js";
+import { prepareTurnRequestProjection } from "./context-refresh.js";
 import { runModelBackedTurnStep } from "./turn-model-step.js";
 import {
   AUTOMATION_MUTATION_TOOL_NAMES,
@@ -64,6 +65,15 @@ export async function runRegularTurnLoop(
       }
     }
 
+    // 请求投影准备放在 compact 与 provider 请求之前：compact 的 token 估算、随后的工具表
+    // 与 system 段都必须反映当前档位；Submission/Guide 在上一执行边界改过 mode 时，
+    // 这里统一重投影 turn-local 条目（正常工具往返零成本，见 prepareTurnRequestProjection）。
+    const finishMcp = beginLocalTurnPreparation(state.turnTraceContext, "mcp");
+    await this.initializeMcp(state.turnTraceContext);
+    finishMcp();
+    throwIfTurnAborted(state.turnAbortSignal);
+    prepareTurnRequestProjection(this, state, state.model);
+
     const compactPhase =
       state.modelStepCount === 0 ? CompactPhase.PreRequest : CompactPhase.MidTurn;
     await this.microcompactIfNeeded(state.turnTraceContext, state.events, state.turnAbortSignal, {
@@ -99,13 +109,11 @@ export async function runRegularTurnLoop(
     if (autoCompactOutcome === "compacted") {
       recordCompactSuccess(state, rapidRefill);
       recordCompactHistoryRound(state);
+      // 压缩可能丢掉全文而留下简版；下一请求补当前身份全文。
+      this.runtimeModeReminderPendingFull = true;
     }
     throwIfTurnAborted(state.turnAbortSignal);
 
-    const finishMcp = beginLocalTurnPreparation(state.turnTraceContext, "mcp");
-    await this.initializeMcp(state.turnTraceContext);
-    finishMcp();
-    throwIfTurnAborted(state.turnAbortSignal);
     const finishTools = beginLocalTurnPreparation(state.turnTraceContext, "tools");
     const turnDisallowedTools = buildTurnDisallowedTools(state);
     // automation 派发到已 active 会话或重试恢复时，入口 metadata 可能没有带到
@@ -123,17 +131,27 @@ export async function runRegularTurnLoop(
         systemReminderAttachmentEntry("plan_mode_exit", buildPlanModeExitReminderBody()),
       ]);
     }
-    const runtimeModeReminderBody = outputTokenRecoveryActive
+    const runtimeModeReminder = outputTokenRecoveryActive
       ? null
-      : buildRuntimeModeReminderBody(
+      : buildRuntimeModeReminder(
           state.turnRequestState.entries,
           this.getMode(),
           this.getPlanEnabled(),
+          { pendingFull: this.runtimeModeReminderPendingFull },
         );
-    if (runtimeModeReminderBody) {
+    if (runtimeModeReminder) {
       commitTurnRequestEntries(this, state.turnRequestState, [
-        systemReminderAttachmentEntry("runtime_mode", runtimeModeReminderBody),
+        systemReminderAttachmentEntry("runtime_mode", runtimeModeReminder.body, {
+          runtimeMode: {
+            identity: runtimeModeReminder.identity,
+            kind: runtimeModeReminder.kind,
+          },
+        }),
       ]);
+    }
+    // pending-full 在提醒真正提交进本轮请求后才消费；构造前消费会在节流吞掉时丢掉全文意图。
+    if (runtimeModeReminder?.kind === "full") {
+      this.runtimeModeReminderPendingFull = false;
     }
     if (
       !outputTokenRecoveryActive &&

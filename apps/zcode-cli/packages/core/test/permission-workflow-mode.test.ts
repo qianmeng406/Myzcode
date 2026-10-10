@@ -18,7 +18,7 @@ test("zcodeUpdate mode allows commands and edits with its own rule id", () => {
   const service = new PermissionService();
   const decision = service.checkPermission({
     toolName: "Bash",
-    input: { command: "git fetch origin --tags" },
+    input: { command: "pnpm typecheck" },
     riskLevel: "medium",
     mode: "zcodeUpdate",
   });

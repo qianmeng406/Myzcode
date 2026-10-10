@@ -49,9 +49,10 @@ function registerRuntimeBuiltInTools(runtime: AgentRuntimeInternal, deps: AgentR
   const browserUseEnabled = resolveRuntimeBrowserUseEnabled(runtime, deps);
   registerBuiltInTools(runtime.registry, {
     bashTimeoutPolicy: runtime.config.bashTimeoutPolicy,
-    // 极简模式不发 skills 段，Skill 工具一并摘掉：留着它等于告诉模型有一个
-    // 它看不到任何技能清单的工具。
-    includeSkill: Boolean(runtime.skillPort) && runtime.config.mode !== "minimal",
+    // Skill 工具按真实端口安装能力，可见性交给最终工具过滤（极简档位会摘掉 Skill 与 MCP）。
+    // 以前注册期也按 mode 短路：极简启动后切回标准档位，Skill 不再注册，只能靠分支刷新
+    // 偶然补回。注册与可见性分层后，切换只改投影，不改注册事实。
+    includeSkill: Boolean(runtime.skillPort),
     includeAgent: Boolean(runtime.subagentPort),
     includeSendMessage: runtime.subagentPort?.sendMessage !== undefined,
     includeRespondToCoordinator:

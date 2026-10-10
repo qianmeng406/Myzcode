@@ -19,6 +19,7 @@ import { OFFICIAL_CUA_PERMISSION_RULE_TOOL_NAME } from "@zcode/shared";
 import { resolvePlanModeTransitionPermission } from "./plan-mode-policy.js";
 import { webFetchRuleSubjects, wildcardToRegExp } from "./rule-matching.js";
 import { isPreapprovedWorkflowDraftWrite } from "./workflow-draft-path.js";
+import { resolveUpdateTaskCommandDecision } from "../tool/handlers/bash-update-task-policy.js";
 import { applyPermissionUpdates } from "../tool/executor/permission-rules.js";
 import { isWebFetchPreapprovedUrl } from "../tool/webfetch-preapproved.js";
 import type { ToolPermissionRulePolicy } from "../tool/types.js";
@@ -166,8 +167,31 @@ export class PermissionService {
 
     // ZCode 更新模式：命令与文件修改自动执行、不逐次确认（纪律由 SOP reminder 与台账
     // 承担），**排在 disallowedTools 与项目 deny 之后**，项目 ask 规则不生效。跟随官方
-    // 发布要连续跑 git fetch/diff 与多轮改动，逐次确认会让整条流程断在半途。
+    // 发版要连续跑 git fetch/diff 与多轮改动，逐次确认会让整条流程断在半途。
+    // 但「不 push/merge、破坏性操作先确认」是执行边界，不是提示词纪律：Bash 命令按
+    // AST 判定，禁令直接 deny、破坏性操作回落单次 ask（见 bash-update-task-policy）。
     if (context.mode === "zcodeUpdate" && !planEnabled) {
+      if (context.toolName === "Bash") {
+        const decision = resolveUpdateTaskCommandDecision(context.input, {
+          forbidMergeAndPush: true,
+        });
+        if (decision === "deny") {
+          return this.deny(
+            context,
+            capability,
+            "mode.zcodeUpdate.gitForbidden",
+            "ZCode update mode forbids git pull/merge/cherry-pick/push/rebase; run them explicitly after review",
+          );
+        }
+        if (decision === "ask") {
+          return this.ask(
+            context,
+            capability,
+            "mode.zcodeUpdate.confirmDestructive",
+            "Destructive, remote-writing or state-mutating git commands (reset --hard, clean, stash, commit, fetch) need explicit confirmation in ZCode update mode",
+          );
+        }
+      }
       return this.allow(
         context,
         capability,
@@ -177,9 +201,20 @@ export class PermissionService {
     }
 
     // 极简模式：上下文极简 + 权限也极简——自动执行、不逐次确认，排在 disallowedTools 与
-    // 项目 deny 之后（同 workflow 姿态）。注意该模式刻意不发任何 reminder，也没有身份
-    // 行为段与技能清单，所以这里放行后**没有任何护栏文本**，这是模式定义本身的取舍。
+    // 项目 deny 之后（同 workflow 姿态）。可识别的破坏性 git 操作回落单次确认，与极简
+    // 护栏「破坏性操作先获明确确认」一致；这层是执行边界，不靠模型自觉。
     if (context.mode === "minimal" && !planEnabled) {
+      if (
+        context.toolName === "Bash" &&
+        resolveUpdateTaskCommandDecision(context.input) !== "allow"
+      ) {
+        return this.ask(
+          context,
+          capability,
+          "mode.minimal.confirmDestructive",
+          "Destructive or state-mutating git commands (reset --hard, clean, stash, commit) need explicit confirmation even in minimal mode",
+        );
+      }
       return this.allow(
         context,
         capability,

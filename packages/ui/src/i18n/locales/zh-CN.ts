@@ -5789,15 +5789,18 @@ const zhCN: Record<string, string> = {
   "mode.label.glm.plan": "计划模式",
   "mode.label.glm.yolo": "完全访问",
   "mode.label.glm.research": "资料查询",
-  "mode.label.glm.minimal": "极简模式",
+  "mode.label.glm.minimal": "极简自动权限（旧）",
   "mode.label.glm.zcodeUpdate": "ZCode 更新模式",
+  "chat.toolbar.mode.minimalContext.label": "极简上下文",
+  "chat.toolbar.mode.minimalContext.description":
+    "只保留身份行、环境与短护栏，隐藏技能、记忆、项目指令与 MCP 工具；不改变权限，只影响之后的请求。",
   "mode.description.glm.build": "改文件前先问我。",
   "mode.description.glm.edit": "自动编辑文件。",
   "mode.description.glm.plan": "编辑前先出计划。",
   "mode.description.glm.yolo": "减少确认次数。",
   "mode.description.glm.research": "只读联网检索：查文档、问答与文献，写操作被拒绝。",
   "mode.description.glm.minimal":
-    "只下发系统工具与最小上下文：保留身份行与工作目录，去掉技能、记忆、项目指令与 MCP 工具；命令与文件修改自动执行。",
+    "旧版组合模式（仅兼容历史会话）：极简上下文 + 命令与文件修改自动执行。新任务请用「极简上下文」开关，并单独选择权限。",
   "mode.description.glm.zcodeUpdate":
     "跟进官方发版：取每个版本的 diff、判定相关性、以本地改动落地并跑门禁验收；命令与文件修改自动执行。",
   "todo.panel.title": "待办",

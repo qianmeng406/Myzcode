@@ -3376,6 +3376,7 @@ export class ProductProjection {
       modelSelection: payload.intent?.modelSelection ?? existing?.modelSelection,
       mode: payload.intent?.mode ?? existing?.mode,
       planEnabled: payload.intent?.planEnabled ?? existing?.planEnabled,
+      contextProfile: payload.intent?.contextProfile ?? existing?.contextProfile,
       sharedContextRefs: payload.intent?.sharedContextRefs ?? existing?.sharedContextRefs,
       provenance: payload.intent?.provenance ?? existing?.provenance,
       delivery: {
@@ -3786,6 +3787,7 @@ export class ProductProjection {
     const payload = event.payload as {
       mode?: string;
       planEnabled?: boolean;
+      contextProfile?: string;
       source?: string;
       toolCallId?: string;
       permissionGrant?: { interactionId: string; queueItemIds: string[] };
@@ -3795,6 +3797,13 @@ export class ProductProjection {
     if (mode) this.configModeTouchedByEvent = true;
     if (!mode) return [];
     const planEnabled = payload.planEnabled ?? mode === "plan";
+    // 档位：新事件显式携带；旧事件按旧 mode=minimal 补极简档位，其余保留现值。
+    const contextProfile =
+      payload.contextProfile === "standard" || payload.contextProfile === "minimal"
+        ? payload.contextProfile
+        : mode === "minimal"
+          ? "minimal"
+          : this.snapshot.config.contextProfile;
     const planTransition =
       payload.source === "tool" && payload.toolCallId
         ? { toolCallId: payload.toolCallId, planEnabled }
@@ -3802,6 +3811,7 @@ export class ProductProjection {
     if (
       this.snapshot.config.mode === mode &&
       this.snapshot.config.planEnabled === planEnabled &&
+      this.snapshot.config.contextProfile === contextProfile &&
       planTransition === this.snapshot.config.planTransition &&
       !payload.permissionGrant
     )
@@ -3824,6 +3834,7 @@ export class ProductProjection {
             ...this.snapshot.config,
             mode,
             planEnabled,
+            contextProfile,
             planTransition,
             ...(payload.permissionGrant
               ? { permissionGrant: { interactionId: payload.permissionGrant.interactionId } }

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { RuntimeMessageEntry } from "../src/agent/message-history.js";
-import { buildRuntimeModeReminderBody } from "../src/runtime/helpers/runtime-reminders.js";
+import {
+  buildRuntimeModeReminder,
+  buildRuntimeModeReminderBody,
+} from "../src/runtime/helpers/runtime-reminders.js";
 
 /**
  * 最小历史条目构造。buildRuntimeModeReminderBody 只读 message.role 与
@@ -15,11 +18,14 @@ function humanTurn(): RuntimeMessageEntry {
   } as unknown as RuntimeMessageEntry;
 }
 
-function modeReminder(): RuntimeMessageEntry {
+function modeReminder(
+  identity: "plan" | "research" | "zcodeUpdate" = "zcodeUpdate",
+  kind: "full" | "sparse" = "full",
+): RuntimeMessageEntry {
   return {
     kind: "attachment",
     message: { role: "user", content: "<system-reminder>…</system-reminder>" },
-    metadata: { source: "runtime_mode" },
+    metadata: { source: "runtime_mode", runtimeMode: { identity, kind } },
   } as unknown as RuntimeMessageEntry;
 }
 
@@ -78,4 +84,51 @@ test("minimal mode deliberately emits no reminder of its own", () => {
   assert.ok(withPlan);
   assert.ok(withPlan!.includes("Plan mode is active"));
   assert.ok(!withPlan!.includes("# ZCode 更新模式"));
+});
+
+test("cross-mode switch emits the update SOP instead of inheriting the old throttle", () => {
+  // 实测缺陷：research 提醒后切更新模式，旧节流把进入全文压掉、甚至直接给引用
+  // 「全文见前文」的简版——而前文根本没有更新 SOP。
+  const body = buildRuntimeModeReminderBody([modeReminder("research"), humanTurn()], "zcodeUpdate");
+  assert.ok(body);
+  assert.ok(body!.includes("# ZCode 更新模式"));
+  assert.ok(body!.includes("zcode-update/更新台账.md"));
+});
+
+test("re-entry always gets the full SOP (pendingFull bypasses same-activation throttle)", () => {
+  const entries = [modeReminder("zcodeUpdate", "sparse"), humanTurn(), humanTurn()];
+  assert.equal(buildRuntimeModeReminderBody(entries, "zcodeUpdate"), null);
+  const full = buildRuntimeModeReminder(entries, "zcodeUpdate", false, { pendingFull: true });
+  assert.ok(full);
+  assert.equal(full!.kind, "full");
+  assert.ok(full!.body.includes("# ZCode 更新模式"));
+});
+
+test("untagged legacy reminders do not throttle a fresh activation", () => {
+  // 旧条目无身份标记：按未知身份处理，不能压掉本次进入的全文。
+  const legacy = {
+    kind: "attachment",
+    message: { role: "user", content: "…" },
+    metadata: { source: "runtime_mode" },
+  } as unknown as RuntimeMessageEntry;
+  const body = buildRuntimeModeReminderBody([legacy], "zcodeUpdate");
+  assert.ok(body);
+  assert.ok(body!.includes("# ZCode 更新模式"));
+});
+
+test("plan wins over research and update identities", () => {
+  for (const mode of ["research", "zcodeUpdate"] as const) {
+    const body = buildRuntimeModeReminderBody([], mode, true);
+    assert.ok(body!.includes("Plan mode is active"), `${mode}+plan 必须给 plan 指引`);
+    assert.ok(!body!.includes("# ZCode 更新模式"));
+    assert.ok(!body!.includes("# 资料查询模式"));
+  }
+});
+
+test("structured identity and kind are exposed for attachment tagging", () => {
+  const reminder = buildRuntimeModeReminder([], "zcodeUpdate");
+  assert.deepEqual(
+    { identity: reminder!.identity, kind: reminder!.kind },
+    { identity: "zcodeUpdate", kind: "full" },
+  );
 });

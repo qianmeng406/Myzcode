@@ -458,6 +458,8 @@ interface ConversationComposerProps {
   /** 选中思考深度；同时带上用户操作时看到的模型，避免异步回流后把 thought 归到另一模型。 */
   onSelectThought: (thought: string, modelContext: { provider: string; model: string }) => void;
   onSwitchMode: (mode: string) => void;
+  /** 上下文档位切换（standard/minimal）；与权限 mode 正交。 */
+  onSwitchContextProfile?: (profile: "standard" | "minimal") => void;
   /** 打开当前 session 的 Status panel，并直达 Running 明细。 */
   onOpenRunningBackgroundWorks?: () => void;
   /**
@@ -548,6 +550,7 @@ function ConversationComposerImpl({
   onSelectModel,
   onSelectThought,
   onSwitchMode,
+  onSwitchContextProfile,
   onOpenRunningBackgroundWorks,
   backgroundWorkOpenTarget = "panel",
   runningSubagentCount = 0,
@@ -2293,6 +2296,7 @@ function ConversationComposerImpl({
             onSelectModel={handleSelectModelTrace}
             onSelectThought={onSelectThought}
             onSwitchMode={onSwitchMode}
+            onSwitchContextProfile={onSwitchContextProfile}
             onRecoverCustomModelSelection={onRecoverCustomModelSelection}
             onSendCompressionCommand={onSendCompressionCommand}
           />
@@ -2658,6 +2662,7 @@ function ConversationComposerImpl({
       onRecoverCustomModelSelection,
       onSendCompressionCommand,
       onSwitchMode,
+      onSwitchContextProfile,
       pending,
       provider,
       modifierTooltip,
@@ -2688,6 +2693,7 @@ function ConversationComposerImpl({
           activeConfigPicker={activeConfigPicker}
           onConfigPickerOpenChange={handleConfigPickerOpenChange}
           onSwitchMode={onSwitchMode}
+          onSwitchContextProfile={onSwitchContextProfile}
         />
         {/* 附件画廊重构曾整段覆盖 leadingActions，误删 CUA 常驻入口。
             入口自身继续负责平台、远程与设置可见性，不在 composer 重复判定。 */}
@@ -2714,6 +2720,7 @@ function ConversationComposerImpl({
       backgroundWorkOpenTarget,
       onOpenRunningBackgroundWorks,
       onSwitchMode,
+      onSwitchContextProfile,
       provider,
       remoteSessionId,
       runningSubagentCount,

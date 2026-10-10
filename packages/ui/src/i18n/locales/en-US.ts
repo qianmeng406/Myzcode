@@ -6054,15 +6054,18 @@ const enUS: Record<string, string> = {
   "mode.label.glm.plan": "Plan mode",
   "mode.label.glm.yolo": "Full access",
   "mode.label.glm.research": "Research",
-  "mode.label.glm.minimal": "Minimal mode",
+  "mode.label.glm.minimal": "Legacy minimal (auto)",
   "mode.label.glm.zcodeUpdate": "ZCode update mode",
+  "chat.toolbar.mode.minimalContext.label": "Minimal context",
+  "chat.toolbar.mode.minimalContext.description":
+    "Keep only the identity line, environment and short guardrails; hides skills, memory, project instructions and MCP tools. It does not change permissions and only affects later requests.",
   "mode.description.glm.build": "Ask before file changes.",
   "mode.description.glm.edit": "Edit files automatically.",
   "mode.description.glm.plan": "Plan before editing.",
   "mode.description.glm.yolo": "Run with fewer confirmations.",
   "mode.description.glm.research": "Read-only web research; edits and commands are denied.",
   "mode.description.glm.minimal":
-    "Send only the system tools with a bare identity line and working directory; no skills, memory, project instructions, or MCP tools. Commands and edits run without confirmation.",
+    "Legacy combined mode (kept for old sessions): minimal context plus commands and edits without confirmation. New tasks should use the Minimal context toggle and choose permissions separately.",
   "mode.description.glm.zcodeUpdate":
     "Track upstream releases: fetch each version's diff, judge relevance, re-implement locally, then verify; commands and edits run without confirmation.",
   "todo.panel.title": "Todo",

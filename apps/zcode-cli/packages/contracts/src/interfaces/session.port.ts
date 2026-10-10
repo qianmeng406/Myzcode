@@ -298,6 +298,8 @@ export interface TurnInputIntentMetadata {
   modelSelection?: ModelSelection;
   /** 与本次用户 Submission 一起固定的协作模式。 */
   mode?: "build" | "edit" | "plan" | "yolo" | "research" | "minimal" | "zcodeUpdate";
+  /** 与本次 Submission 一起固定的上下文档位；改权限/Plan 不改档位。旧请求缺省。 */
+  contextProfile?: "standard" | "minimal";
   admissionSeq: number;
   admittedAt: number;
   requestedDelivery: "auto" | "startNow" | "queue" | "guide";

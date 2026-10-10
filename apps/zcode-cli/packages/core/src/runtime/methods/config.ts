@@ -25,7 +25,7 @@ import {
 import type { AgentRuntimeConfig, ActiveTurnInfo } from "../types.js";
 import type { AgentRuntimeInternal } from "../internal.js";
 import { cloneModelSelection } from "../model-selection.js";
-import { applyRuntimeExecutionState } from "../execution-state.js";
+import { applyRuntimeExecutionState, installRuntimeExecutionState } from "../execution-state.js";
 
 import { orderProviderVisibleToolContracts } from "../../tool/provider-visible-order.js";
 import { projectToolModelContract } from "../../tool/model-contract.js";
@@ -40,7 +40,7 @@ import {
 
 export async function setExecutionState(
   this: AgentRuntimeInternal,
-  input: { mode?: string; planEnabled?: boolean },
+  input: { mode?: string; planEnabled?: boolean; contextProfile?: string },
   traceContext?: TraceContext,
 ): Promise<void> {
   await applyRuntimeExecutionState(this, input, { source: "command", traceContext });
@@ -48,19 +48,25 @@ export async function setExecutionState(
 
 export function updateConfig(
   this: AgentRuntimeInternal,
-  patch: Pick<AgentRuntimeConfig, "mode" | "planEnabled" | "language" | "outputStyle">,
+  patch: Pick<
+    AgentRuntimeConfig,
+    "mode" | "planEnabled" | "contextProfile" | "language" | "outputStyle"
+  >,
 ): void {
-  if (patch.mode !== undefined || patch.planEnabled !== undefined) {
+  if (
+    patch.mode !== undefined ||
+    patch.planEnabled !== undefined ||
+    patch.contextProfile !== undefined
+  ) {
     const previous = resolveExecutionState(this.config);
     const next = resolveExecutionState(patch, previous);
-    Object.assign(this.config, next);
-    if (previous.planEnabled !== next.planEnabled)
-      this.needsPlanModeExitReminder = !next.planEnabled;
-    // 极简模式的提示词档位与工具表都在「构建时」读 mode：只改 config 不重建的话，
-    // 本次请求仍会带上一档位的 system 段与工具表，用户看到的切换就是不生效。
-    // 其他模式不带提示词/工具差异，重建是无副作用的（与 language / outputStyle 同一条路）。
-    if (previous.mode !== next.mode && !this.activeTurn) {
-      this.invalidateToolCache();
+    // 统一走已提交状态安装：失效工具缓存并推进派生版本，请求准备边界据此重投影。
+    // 以前这里只在 idle 时 invalidate，active turn 内改 mode 会沿用旧档位工具表。
+    installRuntimeExecutionState(this, next, previous);
+    if (
+      (previous.mode !== next.mode || previous.contextProfile !== next.contextProfile) &&
+      !this.activeTurn
+    ) {
       rebuildContextPrefix(this);
     }
   }
@@ -291,7 +297,9 @@ export function filterMinimalProfileRuntimeVisibleTools(
   runtime: AgentRuntimeInternal,
   tools: ModelToolContract[],
 ): ModelToolContract[] {
-  if (runtime.config.mode !== "minimal") return tools;
+  // 档位读 contextProfile（旧 mode=minimal 在解析时补出极简档位），不再把「极简上下文」
+  // 绑在权限 mode 上——mode=build + 极简档位同样只留内置工具。
+  if (resolveContextProfile(runtime.config) !== "minimal") return tools;
   return tools.filter((tool) => tool.name !== SKILL_TOOL_NAME && !isMcpToolName(tool.name));
 }
 
@@ -301,4 +309,4 @@ function shouldExposeWebSearch(this: AgentRuntimeInternal, model?: Model): boole
   if (!model) return true;
   return model.properties.supportsNativeWebSearch;
 }
-import { resolveExecutionState } from "@zcode/shared";
+import { resolveContextProfile, resolveExecutionState } from "@zcode/shared";

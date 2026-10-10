@@ -285,6 +285,9 @@ function normalizeTurnStarted(
     ...(payload.intent?.planEnabled !== undefined
       ? { planEnabled: payload.intent.planEnabled }
       : {}),
+    ...(payload.intent?.contextProfile !== undefined
+      ? { contextProfile: payload.intent.contextProfile }
+      : {}),
     ...(payload.intent?.provenance ? { provenance: payload.intent.provenance } : {}),
     ...normalizeAttachments(payload),
   };

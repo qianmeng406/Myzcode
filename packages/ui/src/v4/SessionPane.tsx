@@ -19,6 +19,7 @@ import { Hand } from "lucide-react";
 import {
   BUILTIN_MODEL_PROVIDER_IDS,
   buildCustomSupplierKey,
+  resolveExecutionState,
   TID_CHAT_EMPTY,
   TID_V4_SESSION_PANE,
   testId,
@@ -434,13 +435,19 @@ function submissionConfigFromCommand(
         ? payload
         : undefined;
   if (!candidate?.modelSelection || !candidate.mode) return null;
+  const state = resolveExecutionState({
+    mode: String(candidate.mode),
+    ...(typeof candidate.planEnabled === "boolean" ? { planEnabled: candidate.planEnabled } : {}),
+    ...(typeof candidate.contextProfile === "string"
+      ? { contextProfile: candidate.contextProfile }
+      : {}),
+  });
   return {
     modelSelection: candidate.modelSelection as ComposerSubmissionConfig["modelSelection"],
     mode: candidate.mode as ComposerSubmissionConfig["mode"],
     planEnabled:
-      typeof candidate.planEnabled === "boolean"
-        ? candidate.planEnabled
-        : candidate.mode === "plan",
+      typeof candidate.planEnabled === "boolean" ? candidate.planEnabled : candidate.mode === "plan",
+    contextProfile: state.contextProfile,
   };
 }
 
@@ -472,6 +479,7 @@ function resolveQueuedComposerRestore(
   const config = {
     ...(item.mode ? { mode: item.mode } : {}),
     ...(typeof item.planEnabled === "boolean" ? { planEnabled: item.planEnabled } : {}),
+    ...(item.contextProfile ? { contextProfile: item.contextProfile } : {}),
     ...(item.modelSelection ? { modelSelection: item.modelSelection } : {}),
   };
   return {
@@ -1275,6 +1283,7 @@ export function SessionPane({
     handleDraftSelectModel,
     handleDraftSelectThought,
     handleDraftSwitchMode,
+    handleDraftSwitchContextProfile,
     promoteComposerDraft,
     captureAcceptedModelSelection,
     replaceComposerDraft,
@@ -3603,6 +3612,12 @@ export function SessionPane({
     },
     [handleDraftSwitchMode],
   );
+  const handleSwitchContextProfile = useCallback(
+    (profile: "standard" | "minimal") => {
+      handleDraftSwitchContextProfile(profile);
+    },
+    [handleDraftSwitchContextProfile],
+  );
 
   // context usage 面板的压缩入口（命令文本 = "/compact"，复用 slash 解析路径）。
   const handleSendCompressionCommand = useCallback(
@@ -4518,6 +4533,7 @@ export function SessionPane({
       onSelectModel={handleSelectModel}
       onSelectThought={handleSelectThought}
       onSwitchMode={handleSwitchMode}
+      onSwitchContextProfile={handleSwitchContextProfile}
       onOpenRunningBackgroundWorks={
         sessionId && runningBackgroundWorkCount > 0 ? handleOpenRunningBackgroundWorks : undefined
       }

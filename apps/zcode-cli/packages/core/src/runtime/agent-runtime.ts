@@ -158,6 +158,8 @@ export class AgentRuntime {
   private messageHistory: MessageHistory;
   private readFileState: ReadFileStateMap;
   private cachedTools: ModelToolContract[] | null = null;
+  private contextProjectionRevision = 0;
+  private contextPrefixRevision = -1;
   private contextBuilder: ContextBuilder | null = null;
   private contextInitialized = false;
   private contextSourceSnapshot?: ContextSourceSnapshot;
@@ -169,6 +171,7 @@ export class AgentRuntime {
   private skillPort?: SkillPort;
   private mcpPort?: McpPort;
   private mcpStartupPromise?: Promise<McpConnectionSnapshot>;
+  private mcpRegistrationPromise?: Promise<void>;
   private residencyBlockingWorkCount = 0;
   private mcpInitialized = false;
   private mcpToolsRegistered = false;
@@ -188,6 +191,7 @@ export class AgentRuntime {
   private sessionStore?: SessionStorePort;
   private sessionPersisted = false;
   private needsPlanModeExitReminder = false;
+  private runtimeModeReminderPendingFull = false;
   private latestConversationMessageId?: MessageId;
   private latestAssistantMessageId?: MessageId;
   private latestAssistantTurnId?: TurnId;
@@ -304,7 +308,9 @@ export class AgentRuntime {
       runtime.initializeMessageHistoryFromContext(this.contextBuilder, this.rootTraceContext);
       this.contextInitialized = true;
     }
-    runtime.startMcpStartup(this.rootTraceContext);
+    // MCP 启动推迟到执行状态确定之后（context 初始化或首个请求的 initializeMcp）：
+    // 构造期的 mode 还可能是默认 build，冷恢复随后会回填持久化档位；这里抢先连接会让
+    // 恢复成极简的会话白跑一次 MCP 启动，也会把「极简不启动 MCP」的语义变成竞态。
   }
 
   async closeBrowserSession(): Promise<void> {

@@ -140,8 +140,14 @@ export function resolveSubmittedExecutionState(
     modelSelection?: ModelSelection;
     mode?: SubmissionMode;
     planEnabled?: boolean;
+    contextProfile?: "standard" | "minimal";
   },
-): { modelSelection: ModelSelection; mode: SubmissionMode; planEnabled: boolean } {
+): {
+  modelSelection: ModelSelection;
+  mode: SubmissionMode;
+  planEnabled: boolean;
+  contextProfile: "standard" | "minimal";
+} {
   let modelSelection = payload.modelSelection;
   if (!modelSelection) {
     const runtimeSelection = record.app.runtime?.getSessionModelSelection?.();
@@ -166,15 +172,22 @@ export function resolveSubmittedExecutionState(
           ...(entrySelection!.options ? { options: { ...entrySelection!.options } } : {}),
         };
   }
+  // Session 当前档位作为缺省基线：旧发送端只带 mode 时，切权限保留档位、
+  // 旧 mode=minimal 补极简档位；新发送端的显式 contextProfile 固定本次意图。
+  const currentContextProfile = (
+    record.app.runtime as unknown as { config?: { contextProfile?: string } } | undefined
+  )?.config?.contextProfile;
   const current = resolveExecutionState({
     mode: record.app.getMode?.(),
     planEnabled: record.app.runtime?.getPlanEnabled?.(),
+    ...(currentContextProfile !== undefined ? { contextProfile: currentContextProfile } : {}),
   });
   const state = resolveExecutionState(payload, current);
   return {
     modelSelection,
     mode: state.mode === "auto" ? "build" : state.mode,
     planEnabled: state.planEnabled,
+    contextProfile: state.contextProfile ?? "standard",
   };
 }
 /**
