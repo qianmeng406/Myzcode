@@ -18,7 +18,7 @@ function queueItem(fields: { modelSelection?: QueueItem["modelSelection"] }): Qu
     queueItemId: "plan_exit_approved_call-1",
     clientId: "plan_exit_approved_call-1",
     kind: "sendText",
-    text: "The plan was approved. The user selected command-code/deepseek/deepseek-v4.1-flash.",
+    text: "The plan was approved. The user selected custom-provider/deepseek/deepseek-v4.1-flash.",
     attachments: [],
     ...(fields.modelSelection ? { modelSelection: fields.modelSelection } : {}),
     delivery: { requested: "queue", admitted: "queue" },
@@ -31,7 +31,7 @@ function queueItem(fields: { modelSelection?: QueueItem["modelSelection"] }): Qu
 
 test("队列项携带的执行模型：提升 intent 原样保留（含推理档）", () => {
   const selection = {
-    providerId: "command-code",
+    providerId: "custom-provider",
     modelId: "deepseek/deepseek-v4.1-flash",
     options: { reasoningLevel: "high" },
   };

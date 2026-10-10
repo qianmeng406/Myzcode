@@ -1094,21 +1094,21 @@ test("Oracle 模型偏好：存取对称、非法形状拒收、null 即清除",
   });
   try {
     writeStoredOracleModelSelection({
-      providerId: "command-code",
+      providerId: "custom-provider",
       modelId: "deepseek/deepseek-v4.1-flash",
     });
     assert.deepEqual(readStoredOracleModelSelection(), {
-      providerId: "command-code",
+      providerId: "custom-provider",
       modelId: "deepseek/deepseek-v4.1-flash",
     });
     // 推理档随选择往返保留（否则用户显式选的档位会静默丢失）
     writeStoredOracleModelSelection({
-      providerId: "command-code",
+      providerId: "custom-provider",
       modelId: "deepseek/deepseek-v4.1-flash",
       options: { reasoningLevel: "high" },
     });
     assert.deepEqual(readStoredOracleModelSelection(), {
-      providerId: "command-code",
+      providerId: "custom-provider",
       modelId: "deepseek/deepseek-v4.1-flash",
       options: { reasoningLevel: "high" },
     });

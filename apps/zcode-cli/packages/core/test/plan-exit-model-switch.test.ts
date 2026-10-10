@@ -28,7 +28,7 @@ test("批准带执行模型：停回合并经 follow-up 携带模型选择", () 
       mode: "build",
       plan: "- step",
       executionModelSelection: {
-        providerId: "command-code",
+        providerId: "custom-provider",
         modelId: "deepseek/deepseek-v4.1-flash",
         options: { reasoningLevel: "high" },
       },
@@ -39,7 +39,7 @@ test("批准带执行模型：停回合并经 follow-up 携带模型选择", () 
   assert.equal(result.turnControl?.stopTurnAfterResult, true);
   assert.equal(result.followUpUserInput?.reasonSource, "plan_approval_feedback");
   assert.deepEqual(result.followUpUserInput?.modelSelection, {
-    providerId: "command-code",
+    providerId: "custom-provider",
     modelId: "deepseek/deepseek-v4.1-flash",
     options: { reasoningLevel: "high" },
   });

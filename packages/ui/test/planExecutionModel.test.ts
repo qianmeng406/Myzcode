@@ -7,8 +7,8 @@ import {
 
 const GROUPS = [
   {
-    providerId: "command-code",
-    providerName: "CommandCode",
+    providerId: "custom-provider",
+    providerName: "CustomProvider",
     models: [
       { modelId: "m-high", reasoningLevels: ["low", "medium", "high"] },
       { modelId: "m-single", reasoningLevels: ["standard"] },
@@ -23,9 +23,9 @@ const GROUPS = [
 
 test("选中模型即补齐最高档（values 末位），与 Composer 切模型同语义", () => {
   assert.deepEqual(
-    completePlanExecutionModelChoice(GROUPS, { providerId: "command-code", modelId: "m-high" }),
+    completePlanExecutionModelChoice(GROUPS, { providerId: "custom-provider", modelId: "m-high" }),
     {
-      providerId: "command-code",
+      providerId: "custom-provider",
       modelId: "m-high",
       reasoningLevel: "high",
     },
@@ -42,9 +42,12 @@ test("选中模型即补齐最高档（values 末位），与 Composer 切模型
 
 test("单档模型补齐该唯一档位", () => {
   assert.deepEqual(
-    completePlanExecutionModelChoice(GROUPS, { providerId: "command-code", modelId: "m-single" }),
+    completePlanExecutionModelChoice(GROUPS, {
+      providerId: "custom-provider",
+      modelId: "m-single",
+    }),
     {
-      providerId: "command-code",
+      providerId: "custom-provider",
       modelId: "m-single",
       reasoningLevel: "standard",
     },
@@ -54,7 +57,7 @@ test("单档模型补齐该唯一档位", () => {
 test("无任何档位的模型或未知模型返回 undefined（不能生成 registry 拒绝的选择）", () => {
   assert.equal(
     completePlanExecutionModelChoice(GROUPS, {
-      providerId: "command-code",
+      providerId: "custom-provider",
       modelId: "m-no-levels",
     }),
     undefined,
@@ -64,7 +67,10 @@ test("无任何档位的模型或未知模型返回 undefined（不能生成 reg
     undefined,
   );
   assert.equal(
-    completePlanExecutionModelChoice(undefined, { providerId: "command-code", modelId: "m-high" }),
+    completePlanExecutionModelChoice(undefined, {
+      providerId: "custom-provider",
+      modelId: "m-high",
+    }),
     undefined,
   );
 });
@@ -72,7 +78,7 @@ test("无任何档位的模型或未知模型返回 undefined（不能生成 reg
 test("有效性校验要求模型在目录内且档位仍受支持", () => {
   assert.equal(
     isPlanExecutionModelChoiceValid(GROUPS, {
-      providerId: "command-code",
+      providerId: "custom-provider",
       modelId: "m-high",
       reasoningLevel: "high",
     }),
@@ -81,7 +87,7 @@ test("有效性校验要求模型在目录内且档位仍受支持", () => {
   // 档位被移除
   assert.equal(
     isPlanExecutionModelChoiceValid(GROUPS, {
-      providerId: "command-code",
+      providerId: "custom-provider",
       modelId: "m-high",
       reasoningLevel: "ultra",
     }),
@@ -90,7 +96,7 @@ test("有效性校验要求模型在目录内且档位仍受支持", () => {
   // 模型已不可见（被禁用/删除）
   assert.equal(
     isPlanExecutionModelChoiceValid(GROUPS, {
-      providerId: "command-code",
+      providerId: "custom-provider",
       modelId: "m-removed",
       reasoningLevel: "high",
     }),
@@ -99,14 +105,14 @@ test("有效性校验要求模型在目录内且档位仍受支持", () => {
   // 缺档位
   assert.equal(
     isPlanExecutionModelChoiceValid(GROUPS, {
-      providerId: "command-code",
+      providerId: "custom-provider",
       modelId: "m-high",
     }),
     false,
   );
   assert.equal(
     isPlanExecutionModelChoiceValid(undefined, {
-      providerId: "command-code",
+      providerId: "custom-provider",
       modelId: "m-high",
       reasoningLevel: "high",
     }),

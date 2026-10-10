@@ -13,18 +13,6 @@ export const BUILTIN_MODEL_PROVIDER_IDS = {
   bigmodelStartPlan: "account:bigmodel-start-plan",
 } as const;
 
-/**
- * Command Code 网关渠道。
- *
- * 它由内置 Provider Config 下发（开箱即用、有 logo、地址预设），但**不是**编码套餐渠道：
- * 走 API Key 接入，因此刻意不并入 `BUILTIN_MODEL_PROVIDER_IDS`——那份 id 集合被推导成
- * `BuiltinOAuthProviderId`，是 OAuth/套餐权益逻辑的输入，混入一个无 OAuth 的渠道会污染那套契约。
- */
-export const COMMAND_CODE_PROVIDER_ID = "command-code" as const;
-
-/** 该渠道在模型设置左栏所属的分组 id；与 Provider Config 里的 group 取值保持一致。 */
-export const COMMAND_CODE_PROVIDER_GROUP = "command-code" as const;
-
 export type BuiltinOAuthProviderId = keyof typeof BUILTIN_MODEL_PROVIDER_IDS;
 
 export type BuiltinModelProviderId = (typeof BUILTIN_MODEL_PROVIDER_IDS)[BuiltinOAuthProviderId];

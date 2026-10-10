@@ -40,7 +40,7 @@ test("批准不带执行模型：allow 决策（现行行为不变）", () => {
 
 test("批准附带执行模型：modify 决策把选择合并进工具输入（含推理档）", () => {
   const selection = {
-    providerId: "command-code",
+    providerId: "custom-provider",
     modelId: "deepseek/deepseek-v4.1-flash",
     options: { reasoningLevel: "high" },
   };
@@ -117,7 +117,7 @@ test("UI 应答（action 路径）指定执行模型：全程产出 modify 输�
   const response = v4AnswerToPlanApprovalResponse(
     uiApprovalAnswer({
       executionModel: {
-        providerId: "command-code",
+        providerId: "custom-provider",
         modelId: "deepseek/deepseek-v4.1-flash",
         reasoningLevel: "high",
       },
@@ -129,7 +129,7 @@ test("UI 应答（action 路径）指定执行模型：全程产出 modify 输�
   assert.deepEqual(result.modifiedInput, {
     plan: "- step",
     executionModelSelection: {
-      providerId: "command-code",
+      providerId: "custom-provider",
       modelId: "deepseek/deepseek-v4.1-flash",
       options: { reasoningLevel: "high" },
     },

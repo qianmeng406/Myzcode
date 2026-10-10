@@ -10,8 +10,6 @@ export const providerGroupDataSchema = z.enum([
   "standard-personal",
   "zai-family",
   "bigmodel-family",
-  // Command Code 网关渠道：内置下发，但与智谱套餐 family 无关，单独成组。
-  "command-code",
 ]);
 export const zhipuAccountModeDataSchema = z.enum([
   "start-plan",

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 32,
+  "revision": 33,
   "config": {
     "providerConfigRules": {
       "templateRules": [
@@ -856,24 +856,6 @@
             "logo": {
               "type": "builtin",
               "key": "bigmodel"
-            }
-          }
-        },
-        {
-          "providerId": "command-code",
-          "providerName": "Command Code",
-          "config": {
-            "group": "command-code",
-            "access": {
-              "type": "api-key"
-            },
-            "api": {
-              "type": "openai-chat-completions",
-              "baseUrl": "https://api.commandcode.ai/provider/v1"
-            },
-            "logo": {
-              "type": "builtin",
-              "key": "command-code"
             }
           }
         }

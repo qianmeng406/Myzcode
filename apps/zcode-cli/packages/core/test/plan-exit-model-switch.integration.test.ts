@@ -99,7 +99,7 @@ async function runExitPlanMode(
 test("build + planEnabled 进入计划，指定模型批准：真实 handler 退出后仍触发换模交接", async () => {
   const port = createFakeSessionModePort({ mode: "build", planEnabled: true });
   const selection = {
-    providerId: "command-code",
+    providerId: "custom-provider",
     modelId: "deepseek/deepseek-v4.1-flash",
     options: { reasoningLevel: "high" },
   };
@@ -148,7 +148,7 @@ test("批准不带执行模型：真实 handler 退出后不触发换模（同�
 test("broker modify 产出的完整输入形状贯穿真实 handler 与换模交接", async () => {
   const port = createFakeSessionModePort({ mode: "build", planEnabled: true });
   const selection = {
-    providerId: "command-code",
+    providerId: "custom-provider",
     modelId: "deepseek/deepseek-v4.1-flash",
     options: { reasoningLevel: "high" },
   };
@@ -171,6 +171,6 @@ test("broker modify 产出的完整输入形状贯穿真实 handler 与换模交
   // 交接提示带上推理档，用户能核对「批准时选的档位」确实被执行回合采用。
   assert.match(
     result.followUpUserInput?.input ?? "",
-    /command-code\/deepseek\/deepseek-v4\.1-flash \(reasoning: high\)/,
+    /custom-provider\/deepseek\/deepseek-v4\.1-flash \(reasoning: high\)/,
   );
 });
